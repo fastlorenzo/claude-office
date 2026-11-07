@@ -19,6 +19,7 @@ const ROWS: { keys: string[]; label: TranslationKey }[] = [
   { keys: ["A"], label: "hud.keys.agents" },
   { keys: ["M"], label: "hud.keys.map" },
   { keys: ["P"], label: "hud.keys.overview" },
+  { keys: ["B"], label: "hud.help.ops" },
   { keys: ["O"], label: "hud.keys.graphics" },
   { keys: ["H"], label: "hud.keys.help" },
   { keys: ["Esc"], label: "hud.help.close" },

@@ -217,6 +217,15 @@ export function KeyHints({ portrait }: { portrait: boolean }): ReactNode {
           </button>
         );
       })}
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => useWorldUiStore.getState().toggleOps()}
+        className="flex items-center gap-1.5 text-[11px] text-slate-400 transition-colors hover:text-white"
+      >
+        <Keycap>B</Keycap>
+        {t("hud.keys.ops")}
+      </button>
       <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
         <Keycap>V</Keycap>
         {t(cameraMode === "fp" ? "hud.camera.fp" : "hud.camera.tp")}

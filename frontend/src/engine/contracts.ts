@@ -360,6 +360,8 @@ export interface SyncInput {
   campus: CampusSession[];
   sessions: SessionMeta[];
   selectedSessionId: string | null;
+  /** Building-wide stats for the control room (CampusState.stats). */
+  stats?: CampusStats | null;
 }
 
 // ============================================================================
@@ -367,7 +369,13 @@ export interface SyncInput {
 // ============================================================================
 
 export type InteractionKind =
-  "monitor" | "whiteboard" | "screen" | "character" | "door";
+  | "monitor"
+  | "whiteboard"
+  | "screen"
+  | "character"
+  | "door"
+  /** Control-room ops wall / console (opens the Ops dashboard; sessionId may be ""). */
+  | "ops";
 
 export interface InteractionTarget {
   kind: InteractionKind;
@@ -450,6 +458,17 @@ export interface WorldOptions {
   assetBase: string; // "/assets"
 }
 
+/** Customisable lobby neon sign. */
+export interface BrandingOptions {
+  name: string;
+  tagline: string;
+  /** PNG/WebP/JPG/SVG data URL, or null for the default neon star. */
+  logo: string | null;
+  /** "#rrggbb" neon colour. */
+  color: string;
+  flicker: boolean;
+}
+
 export interface IWorld {
   init(): Promise<void>;
   sync(input: SyncInput): void;
@@ -457,6 +476,8 @@ export interface IWorld {
   setQuality(q: QualitySetting): void;
   /** Apply full graphics settings live (presets / custom). */
   setGraphics(settings: GraphicsSettings): void;
+  /** Lobby brand sign (name, tagline, logo, neon colour, flicker); live. */
+  setBranding?(opts: BrandingOptions): void;
   /** Disable game input (HUD panel open) — releases pointer lock. */
   setInputEnabled(enabled: boolean): void;
   /** Teleport the player to a room's door (minimap fast travel) or "lobby" / "control". */

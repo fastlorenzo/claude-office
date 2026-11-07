@@ -60,6 +60,10 @@ interface WorldUiState {
   banner: { id: number; text: string } | null;
   /** Bumped to re-create the world after an error (never reset). */
   worldEpoch: number;
+  /** Full-screen Ops dashboard (control room) open. */
+  opsOpen: boolean;
+  /** Session highlighted in the Ops dashboard (console monitor F). */
+  opsFocus: string | null;
 
   /** Replace the open panels (capped at {@link MAX_OPEN_PANELS}). */
   setPanels: (panels: HudPanel[]) => void;
@@ -84,6 +88,9 @@ interface WorldUiState {
   setError: (error: string | null) => void;
   setReady: (ready: boolean) => void;
   setPeerPopup: (popup: PeerPopupTarget | null) => void;
+  openOps: (focus?: string | null) => void;
+  closeOps: () => void;
+  toggleOps: () => void;
   reset: () => void;
 }
 
@@ -121,6 +128,8 @@ const INITIAL = {
   ready: false,
   peerPopup: null,
   banner: null as { id: number; text: string } | null,
+  opsOpen: false,
+  opsFocus: null as string | null,
 };
 
 let bannerSeq = 0;
@@ -175,6 +184,13 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   setError: (error) => set({ error }),
   setReady: (ready) => set({ ready }),
   setPeerPopup: (peerPopup) => set({ peerPopup }),
+  openOps: (focus = null) => set({ opsOpen: true, opsFocus: focus }),
+  closeOps: () => set((s) => (s.opsOpen ? { opsOpen: false } : s)),
+  toggleOps: () =>
+    set((s) => ({
+      opsOpen: !s.opsOpen,
+      opsFocus: s.opsOpen ? s.opsFocus : null,
+    })),
   reset: () => set({ ...INITIAL }),
 }));
 

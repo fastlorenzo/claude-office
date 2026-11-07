@@ -67,6 +67,29 @@ const ROUGH: Record<Kind, [number, number]> = {
   clothes: [0.7, 0.9],
 };
 
+/** Greyscale + scale so the (alpha-weighted) mean luminance hits `target` (sRGB 0..1). */
+async function neutralise(s: sharp.Sharp, target: number, alpha: boolean): Promise<sharp.Sharp> {
+  const { data, info } = await s.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let sum = 0;
+  let wsum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const w = alpha ? data[i + 3]! / 255 : 1;
+    const l = 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!;
+    sum += l * w;
+    wsum += w;
+  }
+  const mean = wsum > 0 ? sum / wsum / 255 : 0.5;
+  const k = target / Math.max(0.02, mean);
+  for (let i = 0; i < data.length; i += 4) {
+    const l = 0.2126 * data[i]! + 0.7152 * data[i + 1]! + 0.0722 * data[i + 2]!;
+    const v = Math.min(255, Math.round(l * k));
+    data[i] = v;
+    data[i + 1] = v;
+    data[i + 2] = v;
+  }
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } });
+}
+
 async function main() {
   await mkdir(outDir, { recursive: true });
   const io = new NodeIO().registerExtensions([...ALL_EXTENSIONS, EXTTextureWebP]);
@@ -88,6 +111,12 @@ async function main() {
     // --- materials
     const texKind = new Map<Texture, Kind>();
     const texAlpha = new Set<Texture>();
+    // Tinted textures -> neutral luminance (target mean, sRGB 0..1). glTF multiplies
+    // baseColorFactor with the texture, so a coloured source (the toigo_female_suit_2
+    // diffuse is magenta; MakeHuman hair diffuses are already dark brown) can't be
+    // re-coloured by the factor alone: f05's sage suit rendered purple and every hair
+    // tint came out near-black. Greyscale + normalise makes the factor the colour.
+    const texTint = new Map<Texture, number>();
     for (const m of root.listMaterials()) {
       const kind = kindOf(m.getName());
       const alpha = kind === "hair" || kind === "brows" || kind === "lashes";
@@ -101,6 +130,8 @@ async function main() {
       // Tints are applied as baseColorFactor (glTF multiplies it with the texture)
       const tint = kind === "hair" || kind === "brows" ? spec.hair_tint : kind === "clothes" ? spec.clothes_tint : undefined;
       if (tint) m.setBaseColorFactor([tint[0]!, tint[1]!, tint[2]!, 1]);
+      const bcTex = m.getBaseColorTexture();
+      if (tint && bcTex) texTint.set(bcTex, kind === "clothes" ? 0.82 : spec.hair_desat ? 0.85 : 0.7);
       const [lo, hi] = ROUGH[kind];
       m.setRoughnessFactor(Math.min(hi, Math.max(lo, m.getRoughnessFactor())));
       m.setMetallicFactor(0);
@@ -123,8 +154,8 @@ async function main() {
       const max = MAX_TEX[kind];
       if ((meta.width ?? 0) > max || (meta.height ?? 0) > max)
         s = s.resize(max, max, { fit: "inside", kernel: "lanczos3" });
-      if (kind === "hair" && spec.hair_desat && texAlpha.has(t))
-        s = s.modulate({ saturation: spec.hair_desat[0], brightness: spec.hair_desat[1] });
+      const tintTarget = texTint.get(t);
+      if (tintTarget !== undefined) s = await neutralise(s, tintTarget, texAlpha.has(t));
       if (!texAlpha.has(t)) s = s.removeAlpha();
       const webp = await s
         .webp({ quality: kind === "skin" ? 86 : 80, alphaQuality: 92, effort: 5, exact: true })

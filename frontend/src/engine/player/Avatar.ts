@@ -4,7 +4,7 @@
  */
 import type { AbstractMesh, Scene, TransformNode } from "@/engine/babylon";
 import { MannequinRig } from "@/engine/characters/MannequinRig";
-import { tryCreateGltfRig } from "@/engine/characters/GltfRig";
+import { tryCreateGltfRig } from "@/engine/characters/CastRig";
 import type { CharacterRig } from "@/engine/characters/types";
 
 export interface PlayerAvatar {

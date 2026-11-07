@@ -64,6 +64,7 @@ export interface FxPlan {
   textureQuality: "low" | "medium" | "high";
   iblShadows: boolean;
   characterDetail: GraphicsSettings["characterDetail"];
+  characterCast: GraphicsSettings["characterCast"];
   liveScreens: GraphicsSettings["liveScreens"];
   securityFeeds: GraphicsSettings["securityFeeds"];
   // ---- display & camera
@@ -180,6 +181,7 @@ export function planFx(s: GraphicsSettings): FxPlan {
     textureQuality: s.textureQuality,
     iblShadows: s.iblShadows,
     characterDetail: s.characterDetail,
+    characterCast: s.characterCast,
     liveScreens: s.liveScreens,
     securityFeeds: s.securityFeeds,
     fovDeg: s.fov,

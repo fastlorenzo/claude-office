@@ -12,19 +12,25 @@
  *   gfxset=key:value,...     override single graphics settings (e.g. antiAliasing:taa)
  *   inspect=1                simulate the inspect action (DoF) after ready
  *   tp=1                     start in third person
+ *   brand=Name brandTag=Tagline brandColor=cyan|#rrggbb brandFlicker=1  lobby sign
  *   shot=1                   set document.title = "ready" ~N frames after ready
  *   frames=40                frames to wait before "ready" when shot=1
  *   t=20000                  demo clock (ms) used when shot=1 (frozen)
+ *   ops=1                    show the DOM Ops dashboard (control room) over the world
  */
 
 import { useEffect, useRef, useState } from "react";
+import { OpsDashboard } from "@/components/world/hud/ops/OpsDashboard";
 import {
   applyPreset,
   defaultGraphicsSettings,
   type GraphicsSettings,
 } from "@/engine/fx/graphicsSettings";
+import { normalizeBranding } from "@/engine/world/brandLayout";
 import type {
   CameraMode,
+  CampusSession,
+  CampusStats,
   IWorld,
   QualitySetting,
   WorldEvents,
@@ -86,7 +92,17 @@ function parseParams() {
       graphics.preset = "custom";
     }
   }
+  const brand =
+    q.has("brand") || q.has("brandColor") || q.has("brandTag")
+      ? normalizeBranding({
+          name: q.get("brand"),
+          tagline: q.get("brandTag"),
+          color: q.get("brandColor"),
+          flicker: q.get("brandFlicker") === "1",
+        })
+      : undefined;
   return {
+    brand,
     graphics,
     inspect: q.get("inspect") === "1",
     n,
@@ -96,6 +112,7 @@ function parseParams() {
     shot: q.get("shot") === "1",
     frames: Number(q.get("frames") ?? 40) || 40,
     t: q.get("t") ? Number(q.get("t")) : undefined,
+    ops: q.get("ops") === "1",
   };
 }
 
@@ -103,6 +120,12 @@ export default function WorldDebugPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [status, setStatus] = useState("loading…");
+  const [ops, setOps] = useState<{
+    campus: CampusSession[];
+    stats: CampusStats;
+    labels: Map<string, string>;
+    nowMs: number;
+  } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -130,6 +153,7 @@ export default function WorldDebugPage() {
         },
         { camera: p.camera, preserveDrawingBuffer: p.shot, headBob: !p.camera },
       );
+      if (p.brand) world.setBranding?.(p.brand);
       offs.push(world.on("stats", (s) => setStats(s)));
       offs.push(world.on("error", (e) => setStatus(`error: ${e.message}`)));
       offs.push(
@@ -161,7 +185,15 @@ export default function WorldDebugPage() {
           campus: demo.campus,
           sessions: demo.sessions,
           selectedSessionId: demo.sessions[0]?.id ?? null,
+          stats: demo.stats,
         });
+        if (p.ops)
+          setOps({
+            campus: demo.campus,
+            stats: demo.stats,
+            labels: new Map(demo.sessions.map((s) => [s.id, s.label])),
+            nowMs: Date.now(),
+          });
       };
       feed();
       timer = setInterval(feed, 500);
@@ -199,6 +231,15 @@ export default function WorldDebugPage() {
         )}
       </div>
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80" />
+      {ops && (
+        <OpsDashboard
+          campus={ops.campus}
+          stats={ops.stats}
+          labels={ops.labels}
+          nowMs={ops.nowMs}
+          onClose={() => setOps(null)}
+        />
+      )}
     </div>
   );
 }

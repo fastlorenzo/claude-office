@@ -221,6 +221,8 @@ export class Lighting {
         this.staticDirty = false;
         this.renderStaticShadows();
       }
+      if (this.probesDirty && performance.now() - this.probesAt > 1500)
+        this.flushProbes();
     });
   }
 
@@ -272,7 +274,7 @@ export class Lighting {
     view.name = "sky:view";
     view.gammaSpace = false;
     view.coordinatesMode = Texture.SKYBOX_MODE;
-    view.level = 0.85;
+    view.level = 1.5; // bright daytime sky at the interior exposure
     this.skyView = view;
     // Must stay inside the camera far plane (Player maxZ 220): half-diagonal of
     // a 180 m cube is 156 m. infiniteDistance keeps it centred on the eye.
@@ -316,6 +318,9 @@ export class Lighting {
     const internal = cube.getInternalTexture();
     if (!mat || !internal) return null;
     cube.coordinatesMode = Texture.SKYBOX_MODE;
+    // Render-target cubes come out Y-flipped relative to file cubes: flip the
+    // skybox lookup (mesh) and use INVCUBIC for reflections.
+    if (this.skybox) this.skybox.scaling.y = -1;
     mat.unfreeze();
     mat.reflectionTexture = cube;
     mat.freeze();
@@ -323,7 +328,7 @@ export class Lighting {
     const refl = new BaseTexture(this.scene, internal);
     refl.name = "sky:reflection";
     refl.gammaSpace = false;
-    refl.coordinatesMode = Texture.CUBIC_MODE;
+    refl.coordinatesMode = Texture.INVCUBIC_MODE;
     this.skyReflection?.dispose();
     this.skyReflection = refl;
     this.onSkyBaked?.(refl);
@@ -803,6 +808,16 @@ export class Lighting {
 
   /** Re-render every probe (after a rebuild). */
   refreshProbes(): void {
+    // Coalesced: rooms arriving in a burst re-render the probes once.
+    this.probesDirty = true;
+  }
+
+  private probesDirty = false;
+  private probesAt = 0;
+
+  private flushProbes(): void {
+    this.probesDirty = false;
+    this.probesAt = performance.now();
     for (const spec of this.probes.values()) {
       const probe = spec.probe;
       if (!probe) continue;

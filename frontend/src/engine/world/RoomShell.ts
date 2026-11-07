@@ -85,29 +85,21 @@ export function roomFurniture(L: RoomLayout): {
         y: 0.74,
       });
   });
-  const pz1 = ROOM_PIER.z1;
   props.push(
     { role: "sofa", x: -hx + 0.55, z: hz - 1.5, yaw: Math.PI / 2, scale: 0.92 },
     { role: "loungeTable", x: -hx + 1.55, z: hz - 1.5, yaw: 0 },
     { role: "floorLamp", x: -hx + 0.35, z: hz - 0.35, yaw: 0 },
     { role: "sideTable", x: -hx + 0.42, z: hz - 2.75, yaw: 0 },
-    { role: "planterTall", x: hx - 0.45, z: hz - 0.45, yaw: 0 },
-    { role: "planter", x: -hx + 0.45, z: pz1 + 0.45, yaw: 0 },
+    { role: "planterTall", x: hx - 0.5, z: hz - 0.5, yaw: 0 },
+    { role: "planter", x: -hx + 0.5, z: -1.6, yaw: 0 },
     { role: "coatHooks", x: -hx + 0.62, z: -hz, yaw: Math.PI },
     { role: "shelves", x: -1.35, z: -hz + 0.22, yaw: Math.PI },
     { role: "coffeeCart", x: hx - 1.05, z: -hz + 0.27, yaw: Math.PI },
     { role: "artPrint", x: hx - 1.05, z: -hz + 0.035, yaw: Math.PI, y: 1.95 },
   );
   plants.push(
-    { role: "plantTall", x: hx - 0.45, z: hz - 0.45, yaw: 1.1, y: 0.14 },
-    {
-      role: "plant",
-      x: -hx + 0.45,
-      z: pz1 + 0.45,
-      yaw: 0.4,
-      scale: 0.9,
-      y: 0.02,
-    },
+    { role: "plantTall", x: hx - 0.5, z: hz - 0.5, yaw: 1.1, y: 0.58 },
+    { role: "plant", x: -hx + 0.5, z: -1.6, yaw: 0.4, scale: 0.85, y: 0.42 },
   );
   return { props, plants };
 }
@@ -133,6 +125,9 @@ import { FixturePoint, type Lighting } from "@/engine/fx/Lighting";
 import type { Materials } from "@/engine/materials/Materials";
 import { v3 } from "@/engine/util/MeshBatcher";
 import {
+  DOOR_BAND,
+  DOOR_BAND_FACE,
+  DOOR_H,
   downlight,
   glassPartition,
   linearPendant,
@@ -234,7 +229,7 @@ export class RoomShellModule {
       -hz,
       hz,
       H,
-      { a0: -doorHalf, a1: doorHalf, h: 2.4 },
+      { a0: -doorHalf, a1: doorHalf, h: DOOR_H },
       {
         pitch: 1.5,
         frostBand: true,
@@ -245,12 +240,16 @@ export class RoomShellModule {
     b.rbox("wallFeature", v3(-hx, H / 2, pz), v3(0.18, H, pierZ1 - pierZ0), {
       r: 0.01,
     });
-    b.rbox("blackMetal", v3(-hx - 0.1, 1.45, pz), v3(0.02, 0.52, 0.88), {
-      r: 0.006,
+    // Room-number plaque housing at eye height on the pier.
+    b.rbox("blackMetal", v3(-hx - 0.096, 1.5, pz), v3(0.012, 0.17, 0.17), {
+      r: 0.004,
     });
-    b.rbox("blackMetal", v3(-hx - 0.1, 2.25, pz), v3(0.02, 0.26, 0.88), {
-      r: 0.006,
-    });
+    // Shadow gap framing the LED panel recessed in the door header band.
+    b.box(
+      "shadowGap",
+      v3(-hx - DOOR_BAND_FACE - 0.001, DOOR_H + DOOR_BAND / 2, 0),
+      v3(0.002, DOOR_BAND - 0.05, LAYOUT.DOOR_W - 0.16),
+    );
 
     // Feature wall (+Z): acoustic felt panels (tinted per room).
     b.box(

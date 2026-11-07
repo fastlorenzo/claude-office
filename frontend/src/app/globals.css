@@ -195,6 +195,15 @@ body {
     transform: translateY(0);
   }
 }
+@keyframes ops-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+  }
+}
 @keyframes hud-sheet-left {
   from {
     opacity: 0;

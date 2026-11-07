@@ -60,7 +60,8 @@ export const useCampusStore = create<CampusStoreState>()((set) => ({
         : { sessions, lastUpdated: Date.now() },
     ),
   setConnected: (connected) => set({ connected }),
-  clear: () => set({ sessions: [], stats: null, lastUpdated: null, connected: false }),
+  clear: () =>
+    set({ sessions: [], stats: null, lastUpdated: null, connected: false }),
 }));
 
 export const selectCampusSessions = (s: CampusStoreState): CampusSession[] =>

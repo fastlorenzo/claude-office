@@ -27,6 +27,7 @@ import { Minimap } from "./hud/Minimap";
 import { OverviewStrip } from "./hud/OverviewStrip";
 import { SessionsPanel, type SessionHandlers } from "./hud/SessionsPanel";
 import { useHudKeys } from "./hud/useHudKeys";
+import { OpsOverlay } from "./hud/ops/OpsOverlay";
 
 export interface WorldHudProps extends SessionHandlers {
   isMobile: boolean;
@@ -171,6 +172,8 @@ export function WorldHud(props: WorldHudProps): ReactNode {
           ))}
         </div>
       )}
+
+      <OpsOverlay sessions={props.sessions} />
     </div>
   );
 }

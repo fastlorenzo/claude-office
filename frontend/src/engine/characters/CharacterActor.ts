@@ -25,8 +25,8 @@ import type { LabelLayer } from "../screens/LabelLayer";
 import { ActorHub, type HubActor } from "./ActorHub";
 import type { ActorTier } from "./lod";
 import { MannequinRig } from "./MannequinRig";
-import { tryCreateGltfRig } from "./GltfRig";
-import { agentStateLabel, bossStateLabel } from "./identity";
+import { tryCreateGltfRig } from "./CastRig";
+import { agentStateLabel, bossStateLabel, pickAppearance } from "./identity";
 import { isSeatedPose, smoothstep } from "./poses";
 import type { CharacterRig, Lod } from "./types";
 
@@ -172,6 +172,16 @@ export class CharacterActor implements HubActor {
   get tintHex(): string {
     return this.isBoss ? "#D97757" : this.color;
   }
+
+  /** Impostor head tone (stable per character). */
+  get skinHex(): string {
+    this.skin ??= pickAppearance(
+      `${this.opts.sessionId}_${this.opts.id}`,
+      this.isBoss,
+    ).skin;
+    return this.skin;
+  }
+  private skin: string | undefined;
 
   get seatedNow(): boolean {
     return this.seated || this.phase.k === "sit";

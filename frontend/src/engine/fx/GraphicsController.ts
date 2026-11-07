@@ -34,6 +34,7 @@ import {
 
 export interface DetailSettings {
   characterDetail: GraphicsSettings["characterDetail"];
+  characterCast: GraphicsSettings["characterCast"];
   liveScreens: GraphicsSettings["liveScreens"];
   securityFeeds: GraphicsSettings["securityFeeds"];
 }
@@ -263,11 +264,13 @@ export class GraphicsController {
     // World detail (characters / screens / feeds).
     if (
       d.has("characterDetail") ||
+      d.has("characterCast") ||
       d.has("liveScreens") ||
       d.has("securityFeeds")
     )
       this.t.setDetail({
         characterDetail: plan.characterDetail,
+        characterCast: plan.characterCast,
         liveScreens: plan.liveScreens,
         securityFeeds: plan.securityFeeds,
       });

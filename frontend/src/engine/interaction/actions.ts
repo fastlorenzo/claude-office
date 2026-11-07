@@ -14,6 +14,11 @@ const POPUP: InteractionAction = {
   key: "F",
   labelKey: "world.action.popup",
 };
+const OPEN_OPS: InteractionAction = {
+  id: "inspect",
+  key: "F",
+  labelKey: "world.action.openOps",
+};
 const ENTER: InteractionAction = {
   id: "enter",
   key: "Enter",
@@ -24,6 +29,8 @@ export function actionsFor(target: InteractionTarget): InteractionAction[] {
   switch (target.kind) {
     case "character":
       return [POPUP, ENTER];
+    case "ops":
+      return target.sessionId ? [OPEN_OPS, ENTER] : [OPEN_OPS];
     case "monitor":
     case "whiteboard":
     case "screen":

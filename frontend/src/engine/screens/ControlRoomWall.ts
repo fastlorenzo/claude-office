@@ -1,9 +1,10 @@
 /**
- * Control-room video wall: a cols×rows grid of thin-bezel screens, each
+ * Control-room camera-feed bank: a cols×rows grid of thin-bezel screens, each
  * showing one session room's live camera feed (FeedScheduler RTT) with a
- * security-cam style overlay (● LIVE + clock, project name, status chip,
+ * security-cam style overlay (● LIVE + clock, project name, phase chip,
  * vignette). needs_you rooms get a pulsing amber frame; empty cells show an
- * idle "NO SIGNAL" pattern. Capped at LAYOUT.MAX_FEEDS (last cell → "+N").
+ * idle "NO SIGNAL" pattern (their screen mesh is disabled: no draw call).
+ * ControlRoom places two banks (west / east rooms) beside the ops wall.
  */
 
 import {
@@ -41,7 +42,12 @@ export interface WallSession {
   sessionId: string;
   label: string;
   status: RoomStatus;
+  /** Short phase label for the chip ("Running tests"); status when absent. */
+  phase?: string | null;
 }
+
+/** Where a bank sits: centre, facing yaw (π faces -Z), grid and cell size. */
+export type FeedBankPlacement = BuildingLayout["controlRoom"]["screenWall"];
 
 interface CellMeshes {
   screen: Mesh;
@@ -78,6 +84,7 @@ export class ControlRoomWall {
   private model: WallCell<WallSession>[] = [];
   private sessions: WallSession[] = [];
   private readonly observer: Observer<Scene> | null;
+  private readonly hasFeed: boolean[] = [];
   private readonly feedObserver: ReturnType<FeedScheduler["onChanged"]["add"]>;
   private clockAcc = 0;
   private pulseT = 0;
@@ -86,18 +93,18 @@ export class ControlRoomWall {
 
   constructor(
     scene: Scene,
-    control: BuildingLayout["controlRoom"],
+    sw: FeedBankPlacement,
     feeds: FeedScheduler,
+    id = "",
   ) {
     this.scene = scene;
     this.feeds = feeds;
-    const sw = control.screenWall;
     const cap = LAYOUT.MAX_FEEDS;
     this.cols = Math.max(1, sw.cols);
     this.rows = Math.max(1, Math.min(sw.rows, Math.ceil(cap / this.cols)));
     this.cellW = sw.cellW;
     this.cellH = sw.cellH;
-    this.pivot = new TransformNode("controlWall", scene);
+    this.pivot = new TransformNode(`controlWall${id}`, scene);
     this.pivot.position.set(sw.origin.x, sw.origin.y, sw.origin.z);
     this.pivot.rotation.y = sw.yaw;
 
@@ -122,7 +129,7 @@ export class ControlRoomWall {
       const x = ((this.cols - 1) / 2 - c) * this.cellW;
       const y = ((this.rows - 1) / 2 - r) * this.cellH;
       const bz = CreateBox(
-        `wallBezel_${i}`,
+        `wallBezel${id}_${i}`,
         { width: sWidth + 0.016, height: sHeight + 0.016, depth: 0.02 },
         scene,
       );
@@ -130,18 +137,22 @@ export class ControlRoomWall {
       bezels.push(bz);
 
       const screen = CreatePlane(
-        `wallScreen_${i}`,
+        `wallScreen${id}_${i}`,
         { width: sWidth, height: sHeight },
         scene,
       );
       screen.parent = this.pivot;
       screen.rotation.y = Math.PI;
       screen.position.set(x, y, 0.0005);
-      const mat = createEmissiveMaterial(`wallScreenMat_${i}`, scene, null);
+      const mat = createEmissiveMaterial(
+        `wallScreenMat${id}_${i}`,
+        scene,
+        null,
+      );
       screen.material = mat;
 
       const rim = buildRim(
-        `wallRim_${i}`,
+        `wallRim${id}_${i}`,
         scene,
         sWidth + 0.016,
         sHeight + 0.016,
@@ -152,16 +163,16 @@ export class ControlRoomWall {
       this.cells.push({ screen, mat, rim, x, y });
     }
     this.body = Mesh.MergeMeshes(bezels, true, true) as Mesh;
-    this.body.name = "controlWallBody";
+    this.body.name = `controlWallBody${id}`;
     this.body.parent = this.pivot;
     this.body.material = sharedScreenMaterial(scene, "bezel");
     this.body.isPickable = false;
 
     // Overlay (labels, LIVE badges, vignettes, NO SIGNAL) for the whole wall.
-    this.ow = 2048;
-    this.oh = Math.max(256, Math.round((2048 * totalH) / totalW / 8) * 8);
+    this.ow = Math.max(512, Math.min(2048, Math.round((totalW * 520) / 8) * 8));
+    this.oh = Math.max(256, Math.round((this.ow * totalH) / totalW / 8) * 8);
     this.overlay = CreatePlane(
-      "controlWallOverlay",
+      `controlWallOverlay${id}`,
       { width: totalW, height: totalH },
       scene,
     );
@@ -170,14 +181,14 @@ export class ControlRoomWall {
     this.overlay.position.z = 0.0025;
     this.overlay.isPickable = false;
     this.overlayTex = createScreenTexture(
-      "controlWallOverlayTex",
+      `controlWallOverlayTex${id}`,
       scene,
       this.ow,
       this.oh,
       true,
     );
     this.overlayMat = createEmissiveMaterial(
-      "controlWallOverlayMat",
+      `controlWallOverlayMat${id}`,
       scene,
       this.overlayTex,
     );
@@ -196,6 +207,8 @@ export class ControlRoomWall {
     this.bindTextures();
     this.cells.forEach((cell, i) => {
       const m = this.model[i];
+      this.hasFeed[i] = m.kind === "session";
+      cell.screen.setEnabled(!this.far && this.hasFeed[i]);
       if (m.kind === "session") {
         cell.screen.metadata = {
           interact: {
@@ -220,14 +233,19 @@ export class ControlRoomWall {
 
   private far = false;
 
-  /** Far from the wall (> ~22 m): drop the 16 screens + rims (overlay stays). */
+  /** Far from the wall (> ~22 m): drop the screens + rims (overlay stays). */
   setFar(far: boolean): void {
     if (far === this.far) return;
     this.far = far;
-    for (const c of this.cells) {
-      c.screen.setEnabled(!far);
+    this.cells.forEach((c, i) => {
+      c.screen.setEnabled(!far && (this.hasFeed[i] ?? false));
       c.rim.setEnabled(!far);
-    }
+    });
+  }
+
+  /** Every mesh of the bank (zone lighting / probes). */
+  getMeshes(): Mesh[] {
+    return [this.body, this.overlay, ...this.getGlowMeshes()];
   }
 
   /** Screens + status rims (add to a GlowLayer). */
@@ -425,7 +443,11 @@ function drawFeedOverlay(
   const color = STATUS_COLORS[s.status];
   // Status chip (right).
   ctx.font = `700 ${Math.round(5 * u)}px ${F.sans}`;
-  const chip = STATUS_LABEL[s.status];
+  const chip = fitText(
+    ctx,
+    (s.phase?.trim() || STATUS_LABEL[s.status]).toUpperCase(),
+    w * 0.5,
+  );
   const chipW = ctx.measureText(chip).width + 10 * u;
   const chipX = x + w - chipW - 3.5 * u;
   const chipY = y + h - sh + 2 * u;

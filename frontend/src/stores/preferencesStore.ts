@@ -2,6 +2,15 @@
 
 import { create } from "zustand";
 import { isLocale, type Locale } from "@/i18n";
+import type { BrandingOptions } from "@/engine/contracts";
+import {
+  DEFAULT_BRANDING,
+  clampText,
+  MAX_NAME_CHARS,
+  MAX_TAGLINE_CHARS,
+  normalizeBranding,
+  parseNeonColor,
+} from "@/engine/world/brandLayout";
 import { apiFetch } from "@/utils/api";
 import {
   applyPreset,
@@ -30,6 +39,14 @@ export interface PreferencesState {
   /** Full 3D graphics settings (Graphics menu); persisted as "graphics_settings". */
   graphics: GraphicsSettings;
   isLoaded: boolean;
+
+  // Lobby brand sign (persisted as brand_* preferences)
+  brandName: string;
+  brandTagline: string;
+  /** PNG/WebP data URL (<= 512 px, <= 200 KB) or "" for the default star. */
+  brandLogo: string;
+  brandNeonColor: string;
+  brandFlicker: boolean;
 
   // Attention settings
   commandBarEnabled: boolean;
@@ -62,6 +79,31 @@ export interface PreferencesState {
   setToastFilterArrival: (enabled: boolean) => Promise<void>;
   setToastAutoDismissLow: (ms: number) => Promise<void>;
   setToastAutoDismissInfo: (ms: number) => Promise<void>;
+  setBrandName: (name: string) => void;
+  setBrandTagline: (tagline: string) => void;
+  setBrandLogo: (dataUrl: string) => Promise<void>;
+  setBrandNeonColor: (color: string) => Promise<void>;
+  setBrandFlicker: (enabled: boolean) => Promise<void>;
+}
+
+/** Store slice -> options consumed by IWorld.setBranding. */
+export function selectBranding(
+  s: Pick<
+    PreferencesState,
+    | "brandName"
+    | "brandTagline"
+    | "brandLogo"
+    | "brandNeonColor"
+    | "brandFlicker"
+  >,
+): BrandingOptions {
+  return normalizeBranding({
+    name: s.brandName,
+    tagline: s.brandTagline,
+    logo: s.brandLogo,
+    color: s.brandNeonColor,
+    flicker: s.brandFlicker,
+  });
 }
 
 // ============================================================================
@@ -113,6 +155,9 @@ export function resolveGraphics(
   return prefs.graphics_quality ? applyPreset(q, base) : base;
 }
 
+const BRAND_SAVE_DEBOUNCE_MS = 400;
+const brandTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 const GRAPHICS_SAVE_DEBOUNCE_MS = 300;
 let graphicsTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -144,6 +189,19 @@ async function setPreference(key: string, value: string): Promise<void> {
   }
 }
 
+/** Typing-friendly save: last value per key wins after a short pause. */
+function saveDebounced(key: string, value: string): void {
+  const prev = brandTimers.get(key);
+  if (prev) clearTimeout(prev);
+  brandTimers.set(
+    key,
+    setTimeout(() => {
+      brandTimers.delete(key);
+      void setPreference(key, value);
+    }, BRAND_SAVE_DEBOUNCE_MS),
+  );
+}
+
 // ============================================================================
 // STORE
 // ============================================================================
@@ -164,6 +222,11 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
   toastFilterArrival: DEFAULT_TOAST_FILTER_ARRIVAL,
   toastAutoDismissLow: DEFAULT_TOAST_AUTO_DISMISS_LOW,
   toastAutoDismissInfo: DEFAULT_TOAST_AUTO_DISMISS_INFO,
+  brandName: DEFAULT_BRANDING.name,
+  brandTagline: DEFAULT_BRANDING.tagline,
+  brandLogo: "",
+  brandNeonColor: DEFAULT_BRANDING.color,
+  brandFlicker: DEFAULT_BRANDING.flicker,
   isLoaded: false,
 
   loadPreferences: async () => {
@@ -207,8 +270,43 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
       toastAutoDismissInfo: prefs.toastAutoDismissInfo
         ? Number(prefs.toastAutoDismissInfo)
         : DEFAULT_TOAST_AUTO_DISMISS_INFO,
+      brandName:
+        prefs.brand_name === undefined
+          ? DEFAULT_BRANDING.name
+          : clampText(prefs.brand_name, MAX_NAME_CHARS),
+      brandTagline: clampText(prefs.brand_tagline, MAX_TAGLINE_CHARS),
+      brandLogo: normalizeBranding({ logo: prefs.brand_logo }).logo ?? "",
+      brandNeonColor:
+        parseNeonColor(prefs.brand_neon_color) ?? DEFAULT_BRANDING.color,
+      brandFlicker: prefs.brand_flicker === "true",
       isLoaded: true,
     });
+  },
+
+  setBrandName: (brandName) => {
+    set({ brandName });
+    saveDebounced("brand_name", clampText(brandName, MAX_NAME_CHARS));
+  },
+
+  setBrandTagline: (brandTagline) => {
+    set({ brandTagline });
+    saveDebounced("brand_tagline", clampText(brandTagline, MAX_TAGLINE_CHARS));
+  },
+
+  setBrandLogo: async (brandLogo) => {
+    set({ brandLogo });
+    await setPreference("brand_logo", brandLogo);
+  },
+
+  setBrandNeonColor: async (color) => {
+    const brandNeonColor = parseNeonColor(color) ?? DEFAULT_BRANDING.color;
+    set({ brandNeonColor });
+    await setPreference("brand_neon_color", brandNeonColor);
+  },
+
+  setBrandFlicker: async (brandFlicker) => {
+    set({ brandFlicker });
+    await setPreference("brand_flicker", String(brandFlicker));
   },
 
   setClockType: async (clockType) => {

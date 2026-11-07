@@ -10,13 +10,14 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { locales, type Locale } from "@/i18n";
 import { GraphicsPanel } from "@/components/world/hud/GraphicsPanel";
+import { BrandingTab } from "@/components/settings/BrandingTab";
 import { BuildingTab } from "@/components/settings/BuildingTab";
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type SettingsTab = "general" | "building" | "graphics";
+type SettingsTab = "general" | "building" | "graphics" | "branding";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -185,23 +186,25 @@ export default function SettingsModal({
     >
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 p-1 bg-slate-800/50 rounded-lg border border-slate-700">
-        {(["general", "graphics", "building"] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => handleTabSwitch(tab)}
-            className={`flex-1 px-4 py-2 rounded-md text-sm font-bold transition-colors ${
-              activeTab === tab
-                ? "bg-purple-500/20 border border-purple-500 text-purple-300"
-                : "bg-transparent border border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800"
-            }`}
-          >
-            {t(`settings.tabs.${tab}`)}
-            {tab === "building" && buildingDirty && (
-              <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle" />
-            )}
-          </button>
-        ))}
+        {(["general", "graphics", "branding", "building"] as const).map(
+          (tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => handleTabSwitch(tab)}
+              className={`flex-1 px-4 py-2 rounded-md text-sm font-bold transition-colors ${
+                activeTab === tab
+                  ? "bg-purple-500/20 border border-purple-500 text-purple-300"
+                  : "bg-transparent border border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800"
+              }`}
+            >
+              {t(`settings.tabs.${tab}`)}
+              {tab === "building" && buildingDirty && (
+                <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle" />
+              )}
+            </button>
+          ),
+        )}
       </div>
 
       {/* Tab content */}
@@ -515,6 +518,8 @@ export default function SettingsModal({
         <div className="-mx-6 -mb-6 rounded-lg border border-slate-800 bg-slate-950/60 sm:mx-0 sm:mb-0">
           <GraphicsPanel closeOnEscape={false} />
         </div>
+      ) : activeTab === "branding" ? (
+        <BrandingTab />
       ) : (
         <BuildingTab onDirtyChange={handleDirtyChange} />
       )}

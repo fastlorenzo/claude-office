@@ -4,7 +4,8 @@
  * Static shell (built in the room's local frame, merged per material):
  * warm plank floor, plaster ceiling with recessed light panels, a full-height
  * glazed front with aluminium mullions, a frosted privacy band and a door
- * gap, a charcoal pier carrying the nameplate, a per-room accent wall,
+ * gap, a graphite pier carrying the digital door sign, an LED panel over the
+ * door (project + status in words), a per-room accent wall,
  * skirting. Furniture comes from the AssetLibrary (thin instances), screens
  * and characters from the actors agent's classes. Live state (label, status,
  * monitor lines, todos, boss, agents) is cached so the room can be rebuilt.
@@ -13,10 +14,7 @@
  * the hall, origin at the room centre on the floor.
  */
 import {
-  CreateBox,
-  CreateCylinder,
   Mesh,
-  PBRMaterial,
   Scene,
   TransformNode,
   Vector3,
@@ -30,7 +28,7 @@ import type {
   RoomStatus,
   Vec3,
 } from "@/engine/contracts";
-import { LAYOUT, STATUS_COLORS } from "@/engine/contracts";
+import { LAYOUT } from "@/engine/contracts";
 import type { Agent, TodoItem } from "@/types";
 import type { Boss1 as Boss } from "@/types/generated";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
@@ -38,24 +36,28 @@ import { CharacterActor } from "@/engine/characters/CharacterActor";
 import type { Lod } from "@/engine/characters/types";
 import { FixturePoint, type Lighting } from "@/engine/fx/Lighting";
 import type { PostFx } from "@/engine/fx/PostFx";
-import { lin, type Materials } from "@/engine/materials/Materials";
+import type { Materials } from "@/engine/materials/Materials";
 import { framedSink, type Colliders } from "@/engine/physics/Colliders";
 import { AgentMonitor, BossMonitor } from "@/engine/screens/Monitor";
 import type { LabelLayer } from "@/engine/screens/LabelLayer";
 import { WhiteboardScreen } from "@/engine/screens/Whiteboard";
 import { agentScreenText } from "@/engine/logic/monitorText";
 import {
-  drawNameplate,
+  DOOR_BAND,
+  DOOR_BAND_FACE,
+  DOOR_H,
+  FONT_STACK,
   makeTexture,
   partitionColliders,
   texturedPlane,
 } from "@/engine/world/architecture";
 import { RoomShellModule, ROOM_PIER } from "@/engine/world/RoomShell";
 import {
-  RoomSign,
+  ledContent,
   roomSignData,
   type RoomSignData,
 } from "@/engine/world/RoomSign";
+import { LedPanel } from "@/engine/world/LedPanel";
 
 export interface RoomContext {
   scene: Scene;
@@ -93,11 +95,10 @@ export class Room {
   private selected = false;
   private readonly group: string;
   private readonly statics: Mesh[] = [];
-  private readonly lampMat: PBRMaterial;
-  private readonly lampMeshes: Mesh[] = [];
-  private nameplateTex: DynamicTexture | null = null;
-  private nameplate: Mesh | null = null;
-  private sign: RoomSign | null = null;
+  private led: LedPanel | null = null;
+  private doorTarget: InteractionTarget | null = null;
+  private plaque: Mesh | null = null;
+  private plaqueTex: DynamicTexture | null = null;
   private releaseShell: (() => void) | null = null;
   private campus: CampusSession | null = null;
   private bossMonitor: BossMonitor | null = null;
@@ -110,7 +111,6 @@ export class Room {
   >();
   private readonly departing = new Set<CharacterActor>();
   private lod: Lod | null = null;
-  private pulse = 0;
   private readonly fixtures: Vector3[] = [];
   private lastLines: string[] = [];
   private lastTodos: TodoItem[] = [];
@@ -128,11 +128,6 @@ export class Room {
     this.root.position.set(layout.origin.x, layout.origin.y, layout.origin.z);
     this.root.rotation.y = layout.yaw;
     this.root.computeWorldMatrix(true);
-    this.lampMat = ctx.materials.createEmissive(
-      `lamp:${layout.sessionId}`,
-      STATUS_COLORS.working,
-      2.2,
-    );
     this.build();
   }
 
@@ -191,7 +186,7 @@ export class Room {
       {
         a0: -doorHalf,
         a1: doorHalf,
-        h: 2.4,
+        h: DOOR_H,
       },
       [{ a0: pierZ0, a1: pierZ1 }],
     );
@@ -200,79 +195,52 @@ export class Room {
       new Vector3(-hx, H / 2, pz),
       new Vector3(0.18, H, pierZ1 - pierZ0),
     );
-    // Status bar over the door + round lamp (hall side): one animated mesh.
-    const bar = CreateBox(
-      `${this.group}:statusBar`,
-      { width: 0.02, height: 0.03, depth: LAYOUT.DOOR_W - 0.16 },
-      scene,
-    );
-    bar.position.set(-hx - 0.09, 2.47, 0);
-    const disc = CreateCylinder(
-      `${this.group}:lampDisc`,
-      { height: 0.03, diameter: 0.12, tessellation: 24 },
-      scene,
-    );
-    disc.rotation.z = Math.PI / 2;
-    disc.position.set(-hx - 0.1, H - 0.38, 0);
-    const lamp = Mesh.MergeMeshes([bar, disc], true, true) ?? bar;
-    lamp.name = `${this.group}:lamp`;
-    lamp.parent = this.root;
-    lamp.material = this.lampMat;
-    lamp.isPickable = false;
-    this.lampMeshes.push(lamp);
-    for (const m of this.lampMeshes) {
-      m.computeWorldMatrix(true);
-      m.freezeWorldMatrix();
-      this.ctx.fx?.addGlow(m);
-    }
-
-    // Nameplate on the pier (hall side) — also the "door" interactable.
-    this.nameplateTex = makeTexture(
-      scene,
-      `${this.group}:np`,
-      768,
-      224,
-      () => {},
-    );
-    const np = texturedPlane(
-      scene,
-      `${this.group}:nameplate`,
-      this.nameplateTex,
-      0.84,
-      0.245,
-      { emissive: 0.85 },
-    );
-    np.parent = this.root;
-    np.position.set(-hx - 0.112, 2.25, pz);
-    np.rotation.y = Math.PI / 2; // face -X (hall)
-    np.isPickable = true;
     const doorTarget: InteractionTarget = {
       kind: "door",
       sessionId: this.sessionId,
       roomLabel: this.label,
     };
-    np.metadata = { interact: doorTarget };
-    this.nameplate = np;
-    this.redrawNameplate();
+    this.doorTarget = doorTarget;
+    // Digital LED panel recessed in the door header band (hall side): THE
+    // room sign — project + status in words, summary ticker.
+    this.led = new LedPanel(scene, {
+      name: this.group,
+      parent: this.root,
+      x: -hx - DOOR_BAND_FACE - 0.004,
+      y: DOOR_H + DOOR_BAND / 2,
+      z: 0,
+      yaw: Math.PI / 2,
+      width: LAYOUT.DOOR_W - 0.2,
+      height: DOOR_BAND - 0.07,
+      interact: doorTarget,
+    });
+    this.ctx.fx?.addGlow(this.led.mesh);
 
-    // Digital door sign: what the session is doing.
-    this.sign = new RoomSign(
+    // Discreet room-number plaque at eye height on the pier.
+    this.plaqueTex = makeTexture(
       scene,
-      {
-        parent: this.root,
-        x: -hx - 0.112,
-        y: 1.45,
-        z: pz,
-        yaw: Math.PI / 2,
-        width: 0.84,
-        height: 0.48,
-        name: this.group,
-        interact: doorTarget,
-      },
-      this.signData(),
+      `${this.group}:plaque`,
+      256,
+      256,
+      (c, w, h) => drawPlaque(c, w, h, L.slot.index + 1),
     );
-    if (this.ctx.fx)
-      for (const g of this.sign.glowMeshes) this.ctx.fx.addGlow(g as Mesh);
+    const plaque = texturedPlane(
+      scene,
+      `${this.group}:plaque`,
+      this.plaqueTex,
+      0.15,
+      0.15,
+      {
+        lit: true,
+        roughness: 0.4,
+      },
+    );
+    plaque.parent = this.root;
+    plaque.position.set(-hx - 0.105, 1.5, pz);
+    plaque.rotation.y = Math.PI / 2;
+    plaque.isPickable = true;
+    plaque.metadata = { interact: doorTarget };
+    this.plaque = plaque;
 
     // ---- Furniture: merged into the shell module; colliders + plants per room.
     for (const c of shell.colliders)
@@ -331,7 +299,7 @@ export class Room {
   /** Campus data for the door sign (summary / refs / phase / project). */
   setCampus(cs: CampusSession): void {
     this.campus = cs;
-    this.sign?.update(this.signData());
+    this.refreshSigns();
   }
 
   private signData(): RoomSignData {
@@ -340,6 +308,7 @@ export class Room {
       this.label,
       this.layout.slot.index + 1,
       this.status,
+      this.selected,
     );
   }
 
@@ -350,20 +319,14 @@ export class Room {
   setLabel(label: string): void {
     if (label === this.label) return;
     this.label = label;
-    this.redrawNameplate();
-    this.sign?.update(this.signData());
-    if (this.nameplate) {
-      const meta = this.nameplate.metadata as { interact: InteractionTarget };
-      meta.interact = { ...meta.interact, roomLabel: label };
-    }
+    this.refreshSigns();
+    if (this.doorTarget) this.doorTarget.roomLabel = label;
   }
 
   setStatus(status: RoomStatus): void {
     if (status === this.status) return;
     this.status = status;
     this.applyStatus();
-    this.redrawNameplate();
-    this.sign?.update(this.signData());
   }
 
   get currentStatus(): RoomStatus {
@@ -377,7 +340,7 @@ export class Room {
   setSelected(sel: boolean): void {
     if (sel === this.selected) return;
     this.selected = sel;
-    this.redrawNameplate();
+    this.refreshSigns();
   }
 
   setMonitorLines(lines: string[]): void {
@@ -489,24 +452,14 @@ export class Room {
   }
 
   private applyStatus(): void {
-    this.lampMat.emissiveColor = lin(STATUS_COLORS[this.status]);
-    this.lampMat.emissiveIntensity = this.status === "ended" ? 0.4 : 2.2;
+    this.led?.setPulse(this.status === "needs_you");
+    this.refreshSigns();
   }
 
-  private redrawNameplate(): void {
-    const tex = this.nameplateTex;
-    if (!tex) return;
-    const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-    drawNameplate(
-      ctx,
-      768,
-      224,
-      this.label,
-      this.layout.slot.index,
-      STATUS_COLORS[this.status],
-      this.selected,
-    );
-    tex.update(true);
+  /** Door sign + LED panel (each redraws only when its strings change). */
+  private refreshSigns(): void {
+    const data = this.signData();
+    this.led?.set(ledContent(data));
   }
 
   // -------------------------------------------------------------------------
@@ -529,7 +482,7 @@ export class Room {
       this.bossMonitor?.setLod(lod);
       for (const m of this.agentMonitors) m.setLod(lod);
       this.whiteboard?.setLod(lod);
-      this.sign?.setLod(lod);
+      this.led?.setLod(lod);
       // Far rooms: hide screens entirely; only near rooms cast character shadows.
       const show = lod !== "far";
       const screens = [
@@ -544,10 +497,7 @@ export class Room {
         else this.ctx.lighting.removeShadowCaster(c);
       }
     }
-    if (this.status === "needs_you") {
-      this.pulse += dt;
-      this.lampMat.emissiveIntensity = 1.4 + Math.sin(this.pulse * 5) * 1.1;
-    }
+    this.led?.update(dt);
     this.boss?.update(dt, lod);
     for (const a of this.agents.values()) a.actor.update(dt, lod);
     for (const a of this.departing) a.update(dt, lod);
@@ -559,7 +509,8 @@ export class Room {
 
   /** Meshes for this room's control-room feed camera. */
   getRenderList(): AbstractMesh[] {
-    const out: AbstractMesh[] = [...this.statics, ...this.lampMeshes];
+    const out: AbstractMesh[] = [...this.statics];
+    if (this.led) out.push(this.led.mesh);
     out.push(...this.ctx.assets.allParts());
     if (this.bossMonitor) out.push(this.bossMonitor.screenMesh);
     for (const m of this.agentMonitors) out.push(m.screenMesh);
@@ -598,12 +549,28 @@ export class Room {
     // Statics are the shared shell module: release this room's instance only.
     this.releaseShell?.();
     this.releaseShell = null;
-    for (const m of this.lampMeshes) m.dispose(false, false);
-    this.sign?.dispose();
-    this.nameplate?.material?.dispose();
-    this.nameplate?.dispose();
-    this.nameplateTex?.dispose();
-    this.lampMat.dispose();
+    this.led?.dispose();
+    this.plaque?.material?.dispose();
+    this.plaque?.dispose();
+    this.plaqueTex?.dispose();
     this.root.dispose();
   }
+}
+
+/** Room-number plaque: brushed-dark plate, light numerals. */
+function drawPlaque(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  n: number,
+): void {
+  ctx.fillStyle = "#1A1B1E";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#EDE7DC";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `300 ${Math.round(h * 0.5)}px ${FONT_STACK}`;
+  ctx.fillText(String(n).padStart(2, "0"), w / 2, h * 0.53);
+  ctx.fillStyle = "#D97757";
+  ctx.fillRect(w * 0.38, h * 0.84, w * 0.24, h * 0.025);
 }

@@ -10,6 +10,7 @@
 
 import type { CharacterPose } from "../contracts";
 import type { CharacterClip, CharacterExtraClip } from "../assets/characters";
+import type { MpfbCharacterExtraClip } from "../assets/charactersMpfb";
 
 export type AnyClip = CharacterClip | CharacterExtraClip;
 
@@ -39,4 +40,45 @@ const UPPER_BONE =
 /** True when a skeleton node belongs to the upper-body (gesture) layer. */
 export function isUpperBodyBone(name: string): boolean {
   return UPPER_BONE.test(name);
+}
+
+// ---------------------------------------------------------------------------
+// MPFB / custom (Unreal-style and other skeletons)
+// ---------------------------------------------------------------------------
+
+/** Every clip name a skinned rig may play (Rocketbox + MPFB sets). */
+export type RigClip = AnyClip | MpfbCharacterExtraClip;
+
+/**
+ * Pose → [lower, upper] for the MPFB clip set (also used by custom packs,
+ * whose clips are named / borrowed after it). Seated gestures borrow the
+ * standing arm motion over sitIdle legs, like the Rocketbox mapping.
+ */
+export const MPFB_POSE_LAYERS: Record<CharacterPose, [RigClip, RigClip]> = {
+  idle: ["idle", "idle"],
+  walking: ["walk", "walk"],
+  sitting: ["sitIdle", "sitIdle"],
+  typing: ["type", "type"],
+  thinking: ["sitIdle", "thinking"],
+  raiseHand: ["sitIdle", "raiseHand"],
+  celebrating: ["sitIdle", "cheer"],
+};
+
+export const MPFB_SEATED_CLIPS: ReadonlySet<RigClip> = new Set<RigClip>([
+  "sitIdle",
+  "sitTalk",
+  "type",
+]);
+
+const GENERIC_UPPER =
+  /(spine|waist|chest|clavicle|shoulder|upperarm|lowerarm|forearm|arm|elbow|hand|wrist|finger|thumb|index|middle|mid\d|ring|pinky|neck|head|jaw|eye|brow|lip|mouth|cheek|nose|tongue|ponytail)/i;
+
+/**
+ * Upper-body (gesture) layer test for non-Biped skeletons (MPFB, Unreal,
+ * Mixamo, CC). Hips, root and legs stay in the lower layer.
+ */
+export function isGenericUpperBone(name: string): boolean {
+  if (/armature|root|hip|pelvis|thigh|leg|calf|knee|foot|toe|ball/i.test(name))
+    return false;
+  return GENERIC_UPPER.test(name);
 }

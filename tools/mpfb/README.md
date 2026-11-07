@@ -32,7 +32,10 @@ Needs bun (gltf-transform, sharp, meshoptimizer for decompressing the Mesh2Motio
   base), `thinking` (hand to chin, other arm across), `raiseHand`; `idle` and the standing clips get
   straight legs/pelvis at rest height (the UAL idle is an action-game crouch).
 - `optimize.ts`: hair/brows/lashes -> alphaMode MASK + double sided, roughness clamps, tints as
-  baseColorFactor, textures resized (skin 2048, others 1024, eyes/brows 512) and re-encoded WebP
+  baseColorFactor over a *neutralised* texture (tinted textures are converted to greyscale and
+  normalised to a target mean luminance first: glTF multiplies factor x texture, so the magenta
+  toigo_female_suit_2 diffuse turned f05's sage suit purple and dark-brown hair diffuses made every
+  hair tint near-black), textures resized (skin 2048, others 1024, eyes/brows 512) and re-encoded WebP
   (`EXT_texture_webp`, same as the Rocketbox script), resample/dedup/prune. Meshopt NOT used (Babylon needs an
   external decoder); `--quantize` (KHR_mesh_quantization) is optional and untested in Babylon.
 - Clips are embedded per character (retargeted per body), not in a shared animations.glb.

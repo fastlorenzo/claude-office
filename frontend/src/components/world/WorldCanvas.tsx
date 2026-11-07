@@ -3,7 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import type { IWorld, SyncInput } from "@/engine/contracts";
 import { useCampusStore } from "@/stores/campusStore";
-import { usePreferencesStore } from "@/stores/preferencesStore";
+import { selectBranding, usePreferencesStore } from "@/stores/preferencesStore";
 import { useAttentionStore } from "@/stores/attentionStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import type { Session } from "@/hooks/useSessions";
@@ -71,6 +71,7 @@ export function WorldCanvas({
         ),
       ),
       selectedSessionId: selectedRef.current || null,
+      stats: useCampusStore.getState().stats,
     });
 
     const flush = (): void => {
@@ -105,6 +106,7 @@ export function WorldCanvas({
       const s = useWorldUiStore.getState();
       const blocked =
         s.panels.length > 0 ||
+        s.opsOpen ||
         s.peerPopup !== null ||
         useAttentionStore.getState().focusPopup !== null;
       world.setInputEnabled(!blocked);
@@ -124,10 +126,22 @@ export function WorldCanvas({
         });
         world = w;
         setWorld(w);
+        w.setBranding?.(selectBranding(prefs));
         // Graphics menu: push settings into the live world as they change.
         teardown.push(
           usePreferencesStore.subscribe((st, prev) => {
             if (st.graphics !== prev.graphics) w.setGraphics?.(st.graphics);
+          }),
+          // Lobby neon sign: live name / tagline / logo / colour / flicker.
+          usePreferencesStore.subscribe((st, prev) => {
+            if (
+              st.brandName !== prev.brandName ||
+              st.brandTagline !== prev.brandTagline ||
+              st.brandLogo !== prev.brandLogo ||
+              st.brandNeonColor !== prev.brandNeonColor ||
+              st.brandFlicker !== prev.brandFlicker
+            )
+              w.setBranding?.(selectBranding(st));
           }),
         );
 
@@ -149,6 +163,8 @@ export function WorldCanvas({
             const store = useWorldUiStore.getState();
             if (action === "enter") {
               void enterSession(target.sessionId);
+            } else if (target.kind === "ops") {
+              store.openOps(target.sessionId || null);
             } else if (action === "inspect") {
               store.openInspect(target);
             } else if (action === "popup" && target.kind === "character") {
@@ -181,14 +197,19 @@ export function WorldCanvas({
 
         teardown.push(
           useCampusStore.subscribe((s, prev) => {
-            if (s.sessions !== prev.sessions) schedule();
+            if (s.sessions !== prev.sessions || s.stats !== prev.stats)
+              schedule();
           }),
           usePreferencesStore.subscribe((s, prev) => {
             if (s.graphicsQuality !== prev.graphicsQuality)
               w.setQuality(s.graphicsQuality);
           }),
           useWorldUiStore.subscribe((s, prev) => {
-            if (s.panels !== prev.panels || s.peerPopup !== prev.peerPopup)
+            if (
+              s.panels !== prev.panels ||
+              s.peerPopup !== prev.peerPopup ||
+              s.opsOpen !== prev.opsOpen
+            )
               updateInput();
           }),
           useAttentionStore.subscribe((s, prev) => {

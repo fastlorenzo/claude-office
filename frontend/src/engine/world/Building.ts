@@ -25,7 +25,13 @@ import {
   type AbstractMesh,
   type DynamicTexture,
 } from "@/engine/babylon";
-import { LAYOUT, type BuildingLayout, type RoomSlot } from "@/engine/contracts";
+import {
+  LAYOUT,
+  type BuildingLayout,
+  type BrandingOptions,
+  type CampusSession,
+  type RoomSlot,
+} from "@/engine/contracts";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import {
   fixture,
@@ -38,12 +44,16 @@ import type { Colliders } from "@/engine/physics/Colliders";
 import { ArtBatcher } from "@/engine/art/geometry";
 import { v3 } from "@/engine/util/MeshBatcher";
 import { Skyline } from "@/engine/world/Skyline";
+import { BrandSign } from "@/engine/world/BrandSign";
+import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
+import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
+import { roomStatus } from "@/engine/logic/status";
 import {
+  DOOR_BAND,
+  DOOR_BAND_FACE,
+  DOOR_H,
   downlight,
-  drawLogo,
-  drawLogoHalo,
   drawSpark,
-  drawWayfinding,
   FONT_STACK,
   glassPartition,
   makeTexture,
@@ -92,6 +102,12 @@ export class Building {
   private exterior: Part | null = null;
   private bays = -1;
   private skyline: Skyline | null = null;
+  private controlLed: LedPanel | null = null;
+  /** Control-room floor / ceiling / walls (ControlRoom adds the interior). */
+  private controlShell: Mesh[] = [];
+  private brand: BrandSign | null = null;
+  private brandOpts: BrandingOptions = DEFAULT_BRANDING;
+  private campusCounts = { working: 0, needs: 0, idle: 0 };
 
   constructor(private readonly ctx: BuildingContext) {
     ctx.materials.setExteriorReflection(ctx.lighting.exterior);
@@ -112,6 +128,36 @@ export class Building {
       this.registerProbes(layout);
     }
     this.setEmptyBays(layout, layout.emptySlots);
+  }
+
+  /** Live control-room panel summary ("3 WORKING · 1 NEEDS YOU"). */
+  setCampus(sessions: CampusSession[]): void {
+    const c = { working: 0, needs: 0, idle: 0 };
+    for (const cs of sessions) {
+      const st = roomStatus(cs);
+      if (st === "needs_you") c.needs += 1;
+      else if (st === "working") c.working += 1;
+      else if (st === "done") c.idle += 1;
+    }
+    this.campusCounts = c;
+    this.controlLed?.set(controlLedContent(c));
+  }
+
+  /** Lobby neon sign: name / tagline / logo / colour / flicker. */
+  setBranding(opts: BrandingOptions): void {
+    this.brandOpts = opts;
+    this.brand?.set(opts);
+  }
+
+  /** Per-frame: LED ticker. */
+  update(dt: number): void {
+    this.controlLed?.update(dt);
+    this.brand?.update(dt);
+  }
+
+  /** Control-room shell meshes of the current shell build (for ControlRoom). */
+  get controlShellMeshes(): Mesh[] {
+    return this.controlShell.filter((m) => !m.isDisposed());
   }
 
   get fixtures(): Vector3[] {
@@ -417,13 +463,14 @@ export class Building {
       );
       for (const z of ELEVATOR_Z) {
         // Portal frame + brushed doors (two leaves, centre split).
-        b.rbox("blackMetal", v3(fx + 0.06, 1.25, z), v3(0.09, 2.5, 1.36), {
+        // (Leaves sit 2.5 cm proud of the portal face: no coplanar z-fight.)
+        b.rbox("blackMetal", v3(fx + 0.05, 1.25, z), v3(0.08, 2.5, 1.36), {
           r: 0.006,
         });
         for (const s2 of [-1, 1])
           b.rbox(
             "aluminium",
-            v3(fx + 0.09, 1.2, z + s2 * 0.2775),
+            v3(fx + 0.1, 1.2, z + s2 * 0.2775),
             v3(0.03, 2.38, 0.55),
             {
               r: 0.004,
@@ -574,64 +621,15 @@ export class Building {
 
     this.finish(part, b.build({ receiveShadows: true }));
 
-    // ---- Logo: stand-off letters + halo on the graphite wall.
-    const logoW = 5.0;
-    const logoTex = makeTexture(
+    // ---- Brand: neon sign (BrandSign) on the graphite wall.
+    this.brand = new BrandSign(
       scene,
-      "logo",
-      2048,
-      400,
-      (c, w, h) => drawLogo(c, w, h),
-      {
-        alpha: true,
-      },
+      { x: fwc, y: 3.4, wallZ: -T },
+      this.brandOpts,
     );
-    const logo = texturedPlane(
-      scene,
-      "logo",
-      logoTex,
-      logoW,
-      logoW * (400 / 2048),
-      {
-        emissive: 1.6,
-        alpha: true,
-      },
-    );
-    logo.position.set(fwc, 3.4, -T - 0.08);
-    const haloTex = makeTexture(
-      scene,
-      "logoHalo",
-      1024,
-      256,
-      (c, w, h) => drawLogoHalo(c, w, h),
-      {
-        alpha: true,
-      },
-    );
-    const halo = texturedPlane(
-      scene,
-      "logoHalo",
-      haloTex,
-      logoW * 1.25,
-      logoW * 1.25 * 0.25,
-      {
-        emissive: 0.9,
-        alpha: true,
-      },
-    );
-    halo.position.set(fwc - 0.1, 3.38, -T - 0.04);
-    part.meshes.push(logo, halo);
-    part.textures.push(logoTex, haloTex);
-    this.ctx.fx?.addGlow(logo);
-    part.fixtures.push(
-      fixture(fwc - 1.6, 3.4, -T - 0.4, {
-        kind: "accent",
-        color: "#E8875F",
-        intensity: 0.5,
-        dir: new Vector3(0, 0, 1),
-        range: 2.5,
-      }),
-    );
+    part.meshes.push(...this.brand.meshes);
+    part.textures.push(this.brand.texture);
+    this.brand.set(this.brandOpts);
 
     // Elevator floor indicators on the black glass band (one plane, 1 draw).
     {
@@ -649,24 +647,6 @@ export class Building {
       part.meshes.push(band);
       part.textures.push(tex);
     }
-
-    // Wayfinding over the hall portal.
-    const wayTex = makeTexture(scene, "wayHall", 1024, 256, (c, w, h) =>
-      drawWayfinding(
-        c,
-        w,
-        h,
-        "Sessions",
-        "Rooms · Control room at the end of the hall",
-        "→",
-      ),
-    );
-    const way = texturedPlane(scene, "wayHall", wayTex, 2.4, 0.6, {
-      emissive: 0.8,
-    });
-    way.position.set(0, WH + 0.62, -T - 0.012);
-    part.meshes.push(way);
-    part.textures.push(wayTex);
 
     // ---- Props
     const place = (
@@ -691,13 +671,16 @@ export class Building {
     place("sideTable", lx - 1.5, lz + 1.7, 0);
     // Planters + plants: portal, facade corners, window piers.
     for (const sx of [-1, 1]) {
-      place("planterTall", sx * (hallHalf + 0.55), -0.75, 0);
-      place("plantTall", sx * (hallHalf + 0.55), -0.75, sx * 1.2, 1.25, 0.14);
-      place("planterTall", sx * (halfW - 0.7), z0 + 0.8, 0, 1.15);
-      place("plantTall", sx * (halfW - 0.7), z0 + 0.8, sx * 2.1, 1.5, 0.1);
+      // One pot per plant: scanned foliage (pot stripped) sits at the rim of
+      // a procedural planter (planter 0.46 m, planterTall 0.62 m × scale).
+      // Portal pair: clear of the moss plinth (z ≥ -0.66) and portal frame.
+      place("planterTall", sx * (hallHalf + 0.5), -1.12, 0);
+      place("plantTall", sx * (hallHalf + 0.5), -1.12, sx * 1.2, 1.0, 0.58);
+      place("planterTall", sx * (halfW - 0.75), z0 + 0.85, 0, 1.15);
+      place("plantTall", sx * (halfW - 0.75), z0 + 0.85, sx * 2.1, 1.25, 0.67);
       if (sx > 0) {
         place("planter", halfW - 0.55, -6.0, 0);
-        place("plant", halfW - 0.55, -6.0, 0.7, 1.0, 0.02);
+        place("plant", halfW - 0.55, -6.0, 0.7, 1.0, 0.42);
       }
     }
     place("taskChair", rx, rc - 1.25, Math.PI);
@@ -779,7 +762,7 @@ export class Building {
         );
       }
       const side = bay % 2 === 0 ? -1 : 1;
-      const px = side * (hallHalf - 0.5);
+      const px = side * (hallHalf - 0.6);
       assets.instantiate(
         "planter",
         null,
@@ -789,7 +772,7 @@ export class Building {
       assets.instantiate(
         "plant",
         null,
-        { position: { x: px, y: 0.02, z: zc }, yaw: bay * 1.7, scale: 0.95 },
+        { position: { x: px, y: 0.42, z: zc }, yaw: bay * 1.7, scale: 0.95 },
         { group: g },
       );
     }
@@ -849,12 +832,19 @@ export class Building {
       -hallHalf,
       hallHalf,
       H,
-      { a0: -0.9, a1: 0.9, h: 2.4 },
+      { a0: -0.9, a1: 0.9, h: DOOR_H },
       {
         pitch: 1.2,
         glass: "glassTint",
         frame: "blackMetal",
       },
+    );
+
+    // Shadow gap framing the control-room LED panel in the door header band.
+    b.box(
+      "shadowGap",
+      v3(0, DOOR_H + DOOR_BAND / 2, L + 0.05 - DOOR_BAND_FACE - 0.001),
+      v3(1.64, DOOR_BAND - 0.05, 0.002),
     );
 
     const shellMeshes = b.build({ receiveShadows: true });
@@ -872,12 +862,11 @@ export class Building {
 
   /** Dark NOC: graphite walls, black baffles, curved console, LED accents. */
   private buildControlRoom(layout: BuildingLayout, part: Part): void {
-    const { scene, materials, colliders, assets } = this.ctx;
+    const { scene, materials, colliders } = this.ctx;
     const g = "shell";
     const L = layout.hall.length;
     const T = 0.2;
     const cb = new ArtBatcher(scene, materials, "control", 7);
-    const cz0 = L + T;
     const cz1 = layout.controlRoom.origin.z + layout.controlRoom.size.z / 2;
     const cH = layout.controlRoom.size.y;
     const cw = layout.controlRoom.size.x / 2;
@@ -892,17 +881,10 @@ export class Building {
       v3(0, cH + 0.05, (L + cz1) / 2),
       v3(cw * 2, 0.1, cz1 - L),
     );
-    // Acoustic baffles
-    for (let x = -cw + 0.9; x < cw - 0.5; x += 0.45)
-      cb.rbox(
-        "ceilingDark",
-        v3(x, cH - 0.22, (cz0 + cz1) / 2),
-        v3(0.05, 0.42, cz1 - cz0 - 1),
-        {
-          r: 0.01,
-        },
-      );
-    for (const sx of [-1, 1]) {
+    // Shell only: the interior (video wall, console, feeds, baffles, props,
+    // zone lights) is engine/world/ControlRoom.ts, built by World on top of
+    // `controlShell` (isolateZone runs there, over shell + interior).
+    for (const sx of [-1, 1])
       wallWithOpenings(
         cb,
         colliders,
@@ -915,23 +897,6 @@ export class Building {
         cz1 + T,
         cH,
       );
-      cb.box(
-        "ledBlue",
-        v3(sx * (cw - 0.02), 0.06, (cz0 + cz1) / 2),
-        v3(0.01, 0.012, cz1 - cz0 - 0.4),
-        {
-          keepUVs: true,
-        },
-      );
-      // Vertical acoustic fins on the side walls
-      for (let z = cz0 + 0.6; z < cz1 - 0.4; z += 0.5)
-        cb.rbox(
-          "ceilingDark",
-          v3(sx * (cw - 0.05), cH / 2, z),
-          v3(0.08, cH - 0.4, 0.04),
-          { r: 0.006 },
-        );
-    }
     wallWithOpenings(
       cb,
       colliders,
@@ -944,201 +909,25 @@ export class Building {
       cw + T,
       cH,
     );
-    // Cool linear lights between baffles (dim).
-    for (const z of [cz0 + 1.4, cz0 + 3.8]) {
-      cb.rbox("blackMetal", v3(0, cH - 0.46, z), v3(cw * 2 - 4, 0.03, 0.08), {
-        r: 0.006,
-      });
-      cb.box(
-        "lightPanelDim",
-        v3(0, cH - 0.477, z),
-        v3(cw * 2 - 4.1, 0.004, 0.05),
-        { keepUVs: true },
-      );
-    }
-    // Screen wall surround + LED lines + side panels.
-    const sw = layout.controlRoom.screenWall;
-    const wallW = sw.cols * sw.cellW + 0.5;
-    const wallH = sw.rows * sw.cellH + 0.4;
-    const gloss = materials.get("nocGloss");
-    cb.rbox(
-      gloss,
-      v3(sw.origin.x, sw.origin.y, cz1 - 0.03),
-      v3(wallW + 5.2, wallH + 0.6, 0.06),
-      {
-        r: 0.01,
-      },
-    );
-    for (const dy of [-1, 1])
-      cb.box(
-        "ledBlue",
-        v3(sw.origin.x, sw.origin.y + dy * (wallH / 2 + 0.3), cz1 - 0.065),
-        v3(wallW + 5.2, 0.012, 0.012),
-        { keepUVs: true },
-      );
-    for (const sx of [-1, 1]) {
-      cb.rbox(
-        "blackMetal",
-        v3(sx * (wallW / 2 + 1.35), sw.origin.y, cz1 - 0.07),
-        v3(2.1, 1.25, 0.04),
-        {
-          r: 0.01,
-        },
-      );
-      cb.box(
-        "ledBlue",
-        v3(sx * (wallW / 2 + 2.8), cH / 2, cz1 - 0.065),
-        v3(0.02, cH - 0.3, 0.012),
-        {
-          keepUVs: true,
-        },
-      );
-    }
-
-    // ---- Curved console (operators on the convex side, facing the wall).
-    const R = 4.4;
-    const cc = v3(0, 0, cz1 + 0.6); // arc centre behind the screen wall
-    const dzFront = cc.z - R; // operator edge at the centre line
-    const a0 = Math.PI - 0.62;
-    const a1 = Math.PI + 0.62;
-    cb.arc("blackMetal", cc, R - 0.78, R - 0.08, a0, a1, 0.1, 0.72, 48);
-    cb.arc(gloss, cc, R - 0.86, R, a0 - 0.01, a1 + 0.01, 0.72, 0.76, 48);
-    cb.arc("shadowGap", cc, R - 0.7, R - 0.16, a0, a1, 0, 0.1, 40);
-    cb.arc(
-      "ledBlue",
-      cc,
-      R - 0.012,
-      R + 0.002,
-      a0 + 0.01,
-      a1 - 0.01,
-      0.705,
-      0.715,
-      48,
-      { keepUVs: true },
-    );
-    cb.arc(
-      "ledBlue",
-      cc,
-      R - 0.17,
-      R - 0.155,
-      a0 + 0.01,
-      a1 - 0.01,
-      0.015,
-      0.025,
-      48,
-      { keepUVs: true },
-    );
-    // Monitor stands along the arc
-    const screenAngles = [-0.36, 0, 0.36];
-    const screenPos = screenAngles.map((da) => {
-      const a = Math.PI + da;
-      const r = R - 0.55;
-      return { x: Math.sin(a) * r + cc.x, z: Math.cos(a) * r + cc.z, yaw: da };
-    });
-    for (const s of screenPos) {
-      cb.rbox("blackMetal", v3(s.x, 0.77 + 0.12, s.z), v3(0.05, 0.24, 0.05), {
-        r: 0.006,
-      });
-      cb.rbox("blackMetal", v3(s.x, 0.765, s.z), v3(0.26, 0.012, 0.18), {
-        r: 0.004,
-        yaw: s.yaw,
-      });
-      cb.rbox("blackMetal", v3(s.x, 0.77 + 0.36, s.z), v3(0.66, 0.39, 0.025), {
-        r: 0.006,
-        yaw: s.yaw,
-      });
-    }
-    colliders.addBox(
-      g,
-      new Vector3(0, 0.4, dzFront + 0.4),
-      new Vector3(3.2, 0.8, 0.85),
-    );
-    for (const sx of [-1, 1])
-      colliders.addBox(
-        g,
-        new Vector3(sx * 2.2, 0.4, dzFront + 0.75),
-        new Vector3(1.8, 0.8, 0.85),
-        sx * 0.45,
-      );
     const controlMeshes = cb.build({ receiveShadows: true });
     tagStatic(controlMeshes);
     part.meshes.push(...controlMeshes);
+    this.controlShell = controlMeshes;
 
-    // Console monitors + side panels (dashboard texture).
-    const dashTex = makeTexture(scene, "dash", 512, 288, (c, w, h) =>
-      drawDashboard(c, w, h),
-    );
-    part.textures.push(dashTex);
-    const screens: Mesh[] = [];
-    screenPos.forEach((s, i) => {
-      const m = texturedPlane(scene, `consoleScreen${i}`, dashTex, 0.62, 0.35, {
-        emissive: 1.0,
-      });
-      // Just in front of the housing, along the screen normal (towards the operator).
-      m.position.set(
-        s.x - Math.sin(s.yaw) * 0.0145,
-        0.77 + 0.36,
-        s.z - Math.cos(s.yaw) * 0.0145,
-      );
-      m.rotation.y = s.yaw;
-      screens.push(m);
+    // Control room LED panel over the partition door (hall side): same
+    // family as the room door panels; live summary from setCampus().
+    this.controlLed?.dispose();
+    this.controlLed = new LedPanel(scene, {
+      name: "control",
+      x: 0,
+      y: DOOR_H + DOOR_BAND / 2,
+      z: L + 0.05 - DOOR_BAND_FACE - 0.004,
+      yaw: 0,
+      width: 1.6,
+      height: DOOR_BAND - 0.07,
     });
-    for (const sx of [-1, 1]) {
-      const s = texturedPlane(scene, `controlSide${sx}`, dashTex, 2.0, 1.125, {
-        emissive: 0.8,
-      });
-      s.position.set(sx * (wallW / 2 + 1.35), sw.origin.y, cz1 - 0.095);
-      screens.push(s);
-    }
-    part.meshes.push(...screens);
-    for (const da of [-0.32, 0, 0.32]) {
-      const a = Math.PI + da;
-      const r = R + 0.55;
-      assets.instantiate(
-        "taskChair",
-        null,
-        {
-          position: {
-            x: Math.sin(a) * r + cc.x,
-            y: 0,
-            z: Math.cos(a) * r + cc.z,
-          },
-          yaw: da,
-        },
-        { group: g },
-      );
-    }
-    assets.instantiate(
-      "securityCamera",
-      null,
-      { position: { x: cw - 0.3, y: cH - 0.35, z: cz0 + 0.3 }, yaw: -2.3 },
-      { group: g },
-    );
-    this.ctx.lighting.isolateZone(controlMeshes, [
-      {
-        pos: new Vector3(0, 2.9, cz1 - 1.2),
-        color: "#8FB0FF",
-        intensity: 4.2,
-        range: 9,
-      },
-      {
-        pos: new Vector3(0, 2.7, dzFront - 1.0),
-        color: "#B4C8FF",
-        intensity: 2.0,
-        range: 8,
-      },
-    ]);
-
-    // Control room sign over the partition door (hall side).
-    const ctlTex = makeTexture(scene, "wayCtl", 1024, 256, (c, w, h) =>
-      drawWayfinding(c, w, h, "Control Room", "Live view of every session", ""),
-    );
-    part.textures.push(ctlTex);
-    const ctl = texturedPlane(scene, "wayCtl", ctlTex, 1.8, 0.45, {
-      emissive: 0.8,
-    });
-    ctl.position.set(0, 2.78, L - 0.03);
-    part.meshes.push(ctl);
+    this.ctx.fx?.addGlow(this.controlLed.mesh);
+    this.controlLed.set(controlLedContent(this.campusCounts));
   }
 
   // -------------------------------------------------------------------------
@@ -1209,7 +998,7 @@ export class Building {
         z: zc,
         yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2,
       });
-      const px = sx * (hallHalf - 0.45);
+      const px = sx * (hallHalf - 0.6);
       assets.instantiate(
         "planterTall",
         null,
@@ -1219,7 +1008,7 @@ export class Building {
       assets.instantiate(
         "plantTall",
         null,
-        { position: { x: px, y: 0.14, z: zc + 2.6 }, yaw: s.bay, scale: 1.3 },
+        { position: { x: px, y: 0.58, z: zc + 2.6 }, yaw: s.bay, scale: 1.1 },
         { group: g },
       );
     }
@@ -1283,6 +1072,8 @@ export class Building {
     this.disposePart(this.exterior, "exterior");
     this.skyline?.dispose();
     this.skyline = null;
+    this.controlLed?.dispose();
+    this.controlLed = null;
     this.lobby = this.shell = this.empty = this.exterior = null;
   }
 }
@@ -1303,6 +1094,35 @@ function markExteriorGlass(meshes: Mesh[]): void {
     if (!m.material?.needAlphaBlending()) continue;
     m.alphaIndex = m.material.name.includes("glassTint") ? 5 : 0;
   }
+}
+
+/** Control-room door panel: name + live counts in the room status colours. */
+function controlLedContent(c: {
+  working: number;
+  needs: number;
+  idle: number;
+}): LedContent {
+  const sep = { text: " · ", color: "#6E6A64" };
+  const counts: { text: string; color: string }[] = [];
+  const add = (n: number, word: string, color: string) => {
+    if (!n) return;
+    if (counts.length) counts.push(sep);
+    counts.push({ text: `${n} ${word}`, color });
+  };
+  add(c.working, "WORKING", "#5B9DFF");
+  add(c.needs, "NEEDS YOU", "#F5A524");
+  add(c.idle, "IDLE", "#34D399");
+  if (!counts.length) counts.push({ text: "NO SESSIONS", color: "#7C7A76" });
+  const dot = c.needs ? "#F5A524" : c.working ? "#5B9DFF" : "#34D399";
+  return {
+    dot,
+    line: [
+      { text: "CONTROL ROOM", color: "#FFFFFF" },
+      { text: "  ·  ", color: "#6E6A64" },
+      ...counts,
+    ],
+    ticker: [{ text: "Live view of every session", color: "#8A867F" }],
+  };
 }
 
 /** Indicator band: per door "47 ▲", plus the floor name at the end. */
@@ -1348,46 +1168,4 @@ function drawAvailable(
   ctx.font = `400 ${Math.round(h * 0.05)}px ${FONT_STACK}`;
   ctx.fillText("Start a Claude Code session", w / 2, h * 0.76);
   ctx.fillText("to move in", w / 2, h * 0.83);
-}
-
-function drawDashboard(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-): void {
-  ctx.fillStyle = "#0B1220";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#3B82F6";
-  ctx.font = `600 18px ${FONT_STACK}`;
-  ctx.fillText("CLAUDE OFFICE · OPS", 16, 28);
-  ctx.strokeStyle = "rgba(59,130,246,0.25)";
-  for (let y = 60; y < h - 20; y += 30) {
-    ctx.beginPath();
-    ctx.moveTo(16, y);
-    ctx.lineTo(w - 16, y);
-    ctx.stroke();
-  }
-  const series = [
-    ["#3B82F6", 0.3],
-    ["#22C55E", 1.7],
-    ["#F59E0B", 3.1],
-  ] as const;
-  for (const [col, ph] of series) {
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    for (let x = 16; x < w - 16; x += 6) {
-      const y =
-        h * 0.62 -
-        Math.sin(x * 0.02 + ph) * 40 -
-        Math.sin(x * 0.07 + ph * 2) * 14;
-      if (x === 16) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-  for (let i = 0; i < 6; i++) {
-    ctx.fillStyle = i % 3 === 0 ? "#F59E0B" : i % 2 ? "#22C55E" : "#3B82F6";
-    ctx.fillRect(16 + i * 80, h - 30, 60 * (0.4 + ((i * 37) % 10) / 16), 8);
-  }
 }

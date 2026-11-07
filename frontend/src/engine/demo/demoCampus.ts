@@ -2,8 +2,13 @@
 import type {
   CampusActivity,
   CampusSession,
+  CampusStats,
+  RoomStatus,
+  SessionActivityStats,
   SessionMeta,
   SessionPhase,
+  SessionPhaseKind,
+  SessionTelemetry,
 } from "../contracts";
 import type { Agent, AgentState, BossState, TodoItem } from "@/types";
 
@@ -202,10 +207,212 @@ function makeTodos(i: number, tMs: number): TodoItem[] {
   return todos;
 }
 
+// ---------------------------------------------------------------------------
+// Telemetry / activity / stats (status-line style numbers for the control room)
+// ---------------------------------------------------------------------------
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+
+interface DemoTel {
+  model: string;
+  effort: string;
+  window: number;
+  ctx: number; // base context %
+  cost: number;
+  added: number;
+  removed: number;
+  durMs: number;
+  cacheMin: number; // minutes left on the prompt cache
+  repo: string;
+}
+const TEL: DemoTel[] = [
+  {
+    model: "Opus 5.5",
+    effort: "high",
+    window: 1_000_000,
+    ctx: 19,
+    cost: 100.2,
+    added: 16902,
+    removed: 1777,
+    durMs: 3 * HOUR + 24 * MIN,
+    cacheMin: 59,
+    repo: "acme/continuum",
+  },
+  {
+    model: "Opus 5.5",
+    effort: "xhigh",
+    window: 200_000,
+    ctx: 83,
+    cost: 42.75,
+    added: 2310,
+    removed: 640,
+    durMs: 1 * HOUR + 12 * MIN,
+    cacheMin: 3,
+    repo: "acme/payments-api",
+  },
+  {
+    model: "Sonnet 5",
+    effort: "medium",
+    window: 1_000_000,
+    ctx: 41,
+    cost: 8.4,
+    added: 120,
+    removed: 12,
+    durMs: 18 * MIN,
+    cacheMin: 41,
+    repo: "acme/infra",
+  },
+  {
+    model: "Opus 5.5",
+    effort: "high",
+    window: 200_000,
+    ctx: 64,
+    cost: 23.1,
+    added: 980,
+    removed: 301,
+    durMs: 52 * MIN,
+    cacheMin: 12,
+    repo: "acme/mobile-app",
+  },
+];
+
+function demoTelemetry(
+  i: number,
+  tMs: number,
+  ended: boolean,
+): SessionTelemetry {
+  const d = TEL[i % TEL.length];
+  const drift = (tMs / 1000) * 0.01 * (1 + (i % 3));
+  const pct = Math.min(97, d.ctx + (ended ? 0 : drift));
+  const grow = ended ? 0 : tMs / 60_000;
+  return {
+    model: d.model,
+    effort: d.effort,
+    contextUsedPct: Math.round(pct * 10) / 10,
+    contextTokens: Math.round((pct / 100) * d.window),
+    contextWindow: d.window,
+    costUsd: Math.round((d.cost + grow * 0.31 * (1 + (i % 2))) * 100) / 100,
+    linesAdded: d.added + Math.floor(grow * 7),
+    linesRemoved: d.removed + Math.floor(grow * 2),
+    durationMs: d.durMs + (ended ? 0 : tMs),
+    cacheWarm: !ended,
+    cacheExpiresAt: ended ? null : agoIso(-d.cacheMin * MIN),
+    repo: d.repo,
+    outputStyle: null,
+    updatedAt: agoIso(2_000),
+  };
+}
+
+const MIX_KINDS: SessionPhaseKind[] = [
+  "coding",
+  "exploring",
+  "testing",
+  "building",
+  "running",
+  "git",
+  "researching",
+  "delegating",
+];
+
+function demoActivity(
+  i: number,
+  tMs: number,
+  ended: boolean,
+): SessionActivityStats {
+  const minute = Math.floor(tMs / MIN);
+  const eventsPerMin: number[] = [];
+  for (let k = 0; k < 30; k++) {
+    const m = minute - 29 + k;
+    const wave = 0.5 + 0.5 * Math.sin(m * 0.45 + i * 1.7);
+    const burst = (m * 7 + i * 13) % 11 === 0 ? 14 : 0;
+    const v = ended && k > 18 ? 0 : Math.round(3 + wave * (9 + i * 2) + burst);
+    eventsPerMin.push(v);
+  }
+  const toolMix: Partial<Record<SessionPhaseKind, number>> = {};
+  MIX_KINDS.forEach((k, j) => {
+    const v = ((j * 17 + i * 29) % 40) + (j === i % MIX_KINDS.length ? 60 : 5);
+    toolMix[k] = v;
+  });
+  const toolCalls = Object.values(toolMix).reduce((a, b) => a + (b ?? 0), 0);
+  return {
+    eventsPerMin,
+    toolMix,
+    toolCalls,
+    subagentsSpawned: 3 + ((i * 5) % 9),
+    testRuns: 2 + ((i * 3) % 7),
+    testFailures: i % PROFILES.length === 3 ? 3 : 0,
+    errors: (i * 2) % 5,
+  };
+}
+
+/** Building-wide stats for a demo campus (account-wide limits, cost, events). */
+export function createDemoStats(
+  campus: CampusSession[],
+  tMs: number,
+): CampusStats {
+  const byStatus: Partial<Record<RoomStatus, number>> = {};
+  let subagents = 0;
+  for (const c of campus) {
+    const st: RoomStatus = c.ended ? "ended" : c.bucket;
+    byStatus[st] = (byStatus[st] ?? 0) + 1;
+    subagents += c.agents.filter(
+      (a) => a.state !== "completed" && a.state !== "leaving",
+    ).length;
+  }
+  const minute = Math.floor(tMs / MIN);
+  const eventsPerMin: number[] = [];
+  for (let k = 0; k < 60; k++) {
+    const m = minute - 59 + k;
+    const base = campus.length * 6;
+    const wave = 0.55 + 0.45 * Math.sin(m * 0.21) * Math.cos(m * 0.07);
+    eventsPerMin.push(Math.max(0, Math.round(base * wave + ((m * 13) % 7))));
+  }
+  const costSeries: number[] = [];
+  for (let k = 0; k < 36; k++) {
+    const b = Math.floor(tMs / (5 * MIN)) - 35 + k;
+    costSeries.push(
+      Math.round(
+        (0.8 + 0.7 * (0.5 + 0.5 * Math.sin(b * 0.4)) + (b % 5) * 0.12) * 100,
+      ) / 100,
+    );
+  }
+  const costs = campus.map((c) => c.telemetry?.costUsd ?? 0);
+  const sessionsCost = costs.reduce((a, b) => a + b, 0);
+  const lines = campus.reduce(
+    (a, c) => [
+      a[0] + (c.telemetry?.linesAdded ?? 0),
+      a[1] + (c.telemetry?.linesRemoved ?? 0),
+    ],
+    [0, 0],
+  );
+  return {
+    fiveHour: {
+      usedPct: Math.min(99, 62 + (tMs / 1000) * 0.005),
+      resetsAt: agoIso(-(1 * HOUR + 48 * MIN)),
+      projectedPct: 104,
+    },
+    sevenDay: {
+      usedPct: 19,
+      resetsAt: agoIso(-(3 * 24 * HOUR + 2 * HOUR)),
+      projectedPct: 34,
+    },
+    costTodayUsd: Math.round((sessionsCost + 31.4) * 100) / 100,
+    burnUsdPerHour: 18.6,
+    sessionsByStatus: byStatus,
+    activeSubagents: subagents,
+    eventsPerMin,
+    costSeries,
+    linesAddedToday: lines[0],
+    linesRemovedToday: lines[1],
+    updatedAt: isoAt(tMs),
+  };
+}
+
 export function createDemoCampus(
   count: number,
   tMs: number,
-): { campus: CampusSession[]; sessions: SessionMeta[] } {
+): { campus: CampusSession[]; sessions: SessionMeta[]; stats: CampusStats } {
   const campus: CampusSession[] = [];
   const sessions: SessionMeta[] = [];
   const permIdx = count > 1 ? 1 : 0;
@@ -306,6 +513,10 @@ export function createDemoCampus(
       },
       todos: makeTodos(i, tMs),
       recentActivity: recent,
+      telemetry: demoTelemetry(i, tMs, ended),
+      activity: demoActivity(i, tMs, ended),
+      alive: !ended,
+      lastEventAt: ended ? agoIso(25 * MIN) : agoIso(3_000),
       ended,
       lastUpdated: isoAt(tMs),
     });
@@ -318,5 +529,5 @@ export function createDemoCampus(
       status: ended ? "completed" : "active",
     });
   }
-  return { campus, sessions };
+  return { campus, sessions, stats: createDemoStats(campus, tMs) };
 }

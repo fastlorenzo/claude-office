@@ -1,12 +1,13 @@
 /**
  * Per-scene registry of character actors. Every frame it assigns each actor a
  * LOD tier from its distance to the eye (see lod.ts), toggles the skinned
- * meshes / shadow casting accordingly and maintains two thin-instanced meshes
+ * meshes / shadow casting accordingly and maintains thin-instanced meshes
  * shared by ALL characters:
- *   - impostors  low-poly capsule + head for tier "far"
+ *   - impostors  low-poly capsule (tinted torso, dark legs) + skin-tone head
+ *                for tier "far" (two thin-instanced parts, one matrix buffer)
  *   - blobs      contact-shadow discs for visible characters that do not cast
  *                a real shadow
- * so a whole crowd costs two draw calls instead of 3-5 per person.
+ * so a whole crowd costs three draw calls instead of 3-5 per person.
  */
 
 import {
@@ -42,6 +43,8 @@ export interface HubActor {
   shadowMeshes(): AbstractMesh[];
   /** Apply a tier (enable / disable meshes, pause animation). */
   applyTier(tier: ActorTier): void;
+  /** Optional skin tone (#rrggbb) for the impostor head. */
+  readonly skinHex?: string;
   /** Smooth opacity 0..1 (spawn / depart fade) for blob + impostor. */
   readonly presence: number;
   readonly isGone: boolean;
@@ -81,6 +84,8 @@ export class ActorHub {
   private budget = characterBudget("high");
   private shadows: ShadowSink | null = null;
   private readonly impostor: Mesh;
+  private readonly impHead: Mesh;
+  private readonly headCol = new Float32Array(MAX * 4);
   private readonly blob: Mesh;
   private readonly impBuf = new Float32Array(MAX * 16);
   private readonly impCol = new Float32Array(MAX * 4);
@@ -98,29 +103,45 @@ export class ActorHub {
   }
 
   private constructor(scene: Scene) {
-    // Impostor: capsule body + head sphere merged (vertex colour white).
+    // Impostor: capsule body (vertex colours: white torso takes the agent
+    // tint, darker legs) + a separate thin-instanced head in a skin tone. Both
+    // share the matrix buffer, so a crowd is still one draw call per part.
     const body = CreateCapsule(
-      "impBody",
-      { height: 1.45, radius: 0.22, tessellation: 8, subdivisions: 1 },
+      "actorImpostor",
+      { height: 1.45, radius: 0.22, tessellation: 8, subdivisions: 2 },
       scene,
     );
     body.position.y = 0.725;
-    const head = CreateSphere(
-      "impHead",
-      { diameter: 0.24, segments: 6 },
-      scene,
-    );
-    head.position.y = 1.58;
-    const merged = Mesh.MergeMeshes([body, head], true, true) as Mesh;
-    merged.name = "actorImpostor";
+    body.bakeCurrentTransformIntoVertices();
+    const bp = body.getVerticesData("position")!;
+    const bc = new Float32Array((bp.length / 3) * 4);
+    for (let i = 0; i < bp.length / 3; i++) {
+      // Hips at ~0.78 m: legs below fade to 35 % of the tint.
+      const y = bp[i * 3 + 1];
+      const k = 0.35 + 0.65 * Math.min(1, Math.max(0, (y - 0.7) / 0.16));
+      bc.set([k, k, k, 1], i * 4);
+    }
+    body.setVerticesData("color", bc, false);
     const mat = new StandardMaterial("actorImpostorMat", scene);
     mat.diffuseColor = Color3.White();
     mat.specularColor = Color3.Black();
     mat.emissiveColor = new Color3(0.1, 0.1, 0.1);
-    merged.material = mat;
-    this.impostor = this.prep(merged);
+    body.material = mat;
+    this.impostor = this.prep(body);
     this.impostor.thinInstanceSetBuffer("matrix", this.impBuf, 16, false);
     this.impostor.thinInstanceSetBuffer("color", this.impCol, 4, false);
+
+    const head = CreateSphere(
+      "actorImpostorHead",
+      { diameter: 0.24, segments: 6 },
+      scene,
+    );
+    head.position.y = 1.58;
+    head.bakeCurrentTransformIntoVertices();
+    head.material = mat;
+    this.impHead = this.prep(head);
+    this.impHead.thinInstanceSetBuffer("matrix", this.impBuf, 16, false);
+    this.impHead.thinInstanceSetBuffer("color", this.headCol, 4, false);
 
     // Blob shadow: flat disc on the floor, soft alpha edge via vertex colours.
     const disc = CreateDisc(
@@ -255,10 +276,17 @@ export class ActorHub {
         writeMatrix(this.impBuf, ni, f.x, f.y, f.z, p, sy * p, p, 0);
         const [r, g, b] = hexToRgb(a.tintHex);
         this.impCol.set([r, g, b, 1], ni * 4);
+        const skin = Color3.FromHexString(
+          a.skinHex && /^#[0-9a-f]{6}$/i.test(a.skinHex)
+            ? a.skinHex
+            : "#D9A882",
+        );
+        this.headCol.set([skin.r, skin.g, skin.b, 1], ni * 4);
         ni++;
       }
     }
     this.flush(this.impostor, this.impBuf, ni, this.impCol);
+    this.flush(this.impHead, this.impBuf, ni, this.headCol);
     this.flush(this.blob, this.blobBuf, nb);
   }
 

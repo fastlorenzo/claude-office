@@ -54,6 +54,17 @@ export const ANISOTROPY_VALUES = [1, 2, 4, 8, 16] as const;
 export const TEXTURE_QUALITY_VALUES = ["low", "medium", "high"] as const;
 export const DEPTH_OF_FIELD_VALUES = ["off", "inspectOnly", "always"] as const;
 export const CHARACTER_DETAIL_VALUES = ["low", "medium", "high"] as const;
+/**
+ * Character cast: "mixed" = Rocketbox boss (close-up hero) + MPFB subagents,
+ * "custom" = the user's own pack in public/assets/characters-custom/.
+ */
+export const CHARACTER_CAST_VALUES = [
+  "mixed",
+  "rocketbox",
+  "mpfb",
+  "custom",
+] as const;
+export type CharacterCast = (typeof CHARACTER_CAST_VALUES)[number];
 export const LIVE_SCREENS_VALUES = ["off", "near", "all"] as const;
 export const SECURITY_FEEDS_VALUES = ["off", "low", "high"] as const;
 export const FPS_CAP_VALUES = [0, 30, 60, 120, 144] as const;
@@ -96,6 +107,7 @@ export interface GraphicsSettings {
 
   // ---- World detail ----
   characterDetail: "low" | "medium" | "high"; // LOD bias, animation rate, max skinned characters
+  characterCast: CharacterCast; // which character pack(s) to use (personal, not preset-controlled)
   liveScreens: "off" | "near" | "all"; // GUI monitor/whiteboard textures
   securityFeeds: "off" | "low" | "high"; // control-room RTT resolution / refresh
 
@@ -117,6 +129,7 @@ export const PERSONAL_KEYS = [
   "invertY",
   "showFps",
   "maxPixelRatio",
+  "characterCast",
 ] as const satisfies readonly (keyof GraphicsSettings)[];
 
 type PresetFields = Omit<
@@ -245,6 +258,7 @@ export const DEFAULT_PERSONAL: Pick<
   invertY: false,
   showFps: true,
   maxPixelRatio: 2,
+  characterCast: "mixed",
 };
 
 /** Ordered tiers the auto governor steps through (index 0 = best). */
@@ -360,6 +374,7 @@ export function parseGraphicsSettings(
     screenSpaceReflections: EFFECT_QUALITY_VALUES,
     depthOfField: DEPTH_OF_FIELD_VALUES,
     characterDetail: CHARACTER_DETAIL_VALUES,
+    characterCast: CHARACTER_CAST_VALUES,
     liveScreens: LIVE_SCREENS_VALUES,
     securityFeeds: SECURITY_FEEDS_VALUES,
     fpsCap: FPS_CAP_VALUES,

@@ -168,7 +168,7 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     roughness: 0.34,
     role: "floorMain",
     tint: [0.66, 0.63, 0.6],
-    roughFactor: 0.66,
+    roughFactor: 0.78, // satin: LED reflections read as soft streaks
     bumpLevel: 0.12,
     detail: 6,
   },
@@ -804,7 +804,7 @@ export class Materials {
     mat.detailMap.isEnabled = true;
     mat.detailMap.diffuseBlendLevel = 0.6;
     mat.detailMap.roughnessBlendLevel = 0.8;
-    mat.detailMap.bumpLevel = 0.35;
+    mat.detailMap.bumpLevel = 0.12;
   }
 
   private tex(

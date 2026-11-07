@@ -26,12 +26,6 @@ from app.models.campus import (  # noqa: E402  # type: ignore[import]
     CampusState,
     SessionPhase,
 )
-from app.models.telemetry import (  # noqa: E402  # type: ignore[import]
-    CampusStats,
-    RateLimitWindow,
-    SessionActivityStats,
-    SessionTelemetry,
-)
 from app.models.common import (  # noqa: E402  # type: ignore[import]
     BubbleContent,
     SpeechContent,
@@ -63,6 +57,12 @@ from app.models.sessions import (  # noqa: E402  # type: ignore[import]
     NewsItem,
     Session,
     WhiteboardData,
+)
+from app.models.telemetry import (  # noqa: E402  # type: ignore[import]
+    CampusStats,
+    RateLimitWindow,
+    SessionActivityStats,
+    SessionTelemetry,
 )
 from pydantic.json_schema import models_json_schema  # noqa: E402
 

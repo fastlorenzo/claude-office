@@ -32,7 +32,7 @@ import type { Lighting } from "@/engine/fx/Lighting";
 
 /** Street level relative to our floor (y = 0). */
 export const GROUND_Y = -172;
-const HAZE = new Color3(0.94, 1.0, 1.08);
+const HAZE = new Color3(0.86, 0.92, 1.0);
 const SUN = new Vector3(-0.5, -0.62, 0.6).normalize();
 
 interface Buf {
@@ -46,7 +46,7 @@ const newBuf = (): Buf => ({ pos: [], col: [], uv: [], idx: [] });
 
 /** Unlit shade for a face normal (sun side bright, shade side cool/dark). */
 function shade(nx: number, ny: number, nz: number): number {
-  if (ny > 0.5) return 1.0;
+  if (ny > 0.5) return 0.78; // roofs: gravel / plant, not white
   const sun = Math.max(
     0,
     -(nx * SUN.x + nz * SUN.z) / Math.hypot(SUN.x, SUN.z),
@@ -394,7 +394,7 @@ export class Skyline {
     const facade = newBuf();
     const roof = newBuf();
     const c = this.center;
-    const count = 2300;
+    const count = 3200;
     for (let i = 0; i < count; i++) {
       // Denser and taller near the centre (CBD), low sprawl outside.
       const t = Math.pow(r(), 0.75);
@@ -407,7 +407,13 @@ export class Skyline {
       const h = tall ? 120 + r() * 160 : 18 + r() * (40 + 110 * cbd);
       const w = 18 + r() * 34;
       const d = 18 + r() * 34;
-      const tint = PALETTE[Math.floor(r() * PALETTE.length)];
+      const base = PALETTE[Math.floor(r() * PALETTE.length)];
+      const k = 0.62 + r() * 0.22; // darker than the sky: reads at distance
+      const tint: [number, number, number] = [
+        base[0] * k,
+        base[1] * k,
+        base[2] * k,
+      ];
       towerBox(facade, roof, x, z, w, d, GROUND_Y, GROUND_Y + h, tint, 0);
     }
     // Ground disc (fan) under everything.
@@ -453,7 +459,6 @@ export class Skyline {
       const check = () => {
         if (this.disposed) return resolve();
         const ready = [sky, ...meshes].every((m) => m.isReady(true));
-        console.warn("[skyline:dbg] ready?", ready, [sky, ...meshes].map((m) => m.isReady(true)).join(","));
         if (ready) resolve();
         else setTimeout(check, 120);
       };
@@ -476,6 +481,14 @@ export class Skyline {
     const list = probe.renderList!;
     list.push(sky, ...meshes);
     const rtt = probe.cubeTexture;
+    // Render it as a custom render target (between the scene hooks below)
+    // instead of in the per-camera probe stage.
+    const pi = scene.reflectionProbes.indexOf(probe);
+    if (pi >= 0) scene.reflectionProbes.splice(pi, 1);
+    scene.customRenderTargets.push(rtt);
+    // Fog / far plane only around the render-target pass that bakes the cube
+    // (the interior never sees fog). Scene-level hooks are robust whatever the
+    // RTT bind order is for cube faces.
     let fog: {
       mode: number;
       density: number;
@@ -483,7 +496,11 @@ export class Skyline {
       maxZ: number;
       minZ: number;
     } | null = null;
-    rtt.onBeforeBindObservable.add(() => {
+    let rendered = false;
+    rtt.onAfterRenderObservable.add(() => {
+      rendered = true;
+    });
+    const before = scene.onBeforeRenderTargetsRenderObservable.add(() => {
       const cam = scene.activeCamera;
       fog = {
         mode: scene.fogMode,
@@ -492,17 +509,15 @@ export class Skyline {
         maxZ: cam?.maxZ ?? 220,
         minZ: cam?.minZ ?? 0.05,
       };
-      // Aerial perspective for the bake only (interior stays fog-free).
       scene.fogMode = Scene.FOGMODE_EXP2;
-      scene.fogDensity = 0.00042;
+      scene.fogDensity = 0.00034;
       scene.fogColor = HAZE.clone();
       if (cam) {
         cam.maxZ = 9000;
         cam.minZ = 1;
       }
     });
-    let finalizing = false;
-    rtt.onAfterUnbindObservable.add(() => {
+    const after = scene.onAfterRenderTargetsRenderObservable.add(() => {
       const cam = scene.activeCamera;
       if (fog) {
         scene.fogMode = fog.mode;
@@ -512,19 +527,17 @@ export class Skyline {
           cam.maxZ = fog.maxZ;
           cam.minZ = fog.minZ;
         }
+        fog = null;
       }
-      if (finalizing) return;
-      finalizing = true;
-      console.warn("[skyline:dbg] baked");
-      // All faces of this render call complete synchronously: finish after it.
-      setTimeout(() => {
-        if (this.disposed) return;
-        // Done: the cube becomes the skybox; the city geometry goes away.
-        this.lighting.setSkyTexture(rtt);
-        const idx = scene.reflectionProbes.indexOf(probe);
-        if (idx >= 0) scene.reflectionProbes.splice(idx, 1);
-        cleanup();
-      }, 0);
+      if (!rendered) return;
+      scene.onBeforeRenderTargetsRenderObservable.remove(before);
+      scene.onAfterRenderTargetsRenderObservable.remove(after);
+      // Done: the cube becomes the skybox; the city geometry goes away.
+      const ci = scene.customRenderTargets.indexOf(rtt);
+      if (ci >= 0) scene.customRenderTargets.splice(ci, 1);
+      if (this.disposed) return;
+      this.lighting.setSkyTexture(rtt);
+      cleanup();
     });
     this.probe = probe;
   }

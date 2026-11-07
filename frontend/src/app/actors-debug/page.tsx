@@ -7,8 +7,10 @@
  * Query params:
  *   ?pose=typing   force every row character into one pose
  *   ?t=1.2         freeze animation time (deterministic screenshots)
- *   ?cam=row       camera preset (overview|row|face|room|boss|agent|board|wall)
+ *   ?cam=row       camera preset (overview|row|face|room|boss|agent|board|wall|bossChar|agentChar)
  *   ?shot=1        render a fixed number of frames, then set title "READY"
+ *   ?rig=gltf      realistic characters (pack registry + CastRig)
+ *   ?cast=mpfb     character cast with rig=gltf (mixed|rocketbox|mpfb|custom)
  */
 
 import { useEffect, useRef } from "react";

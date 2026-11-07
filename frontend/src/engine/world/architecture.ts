@@ -34,6 +34,13 @@ export interface Opening {
   y1: number;
 }
 
+/** Clear height of glazed doors (rooms, control room), metres. */
+export const DOOR_H = 2.4;
+/** Header band over glazed doors (holds the recessed LED panel), metres. */
+export const DOOR_BAND = 0.24;
+/** Front face offset of the header band from the partition plane. */
+export const DOOR_BAND_FACE = 0.03;
+
 /** Frosted manifestation band on glazed partitions (height range, metres). */
 export const MANIFEST_Y0 = 1.0;
 export const MANIFEST_H = 0.3;
@@ -224,8 +231,8 @@ export function glassPartition(
 
   for (const [r0, r1] of runs) {
     const w = r1 - r0;
-    put(frame, (r0 + r1) / 2, 0.02, w, 0.04, 0.06); // base track
-    put(frame, (r0 + r1) / 2, height - 0.035, w, 0.07, 0.07); // head track
+    put(frame, (r0 + r1) / 2, 0.02, w, 0.04, 0.05); // base track
+    put(frame, (r0 + r1) / 2, height - 0.025, w, 0.05, 0.05); // head track
     put(glass, (r0 + r1) / 2, height / 2, w, height - 0.1, 0.012);
     if (opts.frostBand)
       put(
@@ -242,7 +249,7 @@ export function glassPartition(
         frame,
         r0 + (w * i) / n,
         height / 2,
-        i === 0 || i === n ? 0.04 : 0.025,
+        0.045, // slim 45 mm anodised profiles
         height,
         0.05,
       );
@@ -268,18 +275,15 @@ export function glassPartition(
   }
   if (door) {
     const w = door.a1 - door.a0;
-    // Recessed door frame: deep black jambs + head, transom glass above.
-    put(frame, door.a0 + 0.03, door.h / 2, 0.06, door.h, 0.16);
-    put(frame, door.a1 - 0.03, door.h / 2, 0.06, door.h, 0.16);
-    put(frame, (door.a0 + door.a1) / 2, door.h + 0.03, w, 0.06, 0.16);
-    put(
-      glass,
-      (door.a0 + door.a1) / 2,
-      (door.h + height) / 2,
-      w,
-      height - door.h - 0.08,
-      0.012,
-    );
+    const mid = (door.a0 + door.a1) / 2;
+    // Slim 50 mm jambs and a finished header band (LED panel recessed in it),
+    // transom glass above up to the head track: no box, no void.
+    put(frame, door.a0 + 0.025, door.h / 2, 0.05, door.h, 0.06);
+    put(frame, door.a1 - 0.025, door.h / 2, 0.05, door.h, 0.06);
+    put(frame, mid, door.h + DOOR_BAND / 2, w, DOOR_BAND, 0.06);
+    const t0 = door.h + DOOR_BAND;
+    const t1 = height - 0.05;
+    put(glass, mid, (t0 + t1) / 2, w, t1 - t0, 0.012);
     if (cols) {
       const cc = (door.a0 + door.a1) / 2;
       const hy = (door.h + height) / 2;
@@ -638,43 +642,6 @@ export function drawSpark(
   ctx.arc(0, 0, r * 0.16, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-}
-
-/** Lobby logo: orange spark + warm-white "Claude Office" wordmark on transparent. */
-export function drawLogo(ctx: Ctx2D, w: number, h: number): void {
-  const r = h * 0.36;
-  drawSpark(ctx, r + h * 0.08, h / 2, r, "#E8875F");
-  ctx.fillStyle = "#FFF6EC";
-  ctx.textBaseline = "middle";
-  ctx.font = `500 ${Math.round(h * 0.44)}px ${FONT_STACK}`;
-  ctx.fillText(
-    "Claude Office",
-    r * 2 + h * 0.3,
-    h / 2 + h * 0.02,
-    w - r * 2 - h * 0.35,
-  );
-}
-
-/**
- * Halo behind stand-off letters (the light they throw onto the wall):
- * soft warm glow shaped like the logo, used on an additive emissive plane.
- */
-export function drawLogoHalo(ctx: Ctx2D, w: number, h: number): void {
-  ctx.clearRect(0, 0, w, h);
-  ctx.filter = `blur(${Math.round(h * 0.06)}px)`;
-  const r = h * 0.3;
-  const pad = h * 0.18;
-  drawSpark(ctx, pad + r + h * 0.08, h / 2, r * 1.1, "rgba(217,119,87,0.95)");
-  ctx.fillStyle = "rgba(255,214,180,0.55)";
-  ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(h * 0.37)}px ${FONT_STACK}`;
-  ctx.fillText(
-    "Claude Office",
-    pad + r * 2 + h * 0.3,
-    h / 2,
-    w - r * 2 - pad * 2,
-  );
-  ctx.filter = "none";
 }
 
 /** Wayfinding sign (black plate, light text, optional arrow). */

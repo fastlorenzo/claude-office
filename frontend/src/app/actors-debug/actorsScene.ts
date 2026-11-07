@@ -22,11 +22,12 @@ import {
 import type { CharacterPose, RoomLayout } from "@/engine/contracts";
 import { allocateSlots, generateLayout } from "@/engine/layout/buildingLayout";
 import { MannequinRig } from "@/engine/characters/MannequinRig";
+import { CastRig, tryCreateGltfRig } from "@/engine/characters/CastRig";
 import {
-  GltfRig,
+  getPackRegistry,
   preloadCharacterPack,
-  tryCreateGltfRig,
-} from "@/engine/characters/GltfRig";
+} from "@/engine/characters/characterPacks";
+import { CHARACTER_CAST_VALUES } from "@/engine/fx/graphicsSettings";
 import type { CharacterRig } from "@/engine/characters/types";
 import { CharacterActor } from "@/engine/characters/CharacterActor";
 import { LabelLayer } from "@/engine/screens/LabelLayer";
@@ -85,7 +86,10 @@ export function startActorsScene(
   const freezeT = params.has("t") ? Number(params.get("t")) : null;
   const shot = params.get("shot") === "1";
   const realistic = params.get("rig") === "gltf";
-  if (realistic) void preloadCharacterPack(scene);
+  const startedAt = performance.now();
+  const castParam = params.get("cast");
+  const cast = CHARACTER_CAST_VALUES.find((c) => c === castParam);
+  if (realistic) void preloadCharacterPack(scene, cast);
 
   // --- Room layout (one east room) -----------------------------------------
   const layout = generateLayout(
@@ -186,6 +190,24 @@ export function startActorsScene(
     1.52,
   );
   presets.wall = facing({ x: -8, y: 1.9, z: 2 }, Math.PI / 2, 3.6, 1.52);
+  // Character close-ups: the room boss across the desk, a typing agent.
+  const seatAt = (p: { x: number; z: number }, y: number) => ({
+    x: p.x,
+    y,
+    z: p.z,
+  });
+  presets.bossChar = facing(
+    seatAt(room.bossDesk.seat, 1.05),
+    room.bossDesk.yaw + 0.35,
+    1.75,
+    1.38,
+  );
+  presets.agentChar = facing(
+    seatAt(room.desks[0].seat, 0.95),
+    room.desks[0].yaw + 0.7,
+    1.6,
+    1.25,
+  );
   const presetName = params.get("cam") ?? "overview";
   const preset = presets[presetName] ?? presets.overview;
   const camera = new ArcRotateCamera(
@@ -306,7 +328,7 @@ export function startActorsScene(
     const ropts = { id: `row-${i}`, boss, color: PALETTE[i % PALETTE.length] };
     const rig =
       tryCreateGltfRig(scene, ropts) ?? new MannequinRig(scene, ropts);
-    if (rig instanceof GltfRig)
+    if (rig instanceof CastRig)
       rig.meshesChanged = (ms) => ms.forEach(addCaster);
     const x = -4.2 + i * 1.2;
     rig.root.position.set(x, 0, -4);
@@ -547,7 +569,7 @@ export function startActorsScene(
       cellH: 0.92,
     },
   } satisfies BuildingLayout["controlRoom"];
-  const wall = new ControlRoomWall(scene, control, feeds);
+  const wall = new ControlRoomWall(scene, control.screenWall, feeds);
   wall.setSessions([
     { sessionId: "demo-0", label: "claude-office", status: "working" },
     { sessionId: "demo-1", label: "payments-api", status: "needs_you" },
@@ -612,7 +634,16 @@ export function startActorsScene(
     engine.runRenderLoop(() => {
       scene.render();
       frames++;
-      if (shot && frames === 40) document.title = "READY";
+      // shot.sh waits for "ready": 40 frames and (realistic rigs) every
+      // CastRig showing its pack avatar, or 60 s.
+      if (shot && frames >= 40 && document.title !== "ready") {
+        const reg = realistic ? getPackRegistry(scene) : null;
+        const rigsDone = [...(reg?.rigs ?? [])].every(
+          (r) => !(r instanceof CastRig) || r.shownKey !== "mannequin",
+        );
+        if (rigsDone || performance.now() - startedAt > 60000)
+          document.title = "ready";
+      }
     });
   });
 

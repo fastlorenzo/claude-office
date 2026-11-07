@@ -108,7 +108,10 @@ export class Interaction {
         ? Vector3.Distance(pick.pickedPoint, this.getEye())
         : pick.distance;
     }
-    if (!target || distance > INTERACT_RANGE) {
+    const range =
+      (mesh?.metadata as { interactRange?: number } | null)?.interactRange ??
+      INTERACT_RANGE;
+    if (!target || distance > range) {
       this.set(null, null);
       return;
     }

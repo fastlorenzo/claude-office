@@ -2,6 +2,7 @@ import type { TranslationKey } from "@/i18n/en";
 import {
   ANISOTROPY_VALUES,
   ANTI_ALIASING_VALUES,
+  CHARACTER_CAST_VALUES,
   CHARACTER_DETAIL_VALUES,
   DEPTH_OF_FIELD_VALUES,
   EFFECT_QUALITY_VALUES,
@@ -61,6 +62,10 @@ const VAL: Record<string, TranslationKey> = {
   always: "gfx.v.always",
   near: "gfx.v.near",
   all: "gfx.v.all",
+  mixed: "gfx.v.castMixed",
+  rocketbox: "gfx.v.castRocketbox",
+  mpfb: "gfx.v.castMpfb",
+  custom: "gfx.v.castCustom",
 };
 
 const opts = (values: readonly (string | number)[]): Option[] =>
@@ -198,6 +203,12 @@ export const SECTIONS: SectionDef[] = [
         kind: "segmented",
         impact: "med",
         options: opts(CHARACTER_DETAIL_VALUES),
+      },
+      {
+        key: "characterCast",
+        kind: "select",
+        impact: "med",
+        options: opts(CHARACTER_CAST_VALUES),
       },
       {
         key: "liveScreens",

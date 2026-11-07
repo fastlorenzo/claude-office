@@ -19,7 +19,7 @@ import {
   Vector3,
 } from "@/engine/babylon";
 import {
-  LAYOUT,
+  type BrandingOptions,
   type BuildingLayout,
   type CameraMode,
   type InteractionActionId,
@@ -63,15 +63,18 @@ import { Colliders } from "@/engine/physics/Colliders";
 import { loadHavok } from "@/engine/physics/havok";
 import { createPlayerAvatar } from "@/engine/player/Avatar";
 import { ActorHub } from "@/engine/characters/ActorHub";
-import { preloadCharacterPack } from "@/engine/characters/GltfRig";
+import {
+  preloadCharacterPack,
+  setCharacterCast,
+} from "@/engine/characters/characterPacks";
 import { Player, PLAYER } from "@/engine/player/Player";
-import { ControlRoomWall } from "@/engine/screens/ControlRoomWall";
 import { FeedScheduler } from "@/engine/screens/FeedScheduler";
 import { LabelLayer } from "@/engine/screens/LabelLayer";
 import { StaticOccluders } from "@/engine/screens/labelOcclusion";
 import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
+import { ControlRoom } from "@/engine/world/ControlRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
 import {
   halfFovFor,
@@ -117,7 +120,12 @@ function sameSlots(
 }
 
 function defaultDetail(): DetailSettings {
-  return { characterDetail: "high", liveScreens: "all", securityFeeds: "high" };
+  return {
+    characterDetail: "high",
+    characterCast: "mixed",
+    liveScreens: "all",
+    securityFeeds: "high",
+  };
 }
 
 function zoneKey(z: Zone): string {
@@ -140,7 +148,7 @@ class World implements IWorld {
   private interaction: Interaction | null = null;
   private building: Building | null = null;
   private feeds: FeedScheduler | null = null;
-  private controlWall: ControlRoomWall | null = null;
+  private controlRoom: ControlRoom | null = null;
   private readonly rooms = new Map<string, Room>();
   private slots: Map<string, RoomSlot> = new Map();
   private layout: BuildingLayout;
@@ -257,7 +265,10 @@ class World implements IWorld {
     try {
       // Registers the realistic character pack synchronously (actors created
       // from now on use GltfRig) and starts loading the animation libraries.
-      const characters = preloadCharacterPack(this.scene).catch((err) => {
+      const characters = preloadCharacterPack(
+        this.scene,
+        this.gfx.settings.characterCast,
+      ).catch((err) => {
         console.warn(
           "[world] character pack unavailable, using mannequins",
           err,
@@ -328,14 +339,9 @@ class World implements IWorld {
         fx: this.fx,
       });
       this.building.build(this.layout);
+      if (this.branding) this.building.setBranding(this.branding);
       this.feeds = new FeedScheduler(this.scene);
-      this.controlWall = new ControlRoomWall(
-        this.scene,
-        this.layout.controlRoom,
-        this.feeds,
-      );
-      for (const m of this.controlWall.getGlowMeshes())
-        if (/rim/i.test(m.name)) this.fx.addGlow(m);
+      this.buildControlRoom();
       this.updateFixtures();
       this.events.emit("layout", this.layout);
       this.setupLod();
@@ -370,7 +376,7 @@ class World implements IWorld {
     this.input.dispose();
     for (const r of this.rooms.values()) r.dispose();
     this.rooms.clear();
-    this.controlWall?.dispose();
+    this.controlRoom?.dispose();
     this.feeds?.dispose();
     this.building?.dispose();
     this.interaction?.dispose();
@@ -420,16 +426,8 @@ class World implements IWorld {
       const baysChanged = layout.bays !== this.layout.bays;
       this.layout = layout;
       this.building?.build(layout);
-      if (baysChanged && this.feeds) {
-        this.controlWall?.dispose();
-        this.controlWall = new ControlRoomWall(
-          this.scene,
-          layout.controlRoom,
-          this.feeds,
-        );
-        for (const m of this.controlWall.getGlowMeshes())
-          if (/rim/i.test(m.name)) this.fx?.addGlow(m);
-      }
+      if (baysChanged && this.feeds) this.buildControlRoom();
+      else this.controlRoom?.setLayout(layout);
       this.events.emit("layout", layout);
     }
 
@@ -441,6 +439,36 @@ class World implements IWorld {
     // Art: door signs read summary / refs / phase straight from the campus
     // session (RoomSign redraws only when its strings change).
     for (const cs of input.campus) this.rooms.get(cs.sessionId)?.setCampus(cs);
+    this.building?.setCampus(input.campus); // control-room LED panel counts
+    this.pushControlRoom();
+  }
+
+  /** Control-room interior on top of the current shell (rebuilt with it). */
+  private buildControlRoom(): void {
+    if (!this.building || !this.feeds) return;
+    this.controlRoom?.dispose();
+    this.controlRoom = new ControlRoom(
+      {
+        scene: this.scene,
+        materials: this.materials,
+        assets: this.assets,
+        colliders: this.colliders,
+        lighting: this.lighting,
+        fx: this.fx,
+        feeds: this.feeds,
+      },
+      this.layout,
+      this.building.controlShellMeshes,
+    );
+    this.pushControlRoom();
+  }
+
+  private pushControlRoom(): void {
+    const input = this.lastInput;
+    if (!this.controlRoom || !input) return;
+    const labels = new Map<string, string>();
+    for (const [id, r] of this.rooms) labels.set(id, r.currentLabel);
+    this.controlRoom.setData(input.campus, input.stats, labels);
   }
 
   private applyOps(ops: SyncOp[]): void {
@@ -516,23 +544,10 @@ class World implements IWorld {
     }
     this.firstSyncDone = true;
     if (roomsChanged) this.updateFixtures();
-    if (wallDirty) this.refreshControlWall();
+    if (wallDirty) this.pushControlRoom();
   }
 
   private firstSyncDone = false;
-
-  private refreshControlWall(): void {
-    if (!this.controlWall) return;
-    const list = [...this.rooms.values()]
-      .sort((a, b) => a.roomLayout.slot.index - b.roomLayout.slot.index)
-      .slice(0, LAYOUT.MAX_FEEDS)
-      .map((r) => ({
-        sessionId: r.sessionId,
-        label: r.currentLabel,
-        status: r.currentStatus,
-      }));
-    this.controlWall.setSessions(list);
-  }
 
   private roomCtx(): RoomContext {
     return {
@@ -571,17 +586,19 @@ class World implements IWorld {
     const eye = this.player.camera.globalPosition;
     this.assets.flush();
     for (const r of this.rooms.values()) r.update(dt, eye);
+    this.building?.update(dt); // LED panel tickers (art)
     if (this.gfx.dynamicLights) this.lighting.update(dt, this.player.position);
     this.interaction?.update(now);
 
     const zone = roomAt(this.layout, this.player.position);
+    const nearControl =
+      zone.kind === "control" ||
+      this.player.position.z > this.layout.hall.length - 6;
     if (this.feeds) {
-      const nearControl =
-        zone.kind === "control" ||
-        this.player.position.z > this.layout.hall.length - 6;
       this.feeds.setActive(nearControl);
       this.feeds.update();
     }
+    this.controlRoom?.update(dt, nearControl);
 
     this.updateLod(now, zone);
 
@@ -663,14 +680,21 @@ class World implements IWorld {
     this.gfx.set(settings);
   }
 
+  private branding: BrandingOptions | null = null;
+  setBranding(opts: BrandingOptions): void {
+    this.branding = opts;
+    this.building?.setBranding(opts);
+  }
+
   /** Characters / screens / feeds detail fan-out (each target is feature-detected). */
   private detail: DetailSettings | null = null;
   private setDetail(d: DetailSettings): void {
     this.detail = d;
     type Detailed = { setDetail?(d: DetailSettings): void };
-    for (const t of [this.feeds, this.controlWall, ...this.rooms.values()])
+    for (const t of [this.feeds, this.controlRoom, ...this.rooms.values()])
       (t as Detailed | null)?.setDetail?.(d);
     this.actorHub?.setDetail(d.characterDetail);
+    if (d.characterCast) setCharacterCast(this.scene, d.characterCast);
     this.screenHub?.setDetail(d.liveScreens);
   }
 
@@ -754,10 +778,10 @@ class World implements IWorld {
       this.screenHub.update(eye);
     }
     this.actorHub.update(eye);
-    if (this.controlWall) {
+    if (this.controlRoom) {
       const o = this.layout.controlRoom.screenWall.origin;
       const d = Math.hypot(eye.x - o.x, eye.z - o.z);
-      this.controlWall.setFar(!feedMode && d > 22);
+      this.controlRoom.setFar(!feedMode && d > 22);
     }
     if (now - this.lastDbgAt >= 500) {
       this.lastDbgAt = now;
