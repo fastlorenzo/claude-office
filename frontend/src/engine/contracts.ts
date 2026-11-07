@@ -201,6 +201,8 @@ export interface CheckRun {
   url?: string | null;
   kind?: CheckKind;
   attempt?: number | null;
+  /** Failed at least once, then passed on a re-run. */
+  flaky?: boolean;
 }
 
 export interface CheckSummary {
@@ -238,6 +240,12 @@ export interface PullRequestInfo {
   labels?: PrLabel[];
   /** dependabot / renovate / github-actions author. */
   bot?: boolean;
+  /** mergeable == CONFLICTING. */
+  conflict?: boolean;
+  /** Open and not updated for more than the backend's CI_STALE_PR_DAYS. */
+  stale?: boolean;
+  /** Any check on this PR is flaky. */
+  flaky?: boolean;
   createdAt?: string | null;
   mergedAt?: string | null;
   closedAt?: string | null;
@@ -256,6 +264,8 @@ export interface PipelineRun {
   event?: string | null;
   headSha?: string | null;
   attempt?: number | null;
+  /** Succeeded, but only on attempt > 1. */
+  flaky?: boolean;
 }
 
 export interface ReleaseInfo {
@@ -271,11 +281,17 @@ export interface LocalGitState {
   ahead: number;
   behind: number;
   dirtyFiles: number;
+  /** Commits on local branches that exist on no remote. */
+  unpushed?: number;
+  /** Checked-out branches across the worktrees. */
+  branches?: string[];
   lastCommit?: { hash: string; message: string; at: string } | null;
   worktrees?: {
     path: string;
     branch: string | null;
     sessionId?: string | null;
+    dirtyFiles?: number;
+    ahead?: number;
   }[];
 }
 
@@ -299,6 +315,8 @@ export interface CampusProject {
   stale?: boolean;
   ciError?: string | null;
   fetchedAt?: string | null;
+  /** Shown because of the pinned-repos setting (may have no live session). */
+  pinned?: boolean;
 }
 
 export interface CampusState {

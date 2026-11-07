@@ -153,6 +153,7 @@ export type Durations = number | null;
 export type Url1 = string | null;
 export type Kind = "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
 export type Attempt = number | null;
+export type Flaky = boolean;
 export type Runs = CheckRun[];
 export type Sessionid = string | null;
 export type Updatedat = string;
@@ -164,6 +165,9 @@ export type Name3 = string;
 export type Color2 = string | null;
 export type Labels = PrLabel[];
 export type Bot = boolean;
+export type Conflict = boolean;
+export type Stale = boolean;
+export type Flaky1 = boolean;
 export type Createdat = string | null;
 export type Mergedat = string | null;
 export type Closedat = string | null;
@@ -179,6 +183,7 @@ export type Url2 = string | null;
 export type Event = string | null;
 export type Headsha = string | null;
 export type Attempt1 = number | null;
+export type Flaky2 = boolean;
 export type Pipelines = PipelineRun[];
 export type Ciavailable = boolean;
 export type Updatedat1 = string;
@@ -193,16 +198,21 @@ export type Branch2 = string | null;
 export type Ahead = number;
 export type Behind = number;
 export type Dirtyfiles = number;
+export type Unpushed = number;
+export type Branches = string[];
 export type Hash = string;
 export type Message2 = string;
 export type At = string;
 export type Path = string;
 export type Branch3 = string | null;
 export type Sessionid1 = string | null;
+export type Dirtyfiles1 = number;
+export type Ahead1 = number;
 export type Worktrees = LocalWorktree[];
-export type Stale = boolean;
+export type Stale1 = boolean;
 export type Cierror = string | null;
 export type Fetchedat = string | null;
+export type Pinned = boolean;
 export type Sessionid2 = string;
 export type Bucket = "needs_you" | "working" | "done";
 export type Agents = Agent[];
@@ -477,7 +487,7 @@ export type Branch4 = string;
 /**
  * Commits ahead of remote
  */
-export type Ahead1 = number;
+export type Ahead2 = number;
 /**
  * Commits behind remote
  */
@@ -826,9 +836,10 @@ export interface CampusProject {
   mainHealth?: Mainhealth;
   releases?: Releases;
   localGit?: LocalGitState | null;
-  stale?: Stale;
+  stale?: Stale1;
   ciError?: Cierror;
   fetchedAt?: Fetchedat;
+  pinned?: Pinned;
   [k: string]: unknown;
 }
 /**
@@ -854,6 +865,9 @@ export interface PullRequestInfo {
   changedFiles?: Changedfiles;
   labels?: Labels;
   bot?: Bot;
+  conflict?: Conflict;
+  stale?: Stale;
+  flaky?: Flaky1;
   createdAt?: Createdat;
   mergedAt?: Mergedat;
   closedAt?: Closedat;
@@ -884,6 +898,7 @@ export interface CheckRun {
   url?: Url1;
   kind?: Kind;
   attempt?: Attempt;
+  flaky?: Flaky;
   [k: string]: unknown;
 }
 /**
@@ -911,6 +926,7 @@ export interface PipelineRun {
   event?: Event;
   headSha?: Headsha;
   attempt?: Attempt1;
+  flaky?: Flaky2;
   [k: string]: unknown;
 }
 /**
@@ -934,6 +950,8 @@ export interface LocalGitState {
   ahead?: Ahead;
   behind?: Behind;
   dirtyFiles?: Dirtyfiles;
+  unpushed?: Unpushed;
+  branches?: Branches;
   lastCommit?: LocalCommit | null;
   worktrees?: Worktrees;
   [k: string]: unknown;
@@ -956,6 +974,8 @@ export interface LocalWorktree {
   path: Path;
   branch?: Branch3;
   sessionId?: Sessionid1;
+  dirtyFiles?: Dirtyfiles1;
+  ahead?: Ahead1;
   [k: string]: unknown;
 }
 /**
@@ -1383,7 +1403,7 @@ export interface Fileedits {
  */
 export interface GitStatus {
   branch: Branch4;
-  ahead?: Ahead1;
+  ahead?: Ahead2;
   behind?: Behind1;
   changed_files?: ChangedFiles;
   commits?: Commits;

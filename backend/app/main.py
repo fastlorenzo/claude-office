@@ -16,10 +16,12 @@ from rich.logging import RichHandler
 from sqlalchemy import delete, select, update
 
 from app.api.middleware import ApiKeyMiddleware, LocalhostOnlyMiddleware
-from app.api.routes import events, floors, preferences, sessions, telemetry, websockets
+from app.api.routes import ci, events, floors, preferences, sessions, telemetry, websockets
+from app.api.routes.ci import load_pinned_repos
 from app.config import get_settings
 from app.core.ci_poller import get_ci_poller
 from app.core.event_processor import EventProcessor, get_event_processor
+from app.core.local_git import get_local_git
 from app.core.summary_service import get_summary_service
 from app.db.database import Base, get_engine
 from app.db.migrate import migrate_schema
@@ -96,20 +98,30 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     )
 
     ci_task: asyncio.Task[None] | None = None
+    git_task: asyncio.Task[None] | None = None
     if settings.CI_POLL_ENABLED:
         ci_poller = get_ci_poller()
         ci_poller.configure(
             on_change=get_event_processor().request_campus_broadcast,
             interval=settings.CI_POLL_INTERVAL_SECONDS,
+            releases_limit=settings.CI_RELEASES_LIMIT,
         )
+        ci_poller.set_pinned(await load_pinned_repos())
         ci_task = asyncio.create_task(ci_poller.run())
+    local_git = get_local_git()
+    local_git.configure(
+        on_change=get_event_processor().request_campus_broadcast,
+        ttl=settings.LOCAL_GIT_TTL_SECONDS,
+    )
+    git_task = asyncio.create_task(local_git.run())
 
     yield
 
-    if ci_task is not None:
-        ci_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await ci_task
+    for task in (ci_task, git_task):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
     liveness.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await liveness
@@ -232,6 +244,7 @@ app.add_middleware(
 
 app.include_router(events.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(floors.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(ci.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(preferences.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(telemetry.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(sessions.router, prefix=f"{settings.API_V1_STR}")

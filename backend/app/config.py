@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # CI/CD polling through the gh CLI (only while a /ws/campus client is connected).
     CI_POLL_ENABLED: bool = True
     CI_POLL_INTERVAL_SECONDS: float = 60.0
+    # Repos ("owner/name", comma separated) always shown as factory lines. The
+    # persisted ``ci_pinned_repos`` preference (PUT /api/v1/ci/pinned-repos) wins.
+    CI_PINNED_REPOS: str = ""
+    CI_RELEASES_LIMIT: int = 5
+    CI_STALE_PR_DAYS: int = 14
+    # Local git intake (no network): per-root cache TTL.
+    LOCAL_GIT_TTL_SECONDS: float = 30.0
 
     DATABASE_URL: str = f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}"
     GIT_POLL_INTERVAL: int = 5

@@ -15,7 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.config import get_settings
-from app.core.ci_poller import get_ci_poller
+from app.core.ci_poller import derive_pr_flags, get_ci_poller
+from app.core.local_git import get_local_git
 from app.core.projects import ProjectRef, get_project_ref, resolve_project
 from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
@@ -300,44 +301,70 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
 
 
 def build_projects(sessions: list[CampusSession], now: datetime) -> list[CampusProject]:
-    """Group live sessions by project; attach cached CI data (no IO)."""
+    """Group live sessions by project; attach cached CI + local git data (no IO).
+
+    Pinned repos (settings) always get a project, even without a live session.
+    """
     groups: dict[str, list[CampusSession]] = {}
     for cs in sessions:
         if cs.project_id and not cs.ended:
             groups.setdefault(cs.project_id, []).append(cs)
     poller = get_ci_poller()
+    intake = get_local_git()
+    stale_days = get_settings().CI_STALE_PR_DAYS
+    pinned = set(poller.pinned)
     out: list[CampusProject] = []
-    for pid in sorted(groups):
-        members = groups[pid]
+    for pid in sorted(set(groups) | pinned):
+        members = groups.get(pid, [])
         ref: ProjectRef | None = get_project_ref(pid)
-        repo = ref.repo if ref else None
+        repo = ref.repo if ref else (pid if pid in pinned else None)
         ci = poller.note_repo(repo, ref.default_branch if ref else None) if repo else None
+        default_branch = (ref.default_branch if ref else None) or (
+            ci.default_branch if ci else None
+        )
         available = bool(ci and ci.available)
         by_branch = {m.git_branch: m.session_id for m in members if m.git_branch}
         prs: list[PullRequestInfo] = []
         if ci and available:
             prs = [
-                pr.model_copy(update={"session_id": by_branch.get(pr.branch)})
+                derive_pr_flags(pr, now, stale_days).model_copy(
+                    update={"session_id": by_branch.get(pr.branch)}
+                )
                 for pr in ci.pull_requests
             ]
-        updated = max(
-            (m.last_updated for m in members),
-            default=now,
-        )
+        local = intake.note_root(ref.root) if ref else None
+        if local is not None:
+            local = local.model_copy(
+                update={
+                    "worktrees": [
+                        w.model_copy(update={"session_id": by_branch.get(w.branch or "")})
+                        for w in local.worktrees
+                    ]
+                }
+            )
+        updated = max((m.last_updated for m in members), default=now)
         out.append(
             CampusProject(
                 id=pid,
-                name=ref.name if ref else (members[0].project or pid),
+                name=ref.name
+                if ref
+                else ((members[0].project if members else None) or pid.split("/")[-1]),
                 repo=repo,
-                default_branch=ref.default_branch if ref else None,
+                default_branch=default_branch,
                 session_ids=[m.session_id for m in members],
                 pull_requests=prs,
                 pipelines=list(ci.pipelines) if ci and available else [],
                 ci_available=available,
                 updated_at=updated.isoformat(),
-                main_health=_main_health(ci.pipelines, ref.default_branch if ref else None)
+                main_health=_main_health(ci.pipelines, default_branch)
                 if ci and available
                 else "none",
+                releases=list(ci.releases) if ci and available else [],
+                local_git=local,
+                stale=bool(ci and ci.stale),
+                ci_error=ci.error if ci else None,
+                fetched_at=ci.fetched_at if ci else None,
+                pinned=pid in pinned,
             )
         )
     return out

@@ -37,7 +37,8 @@ class CheckRun(BaseModel):
     duration_s: float | None = None
     url: str | None = None
     kind: CheckKind = "other"
-    attempt: int | None = None
+    attempt: int | None = None  # >1 when the same check name ran more than once
+    flaky: bool = False  # failed at least once, then passed on a re-run
 
 
 class CheckSummary(BaseModel):
@@ -79,6 +80,9 @@ class PullRequestInfo(BaseModel):
     changed_files: int | None = None
     labels: list[PrLabel] = Field(default_factory=lambda: cast(list[PrLabel], []))
     bot: bool = False  # dependabot / renovate / github-actions author
+    conflict: bool = False  # mergeable == CONFLICTING
+    stale: bool = False  # open and not updated for more than CI_STALE_PR_DAYS
+    flaky: bool = False  # any check on this PR is flaky
     created_at: str | None = None
     merged_at: str | None = None
     closed_at: str | None = None
@@ -98,6 +102,7 @@ class PipelineRun(BaseModel):
     event: str | None = None
     head_sha: str | None = None
     attempt: int | None = None
+    flaky: bool = False  # succeeded, but only on attempt > 1
 
 
 class ReleaseInfo(BaseModel):
@@ -124,6 +129,8 @@ class LocalWorktree(BaseModel):
     path: str
     branch: str | None = None
     session_id: str | None = None
+    dirty_files: int = 0
+    ahead: int = 0
 
 
 class LocalGitState(BaseModel):
@@ -133,6 +140,8 @@ class LocalGitState(BaseModel):
     ahead: int = 0
     behind: int = 0
     dirty_files: int = 0
+    unpushed: int = 0  # commits on local branches that exist on no remote
+    branches: list[str] = Field(default_factory=lambda: cast(list[str], []))  # checked-out
     last_commit: LocalCommit | None = None
     worktrees: list[LocalWorktree] = Field(default_factory=lambda: cast(list[LocalWorktree], []))
 
@@ -157,3 +166,4 @@ class CampusProject(BaseModel):
     stale: bool = False  # last fetch failed, data is last-good
     ci_error: str | None = None
     fetched_at: str | None = None
+    pinned: bool = False  # shown because of the pinned-repos setting

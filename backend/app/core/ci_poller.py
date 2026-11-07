@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -28,6 +28,7 @@ from app.models.ci import (
     PipelineRun,
     PrLabel,
     PullRequestInfo,
+    ReleaseInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,11 +36,17 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CiPoller",
     "GhResult",
+    "RateLimitError",
     "RepoCi",
+    "derive_pr_flags",
+    "map_releases",
+    "normalize_repo",
+    "parse_rate_limit",
     "get_ci_poller",
     "map_pull_request",
     "map_pipeline_run",
     "rollup_checks",
+    "short_error",
     "reset_ci_poller",
 ]
 
@@ -55,6 +62,16 @@ MAX_CHECK_RUNS = 12
 MAX_PIPELINES = 10
 MAX_PRS = 20
 RECENT_PR_WINDOW = timedelta(hours=24)
+RATE_CHECK_S = 300.0  # how often to read `gh api rate_limit`
+RATE_LOW_FRACTION = 0.10  # back off below 10 % remaining ...
+RATE_LOW_FLOOR = 50  # ... or below this many calls
+RATE_MAX_PAUSE_S = 3600.0
+FAST_DIVISOR = 3.0  # 60 s -> 20 s while checks are running
+IDLE_MULTIPLIER = 3.0  # 60 s -> 180 s when nothing is open or pending
+RELEASE_EVERY = 10  # refresh releases every N poll intervals
+MAX_PINNED = 20
+RELEASE_FIELDS = "tagName,name,publishedAt,isPrerelease,isDraft"
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 PR_FIELDS = (
     "number,title,headRefName,author,url,isDraft,state,reviewDecision,mergeable,"
@@ -83,6 +100,10 @@ class GhMissingError(Exception):
 
 class GhAuthError(Exception):
     """``gh`` is not authenticated."""
+
+
+class RateLimitError(Exception):
+    """GitHub says the API rate limit is exhausted."""
 
 
 class RepoGoneError(Exception):
@@ -182,7 +203,7 @@ def rollup_checks(entries: Any) -> CheckSummary:
     cancelled run next to successes does not mask them (it is usually a
     superseded run), so ``cancelled`` only wins when nothing succeeded.
     """
-    latest: dict[str, tuple[datetime | None, CheckRun]] = {}
+    history: dict[str, list[tuple[datetime | None, CheckRun]]] = {}
     if isinstance(entries, list):
         for raw in cast(list[Any], entries):
             if not isinstance(raw, dict):
@@ -214,11 +235,21 @@ def rollup_checks(entries: Any) -> CheckSummary:
                     url=_s(e.get("detailsUrl")),
                     kind=classify_check(name),
                 )
-            prev = latest.get(name)
-            if prev is None or (started or datetime.min.replace(tzinfo=UTC)) >= (
-                prev[0] or datetime.min.replace(tzinfo=UTC)
-            ):
-                latest[name] = (started, run)
+            history.setdefault(name, []).append((started, run))
+
+    # Re-runs of one name: the latest start wins; a success after an earlier
+    # failure is flagged flaky and carries the attempt count.
+    floor = datetime.min.replace(tzinfo=UTC)
+    latest: dict[str, tuple[datetime | None, CheckRun]] = {}
+    for name, hist in history.items():
+        ordered = sorted(enumerate(hist), key=lambda t: (t[1][0] or floor, t[0]))
+        last_started, last_run = ordered[-1][1]
+        if len(ordered) > 1:
+            last_run.attempt = len(ordered)
+            last_run.flaky = last_run.state == "success" and any(
+                r.state == "failure" for _, (_, r) in ordered[:-1]
+            )
+        latest[name] = (last_started, last_run)
 
     runs = [r for _, r in latest.values()]
     counts: dict[CheckState, int] = {}
@@ -299,7 +330,10 @@ def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
     mergeable = {"MERGEABLE": "mergeable", "CONFLICTING": "conflicting", "UNKNOWN": "unknown"}.get(
         str(raw.get("mergeable") or "").upper()
     )
+    checks = rollup_checks(raw.get("statusCheckRollup"))
     return PullRequestInfo(
+        conflict=mergeable == "conflicting",
+        flaky=any(r.flaky for r in checks.runs),
         base_branch=_s(raw.get("baseRefName")),
         additions=_int(raw.get("additions")),
         deletions=_int(raw.get("deletions")),
@@ -318,9 +352,77 @@ def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
         state=state,  # type: ignore[arg-type]
         review_decision=review,  # type: ignore[arg-type]
         mergeable=mergeable,  # type: ignore[arg-type]
-        checks=rollup_checks(raw.get("statusCheckRollup")),
+        checks=checks,
         updated_at=_s(raw.get("updatedAt")) or "",
     )
+
+
+def derive_pr_flags(pr: PullRequestInfo, now: datetime, stale_days: int) -> PullRequestInfo:
+    """Recompute the time-dependent ``stale`` flag (the rest is fixed at map time)."""
+    updated = _parse_dt(pr.updated_at)
+    stale = (
+        pr.state == "open" and updated is not None and now - updated > timedelta(days=stale_days)
+    )
+    return pr if pr.stale == stale else pr.model_copy(update={"stale": stale})
+
+
+def map_releases(raws: Any, repo: str, limit: int) -> list[ReleaseInfo]:
+    """``gh release list --json`` -> newest-first ReleaseInfo (drafts skipped)."""
+    out: list[ReleaseInfo] = []
+    if not isinstance(raws, list):
+        return out
+    for item in cast(list[Any], raws):
+        if not isinstance(item, dict):
+            continue
+        d = cast(dict[str, Any], item)
+        tag = _s(d.get("tagName"))
+        if not tag or d.get("isDraft") is True:
+            continue
+        out.append(
+            ReleaseInfo(
+                tag=tag,
+                name=_s(d.get("name")),
+                published_at=_s(d.get("publishedAt")),
+                prerelease=bool(d.get("isPrerelease")),
+                url=f"https://github.com/{repo}/releases/tag/{tag}",
+            )
+        )
+    out.sort(key=lambda r: r.published_at or "", reverse=True)
+    return out[: max(limit, 0)]
+
+
+def normalize_repo(value: Any) -> str | None:
+    """``owner/name`` (trimmed), or None when it is not a plausible GitHub slug."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip().removeprefix("https://github.com/").strip("/")
+    return v if _REPO_RE.match(v) else None
+
+
+def parse_rate_limit(data: Any) -> tuple[int, int, float] | None:
+    """``gh api rate_limit`` -> (remaining, limit, reset_epoch) of the scarcer bucket.
+
+    ``gh pr list``/``run list`` use GraphQL and REST respectively, so the lower
+    remaining fraction of ``core`` and ``graphql`` decides.
+    """
+    if not isinstance(data, dict):
+        return None
+    res = cast(dict[str, Any], data).get("resources")
+    if not isinstance(res, dict):
+        return None
+    worst: tuple[int, int, float] | None = None
+    for key in ("core", "graphql"):
+        b = cast(dict[str, Any], res).get(key)
+        if not isinstance(b, dict):
+            continue
+        bd = cast(dict[str, Any], b)
+        rem, lim, reset = bd.get("remaining"), bd.get("limit"), bd.get("reset")
+        if not isinstance(rem, int) or not isinstance(lim, int) or lim <= 0:
+            continue
+        r = float(reset) if isinstance(reset, (int, float)) else 0.0
+        if worst is None or rem / lim < worst[0] / worst[1]:
+            worst = (rem, lim, r)
+    return worst
 
 
 def map_pull_requests(raws: Any, now: datetime) -> list[PullRequestInfo]:
@@ -377,6 +479,7 @@ def map_pipeline_run(raw: dict[str, Any]) -> PipelineRun | None:
         event=_s(raw.get("event")),
         head_sha=_s(raw.get("headSha")),
         attempt=_int(raw.get("attempt")),
+        flaky=state == "success" and (_int(raw.get("attempt")) or 1) > 1,
         state=state,
         started_at=_s(raw.get("createdAt")),
         duration_s=_duration(created, updated)
@@ -426,6 +529,11 @@ class RepoCi:
     next_at: float = 0.0  # monotonic
     last_seen: float = 0.0  # monotonic, last time a campus build asked for this repo
     default_branch: str | None = None
+    releases: list[ReleaseInfo] = field(default_factory=lambda: cast(list[ReleaseInfo], []))
+    releases_next_at: float = 0.0
+    stale: bool = False  # last fetch failed; data is last-good
+    error: str | None = None  # short human message
+    fetched_at: str | None = None  # ISO time of the last successful fetch
 
 
 async def _run_gh(args: list[str]) -> GhResult:
@@ -454,6 +562,8 @@ async def _run_gh(args: list[str]) -> GhResult:
 
 def _classify_failure(res: GhResult) -> Exception:
     err = res.stderr.lower()
+    if "rate limit" in err:
+        return RateLimitError(res.stderr.strip()[:200])
     if (
         "auth login" in err
         or "not logged in" in err
@@ -466,6 +576,20 @@ def _classify_failure(res: GhResult) -> Exception:
     return RuntimeError(res.stderr.strip()[:200] or f"gh exited {res.returncode}")
 
 
+def short_error(exc: BaseException) -> str:
+    """One short human line for ``ciError`` (never a stack trace or a long stderr)."""
+    if isinstance(exc, TimeoutError):
+        return "gh timed out"
+    if isinstance(exc, RateLimitError):
+        return "GitHub rate limit reached"
+    text = str(exc).strip()
+    m = re.search(r"HTTP (\d{3})", text)
+    if m:
+        return f"GitHub returned HTTP {m.group(1)}"
+    first = text.splitlines()[0] if text else ""
+    return f"gh failed: {first[:60]}" if first else "gh failed"
+
+
 class CiPoller:
     def __init__(
         self,
@@ -474,22 +598,56 @@ class CiPoller:
         is_watched: Callable[[], bool] | None = None,
         on_change: Callable[[], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
         interval: float = POLL_INTERVAL_S,
+        releases_limit: int = 0,
     ) -> None:
         self._run_gh = run_gh or _run_gh
         self._is_watched = is_watched or (lambda: False)
         self._on_change = on_change
         self._clock = clock
+        self._wall = wall_clock
         self._interval = interval
+        self._releases_limit = releases_limit
         self._repos: dict[str, RepoCi] = {}
+        self._pinned: tuple[str, ...] = ()
         self._sem = asyncio.Semaphore(MAX_CONCURRENT_GH)
         self._gh_down_until = 0.0
+        self._rate_pause_until = 0.0
+        self._rate_next_check: float | None = None  # armed on the first watched tick
+        self.rate_remaining: int | None = None
         self.gh_available: bool | None = None  # None until the first call
         self._warned: set[str] = set()
 
-    def configure(self, *, on_change: Callable[[], None] | None, interval: float) -> None:
+    def configure(
+        self,
+        *,
+        on_change: Callable[[], None] | None,
+        interval: float,
+        releases_limit: int | None = None,
+    ) -> None:
         self._on_change = on_change
         self._interval = interval
+        if releases_limit is not None:
+            self._releases_limit = releases_limit
+
+    # -- pinned repos --------------------------------------------------------
+
+    @property
+    def pinned(self) -> tuple[str, ...]:
+        return self._pinned
+
+    def set_pinned(self, repos: Iterable[Any]) -> tuple[str, ...]:
+        """Replace the pinned set (normalised, de-duplicated, capped). Returns it."""
+        out: list[str] = []
+        for r in repos:
+            n = normalize_repo(r)
+            if n and n not in out:
+                out.append(n)
+        self._pinned = tuple(out[:MAX_PINNED])
+        for repo in self._pinned:
+            self.note_repo(repo, None)
+        return self._pinned
 
     # -- read side (called while building the campus; no IO) ----------------
 
@@ -507,15 +665,34 @@ class CiPoller:
 
     # -- polling -------------------------------------------------------------
 
+    def next_interval(self, entry: RepoCi) -> float:
+        """Faster while checks run, slower when nothing is open or pending."""
+        pending = any(p.state == "open" and p.checks.pending > 0 for p in entry.pull_requests)
+        pending = pending or any(r.state in ("running", "queued") for r in entry.pipelines[:3])
+        if pending:
+            return max(5.0, self._interval / FAST_DIVISOR)
+        if not any(p.state == "open" for p in entry.pull_requests):
+            return self._interval * IDLE_MULTIPLIER
+        return self._interval
+
     async def tick(self) -> int:
         """Poll every due repo (only when a campus client is watching). Returns #polled."""
         if not self._is_watched():
             return 0
         now = self._clock()
-        if now < self._gh_down_until:
+        if now < self._gh_down_until or now < self._rate_pause_until:
             return 0
+        for repo in self._pinned:  # pinned repos are never forgotten
+            self.note_repo(repo, None)
         for repo in [r for r, e in self._repos.items() if now - e.last_seen > REPO_FORGET_S]:
             del self._repos[repo]
+        if self._rate_next_check is None:
+            self._rate_next_check = now + RATE_CHECK_S
+        elif now >= self._rate_next_check:
+            self._rate_next_check = now + RATE_CHECK_S
+            await self._check_rate_limit()
+            if self._clock() < self._rate_pause_until:
+                return 0
         due = [r for r, e in self._repos.items() if e.next_at <= now]
         if not due:
             return 0
@@ -534,13 +711,54 @@ class CiPoller:
         except ValueError as exc:
             raise RuntimeError("gh returned invalid JSON") from exc
 
+    async def _check_rate_limit(self) -> None:
+        """Read ``gh api rate_limit`` (free, not counted) and pause when nearly exhausted."""
+        try:
+            parsed = parse_rate_limit(await self._call(["api", "rate_limit"]))
+        except (TimeoutError, RuntimeError, OSError, RepoGoneError):
+            return  # best effort; real failures surface on the repo polls
+        except (GhMissingError, GhAuthError):
+            return
+        except RateLimitError:
+            self._pause_for_rate_limit(None)
+            return
+        if parsed is None:
+            return
+        remaining, limit, reset = parsed
+        self.rate_remaining = remaining
+        if remaining < max(RATE_LOW_FLOOR, int(limit * RATE_LOW_FRACTION)):
+            self._pause_for_rate_limit(reset)
+        else:
+            self._rate_pause_until = 0.0
+
+    def _pause_for_rate_limit(self, reset_epoch: float | None) -> None:
+        wait = (reset_epoch - self._wall()) if reset_epoch else RATE_MAX_PAUSE_S / 4
+        wait = min(max(wait, 60.0), RATE_MAX_PAUSE_S)
+        self._rate_pause_until = self._clock() + wait
+        self._warn_once("rate", f"GitHub rate limit low; pausing CI polling for {wait:.0f}s")
+        for entry in self._repos.values():
+            entry.error = "GitHub rate limit low; polling paused"
+            entry.stale = bool(entry.available)
+        if self._on_change is not None:
+            self._on_change()
+
     async def _poll_repo(self, repo: str) -> bool:
         """Fetch one repo; returns True when its cached data changed."""
         entry = self._repos.get(repo)
         if entry is None:
             return False
-        before = (entry.pull_requests, entry.pipelines, entry.available)
+        before = self._snapshot(entry)
         try:
+            if entry.default_branch is None and repo in self._pinned:
+                info = await self._call(["repo", "view", repo, "--json", "defaultBranchRef"])
+                ref = (
+                    cast(dict[str, Any], info).get("defaultBranchRef")
+                    if isinstance(info, dict)
+                    else None
+                )
+                name = _s(cast(dict[str, Any], ref).get("name")) if isinstance(ref, dict) else None
+                if name:
+                    entry.default_branch = name
             prs = await self._call(
                 [
                     "pr",
@@ -560,35 +778,85 @@ class CiPoller:
             )
         except GhMissingError:
             self._gh_down("gh-missing", "gh CLI not found; CI/CD data disabled")
+            entry.error = "gh CLI not found"
             return self._mark_unavailable(entry, before)
         except GhAuthError:
             self._gh_down(
                 "gh-auth", "gh is not authenticated (run `gh auth login`); CI/CD data disabled"
             )
+            entry.error = "gh is not authenticated"
             return self._mark_unavailable(entry, before)
         except RepoGoneError:
             entry.next_at = self._clock() + REPO_GONE_RETRY_S
             self._warn_once(f"gone:{repo}", f"gh cannot access {repo}; skipping CI for it")
+            entry.error = "repo not accessible via gh"
             return self._mark_unavailable(entry, before)
+        except RateLimitError as exc:
+            self._pause_for_rate_limit(None)
+            entry.error = short_error(exc)
+            entry.stale = bool(entry.available)
+            return before != self._snapshot(entry)
         except (TimeoutError, RuntimeError, OSError) as exc:
             entry.fails += 1
             delay = min(self._interval * 2 ** (entry.fails - 1), MAX_BACKOFF_S)
             entry.next_at = self._clock() + delay
+            entry.error = short_error(exc)
+            entry.stale = bool(entry.available)  # keep last-good data, flagged stale
             logger.debug("gh poll for %s failed (%s); retry in %.0fs", repo, exc, delay)
-            return False
+            return before != self._snapshot(entry)
         self.gh_available = True
         entry.fails = 0
-        entry.next_at = self._clock() + self._interval
         entry.available = True
+        entry.error = None
+        entry.stale = False
+        entry.fetched_at = datetime.now(UTC).isoformat()
         entry.pull_requests = map_pull_requests(prs, datetime.now(UTC))
         entry.pipelines = map_pipeline_runs(runs, entry.default_branch)
-        return before != (entry.pull_requests, entry.pipelines, entry.available)
+        entry.next_at = self._clock() + self.next_interval(entry)
+        await self._refresh_releases(repo, entry)
+        return before != self._snapshot(entry)
+
+    async def _refresh_releases(self, repo: str, entry: RepoCi) -> None:
+        if self._releases_limit <= 0 or self._clock() < entry.releases_next_at:
+            return
+        entry.releases_next_at = self._clock() + self._interval * RELEASE_EVERY
+        try:
+            raw = await self._call(
+                [
+                    "release",
+                    "list",
+                    "--repo",
+                    repo,
+                    "--limit",
+                    str(self._releases_limit + 3),  # drafts are filtered after
+                    "--json",
+                    RELEASE_FIELDS,
+                ]
+            )
+        except (GhMissingError, GhAuthError, RepoGoneError, RateLimitError):
+            return
+        except (TimeoutError, RuntimeError, OSError):
+            return  # releases are optional; keep the last list
+        entry.releases = map_releases(raw, repo, self._releases_limit)
+
+    @staticmethod
+    def _snapshot(entry: RepoCi) -> tuple[Any, ...]:
+        return (
+            entry.pull_requests,
+            entry.pipelines,
+            entry.available,
+            entry.releases,
+            entry.stale,
+            entry.error,
+        )
 
     def _mark_unavailable(self, entry: RepoCi, before: tuple[Any, ...]) -> bool:
         entry.available = False
+        entry.stale = False
         entry.pull_requests = []
         entry.pipelines = []
-        return before != ([], [], False)
+        entry.releases = []
+        return before != self._snapshot(entry)
 
     def _gh_down(self, key: str, message: str) -> None:
         self.gh_available = False
@@ -620,9 +888,13 @@ _poller: CiPoller | None = None
 def get_ci_poller() -> CiPoller:
     global _poller
     if _poller is None:
+        from app.config import get_settings
         from app.core.connection_manager import get_manager
 
-        _poller = CiPoller(is_watched=lambda: bool(get_manager().campus_connections))
+        _poller = CiPoller(
+            is_watched=lambda: bool(get_manager().campus_connections),
+            releases_limit=get_settings().CI_RELEASES_LIMIT,
+        )
     return _poller
 
 
