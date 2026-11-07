@@ -25,6 +25,29 @@ const ENTER: InteractionAction = {
   labelKey: "world.action.enter",
 };
 
+function factoryInspect(labelKey: string): InteractionAction {
+  return { id: "inspect", key: "F", labelKey };
+}
+
+const FACTORY_INSPECT: Partial<
+  Record<InteractionTarget["kind"], InteractionAction>
+> = {
+  lanePlate: factoryInspect("factory.action.openPr"),
+  workpiece: factoryInspect("factory.action.openPr"),
+  station: factoryInspect("factory.action.openStation"),
+  lineBoard: factoryInspect("factory.action.openLine"),
+  trunk: factoryInspect("factory.action.openLine"),
+  mainLine: factoryInspect("factory.action.openLine"),
+  dock: factoryInspect("factory.action.openDeploy"),
+};
+
+/** "Open on GitHub": no keyboard binding (panels carry the button); touch / panels call it. */
+export const OPEN_GITHUB: InteractionAction = {
+  id: "github",
+  key: "Enter",
+  labelKey: "factory.action.github",
+};
+
 export function actionsFor(target: InteractionTarget): InteractionAction[] {
   switch (target.kind) {
     case "character":
@@ -36,6 +59,17 @@ export function actionsFor(target: InteractionTarget): InteractionAction[] {
     case "screen":
     case "door":
       return [INSPECT, ENTER];
+    case "lanePlate":
+    case "workpiece":
+    case "station":
+    case "lineBoard":
+    case "dock":
+    case "trunk":
+    case "mainLine": {
+      const inspect = FACTORY_INSPECT[target.kind];
+      if (!inspect) return [];
+      return target.sessionId ? [inspect, ENTER] : [inspect];
+    }
     default:
       return [];
   }

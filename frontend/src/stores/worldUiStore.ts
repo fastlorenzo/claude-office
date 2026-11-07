@@ -23,7 +23,11 @@ export type HudPanel =
   | "minimap"
   | "help"
   | "graphics"
-  | "inspect";
+  | "inspect"
+  | "factoryPr"
+  | "factoryStation"
+  | "factoryLine"
+  | "factoryDeploy";
 
 /** Popup for a character that belongs to a non-selected session. */
 export interface PeerPopupTarget {
@@ -47,6 +51,8 @@ interface WorldUiState {
   /** Top-most open panel (null when none). Kept in sync with `panels`. */
   openPanel: HudPanel | null;
   inspectTarget: InteractionTarget | null;
+  /** Factory target shown by the factory panels (ids only; data is read live). */
+  factoryTarget: InteractionTarget | null;
   prompt: InteractionEvent | null;
   pose: PlayerPose | null;
   stats: WorldStats | null;
@@ -79,6 +85,8 @@ interface WorldUiState {
   closeTop: () => boolean;
   closeAll: () => void;
   openInspect: (target: InteractionTarget) => void;
+  /** Open the factory panel matching the target kind (pr / station / line / deploy). */
+  openFactory: (target: InteractionTarget) => void;
   setPrompt: (prompt: InteractionEvent | null) => void;
   setPose: (pose: PlayerPose | null) => void;
   setStats: (stats: WorldStats | null) => void;
@@ -118,6 +126,7 @@ function pushPanel(panels: HudPanel[], panel: HudPanel): HudPanel[] {
 const INITIAL = {
   ...withPanels([]),
   inspectTarget: null,
+  factoryTarget: null,
   prompt: null,
   pose: null,
   stats: null,
@@ -130,6 +139,19 @@ const INITIAL = {
   banner: null as { id: number; text: string } | null,
   opsOpen: false,
   opsFocus: null as string | null,
+};
+
+/** Interaction kind -> factory panel (kept here so the store stays engine-free). */
+export const FACTORY_PANEL_BY_KIND: Partial<
+  Record<InteractionTarget["kind"], HudPanel>
+> = {
+  lanePlate: "factoryPr",
+  workpiece: "factoryPr",
+  station: "factoryStation",
+  lineBoard: "factoryLine",
+  trunk: "factoryLine",
+  mainLine: "factoryLine",
+  dock: "factoryDeploy",
 };
 
 let bannerSeq = 0;
@@ -174,6 +196,12 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   openInspect: (target) => {
     set({ inspectTarget: target });
     get().open("inspect");
+  },
+  openFactory: (target) => {
+    const id = FACTORY_PANEL_BY_KIND[target.kind];
+    if (!id) return;
+    set({ factoryTarget: target });
+    get().open(id);
   },
   setPrompt: (prompt) => set({ prompt }),
   setPose: (pose) => set({ pose }),

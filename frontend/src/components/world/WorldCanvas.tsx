@@ -9,6 +9,7 @@ import { useWorldUiStore } from "@/stores/worldUiStore";
 import type { Session } from "@/hooks/useSessions";
 import { sessionLabel, toSessionMeta } from "./sessionMeta";
 import { enterSession, setEnterContext } from "./enterSession";
+import { githubUrlOf, isFactoryKind } from "@/engine/interaction/factoryTargets";
 import { setWorld } from "./worldRef";
 
 const SYNC_THROTTLE_MS = 50;
@@ -162,8 +163,13 @@ export function WorldCanvas({
           w.on("layout", (l) => useWorldUiStore.getState().setLayout(l)),
           w.on("action", ({ action, target, screenPos }) => {
             const store = useWorldUiStore.getState();
-            if (action === "enter") {
+            if (action === "github") {
+              const url = githubUrlOf(target);
+              if (url) window.open(url, "_blank", "noopener,noreferrer");
+            } else if (action === "enter") {
               void enterSession(target.sessionId);
+            } else if (isFactoryKind(target.kind)) {
+              if (action === "inspect") store.openFactory(target);
             } else if (target.kind === "ops") {
               store.openOps(target.sessionId || null);
             } else if (action === "inspect") {

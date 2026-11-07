@@ -39,7 +39,7 @@ export function HudPanelFrame({
         <h2 className="flex-1 truncate text-xs font-semibold uppercase tracking-[0.14em] text-slate-200">
           {t(meta.titleKey)}
         </h2>
-        {meta.keyLabel && id !== "inspect" ? (
+        {meta.keyLabel && id !== "inspect" && !id.startsWith("factory") ? (
           <Keycap>{meta.keyLabel}</Keycap>
         ) : null}
         <button

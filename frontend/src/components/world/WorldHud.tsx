@@ -23,6 +23,10 @@ import { HudPanelFrame } from "./hud/HudPanel";
 import { GraphicsPanel } from "./hud/GraphicsPanel";
 import { HelpPanel } from "./hud/HelpPanel";
 import { InspectPanel } from "./hud/InspectPanel";
+import { PrPanel } from "./hud/factory/PrPanel";
+import { StationPanel } from "./hud/factory/StationPanel";
+import { LinePanel } from "./hud/factory/LinePanel";
+import { DeployPanel } from "./hud/factory/DeployPanel";
 import { Minimap } from "./hud/Minimap";
 import { OverviewStrip } from "./hud/OverviewStrip";
 import { SessionsPanel, type SessionHandlers } from "./hud/SessionsPanel";
@@ -114,6 +118,30 @@ function PanelBody({
       return (
         <HudPanelFrame id={id}>
           <InspectPanel sessions={props.sessions} />
+        </HudPanelFrame>
+      );
+    case "factoryPr":
+      return (
+        <HudPanelFrame id={id}>
+          <PrPanel />
+        </HudPanelFrame>
+      );
+    case "factoryStation":
+      return (
+        <HudPanelFrame id={id}>
+          <StationPanel />
+        </HudPanelFrame>
+      );
+    case "factoryLine":
+      return (
+        <HudPanelFrame id={id}>
+          <LinePanel />
+        </HudPanelFrame>
+      );
+    case "factoryDeploy":
+      return (
+        <HudPanelFrame id={id}>
+          <DeployPanel />
         </HudPanelFrame>
       );
   }

@@ -659,17 +659,35 @@ export type InteractionKind =
   | "character"
   | "door"
   /** Control-room ops wall / console (opens the Ops dashboard; sessionId may be ""). */
-  | "ops";
+  | "ops"
+  /** Software-factory targets (engine/interaction/factoryTargets.ts); sessionId is "" unless linked. */
+  | "lanePlate"
+  | "station"
+  | "workpiece"
+  | "lineBoard"
+  | "dock"
+  | "trunk"
+  | "mainLine";
 
 export interface InteractionTarget {
   kind: InteractionKind;
   sessionId: string;
   agentId?: string; // "boss" for the main agent
   roomLabel: string;
+  /** Factory targets: project (CampusProject.id) the target belongs to. */
+  projectId?: string;
+  prNumber?: number;
+  /** Station: check name (or first name of a grouped "+N" station). */
+  checkName?: string;
+  /** 0-based lane. */
+  lane?: number;
+  /** GitHub URL (PR / run / release) for "Open on GitHub". */
+  url?: string;
 }
 
+
 /** Read-only today; write actions (answer_permission, send_message) are added here later. */
-export type InteractionActionId = "inspect" | "enter" | "popup";
+export type InteractionActionId = "inspect" | "enter" | "popup" | "github";
 
 export interface InteractionAction {
   id: InteractionActionId;

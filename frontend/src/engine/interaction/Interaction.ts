@@ -23,12 +23,25 @@ import { actionsFor, isInteractionTarget } from "@/engine/interaction/actions";
 import type { PostFx } from "@/engine/fx/PostFx";
 import { isStaticCollider } from "@/engine/physics/Colliders";
 import { FocusFrame } from "@/engine/interaction/FocusFrame";
+import {
+  hasThinResolver,
+  resolveThinTarget,
+  sameFactoryIds,
+} from "@/engine/interaction/factoryTargets";
 import type { Emitter } from "@/engine/util/Emitter";
 
 export const INTERACT_RANGE = 3.5;
 const PERIOD_MS = 100;
 
-function targetOf(mesh: AbstractMesh | null): InteractionTarget | null {
+function targetOf(
+  mesh: AbstractMesh | null,
+  thinInstanceIndex = -1,
+): InteractionTarget | null {
+  // Thin-instance pools resolve the picked instance through their registered resolver.
+  if (mesh && thinInstanceIndex >= 0 && hasThinResolver(mesh)) {
+    const t = resolveThinTarget(mesh, thinInstanceIndex);
+    if (t && isInteractionTarget(t)) return t;
+  }
   let n: AbstractMesh | null = mesh;
   // Walk up a few parents: character parts may carry metadata on an ancestor mesh.
   for (let i = 0; n && i < 4; i++) {
@@ -47,7 +60,8 @@ function sameTarget(
   return (
     a.kind === b.kind &&
     a.sessionId === b.sessionId &&
-    (a.agentId ?? "") === (b.agentId ?? "")
+    (a.agentId ?? "") === (b.agentId ?? "") &&
+    sameFactoryIds(a, b)
   );
 }
 
@@ -55,6 +69,7 @@ export class Interaction {
   private last = 0;
   private current: InteractionEvent | null = null;
   private currentMesh: AbstractMesh | null = null;
+  private currentThin = false;
   enabled = true;
   private readonly frame: FocusFrame;
 
@@ -88,11 +103,12 @@ export class Interaction {
         const meta = m.metadata as {
           interact?: unknown;
           staticCollider?: boolean;
+          thinInteract?: unknown;
           seeThrough?: boolean;
         } | null;
         if (!meta) return false;
         // Interactables may be invisible pick proxies (characters): no visibility check.
-        if (meta.interact) return m.isPickable;
+        if (meta.interact || meta.thinInteract) return m.isPickable;
         return isStaticCollider(meta) && !meta.seeThrough;
       },
       false,
@@ -101,8 +117,11 @@ export class Interaction {
     let target: InteractionTarget | null = null;
     let mesh: AbstractMesh | null = null;
     let distance = Infinity;
+    let thin = false;
     if (pick?.hit && pick.pickedMesh) {
-      target = targetOf(pick.pickedMesh);
+      const idx = pick.thinInstanceIndex ?? -1;
+      target = targetOf(pick.pickedMesh, idx);
+      thin = idx >= 0 && hasThinResolver(pick.pickedMesh);
       mesh = pick.pickedMesh;
       distance = pick.pickedPoint
         ? Vector3.Distance(pick.pickedPoint, this.getEye())
@@ -115,7 +134,7 @@ export class Interaction {
       this.set(null, null);
       return;
     }
-    const screenPos = this.project(mesh!);
+    const screenPos = this.project(mesh!, thin ? pick?.pickedPoint : null);
     if (sameTarget(target, this.current?.target ?? null)) {
       if (this.current) {
         this.current.screenPos = screenPos;
@@ -126,14 +145,20 @@ export class Interaction {
     this.set(
       { target, actions: actionsFor(target), screenPos, distance },
       mesh,
+      thin,
     );
   }
 
-  private set(ev: InteractionEvent | null, mesh: AbstractMesh | null): void {
+  private set(
+    ev: InteractionEvent | null,
+    mesh: AbstractMesh | null,
+    thin = false,
+  ): void {
     if (!ev && !this.current) return;
     this.current = ev;
-    if (mesh !== this.currentMesh) {
+    if (mesh !== this.currentMesh || thin !== this.currentThin) {
       this.currentMesh = mesh;
+      this.currentThin = thin;
       // Characters (opaque, volumetric): subtle outer glow only.
       // Flat screens/boards/nameplates: a thin frame — never touch their material.
       const isCharacter = ev?.target.kind === "character";
@@ -143,9 +168,11 @@ export class Interaction {
       );
       // Curved targets (the control-room video wall) opt out: a frame fitted
       // to their bounding box would be metres deep.
+      // A thin-instance pool mesh spans the whole line: never frame its bounds.
       const noFrame =
+        thin ||
         (mesh?.metadata as { noFocusFrame?: boolean } | null)?.noFocusFrame ===
-        true;
+          true;
       this.frame.show(mesh && ev && !isCharacter && !noFrame ? mesh : null);
       this.fx?.suppressGlow(
         mesh && !isCharacter && mesh.getClassName() === "Mesh"
@@ -156,10 +183,10 @@ export class Interaction {
     this.events.emit("interaction", ev);
   }
 
-  private project(mesh: AbstractMesh): ScreenPos {
+  private project(mesh: AbstractMesh, point?: Vector3 | null): ScreenPos {
     const engine = this.scene.getEngine();
     const cam = this.getCamera();
-    const centre = mesh.getBoundingInfo().boundingSphere.centerWorld;
+    const centre = point ?? mesh.getBoundingInfo().boundingSphere.centerWorld;
     const vp = cam.viewport.toGlobal(
       engine.getRenderWidth(),
       engine.getRenderHeight(),
