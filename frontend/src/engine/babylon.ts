@@ -207,3 +207,6 @@ export { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
 // ---------------------------------------------------------------------------
 export { ClusteredLightContainer } from "@babylonjs/core/Lights/Clustered/clusteredLightContainer";
 export { RectAreaLight } from "@babylonjs/core/Lights/rectAreaLight";
+
+// Added by the workpieces agent (additive)
+export { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
