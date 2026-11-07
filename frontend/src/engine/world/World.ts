@@ -840,8 +840,12 @@ class World implements IWorld {
     const cam = this.player.camera;
     const eye = cam.globalPosition;
     const feedMode = this.feeds?.isActive ?? false;
-    this.actorHub.setFeedMode(feedMode);
-    this.screenHub.setFeedMode(feedMode);
+    // Inside the sealed control room the rooms are out of sight: the feeds
+    // keep rendering them, but characters / screens follow the visibility
+    // detail (impostor) instead of being forced to full for the feeds.
+    const sealed = zone.kind === "control";
+    this.actorHub.setFeedMode(feedMode && !sealed);
+    this.screenHub.setFeedMode(feedMode && !sealed);
     const dir = cam.getForwardRay(1).direction;
     const yaw =
       Math.hypot(dir.x, dir.z) > 0.2

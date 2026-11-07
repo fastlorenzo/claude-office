@@ -240,11 +240,15 @@ export class VisibilityController {
       for (const m of handle.members ?? [id]) {
         liveMembers.add(m);
         const b = handle.memberBounds?.get(m);
-        const d = feedMode || sealed
-          ? want
-          : b
-            ? podDetail(want, footprintDistance(inp.eye, { id: m, side: "east", ...b }))
-            : want;
+        const d =
+          feedMode || sealed
+            ? want
+            : b
+              ? podDetail(
+                  want,
+                  footprintDistance(inp.eye, { id: m, side: "east", ...b }),
+                )
+              : want;
         if (this.memberDetail.get(m) === d) continue;
         this.memberDetail.set(m, d);
         this.deps.screens.setRoomDetail(m, d);
