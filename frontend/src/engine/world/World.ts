@@ -320,6 +320,20 @@ class World implements IWorld {
         mode: this.cameraMode,
         headBob: this.debug.headBob ?? true,
       });
+      if (!this.debug.camera && !this.debug.preserveDrawingBuffer)
+        this.player.restoreOr(
+          {
+            feet: new Vector3(spawn.x, spawn.y + 0.05, spawn.z),
+            yaw: this.layout.lobby.spawnYaw,
+          },
+          (p) => zoneAt3(this.factoryLayout, this.layout, p).kind !== "outside",
+        );
+      // Fall net fallbacks: the reception, then the control room.
+      const cs = this.layout.controlRoom.spawn;
+      this.player.setFallbacks([
+        { feet: new Vector3(0, 0.05, this.layout.bounds.min.z + 2), yaw: 0 },
+        { feet: new Vector3(cs.x, cs.y + 0.05, cs.z), yaw: 0 },
+      ]);
       this.lighting.setCamera(this.player.camera);
       this.player.setAvatar(createPlayerAvatar(this.scene));
       for (const m of this.player.avatarMeshes)
@@ -353,14 +367,6 @@ class World implements IWorld {
       if (this.disposed) return;
 
       this.building = new Building({
-      if (!this.debug.camera && !this.debug.preserveDrawingBuffer)
-        this.player.restoreOr(
-          {
-            feet: new Vector3(spawn.x, spawn.y + 0.05, spawn.z),
-            yaw: this.layout.lobby.spawnYaw,
-          },
-          (p) => zoneAt3(this.factoryLayout, this.layout, p).kind !== "outside",
-        );
         scene: this.scene,
         materials: this.materials,
         assets: this.assets,
@@ -388,6 +394,8 @@ class World implements IWorld {
         this.scene.executeWhenReady(() => resolve()),
       );
       if (this.disposed) return;
+      // Colliders (building, factory, entrance) exist: let the player fall/walk.
+      this.player.markReady();
       this.engine.runRenderLoop(() => this.frame());
       this.events.emit("ready", undefined);
     } catch (err) {
@@ -432,8 +440,6 @@ class World implements IWorld {
   ): () => void {
     return this.events.on(event, cb);
   }
-      // Colliders (building, factory, entrance) exist: let the player fall/walk.
-      this.player.markReady();
 
   // -------------------------------------------------------------------------
   // Sync

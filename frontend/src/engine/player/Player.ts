@@ -71,6 +71,10 @@ export class Player {
   /** No simulation until the world's colliders exist (see `markReady`). */
   private waiting = true;
   private spawnPose: { feet: Vector3; yaw: number } | null = null;
+  /** Further safe spots for the fall net (reception, control room). */
+  private fallbacks: { feet: Vector3; yaw: number }[] = [];
+  /** Fell with no floored spawn anywhere: hold until one has a floor. */
+  private stranded = false;
   private airborneOutside = 0;
 
   private cc: PhysicsCharacterController | null = null;
@@ -193,6 +197,25 @@ export class Player {
     this.pendingOrigin.copyFrom(this.feet);
   }
 
+  /** Extra respawn spots the fall net tries (in order) after the spawn. */
+  setFallbacks(list: { feet: Vector3; yaw: number }[]): void {
+    this.fallbacks = list.map((f) => ({ feet: f.feet.clone(), yaw: f.yaw }));
+  }
+
+  /** First of spawn + fallbacks with floor support under it, or null. */
+  private safeSpawn(): { feet: Vector3; yaw: number } | null {
+    const all = [
+      ...(this.spawnPose ? [this.spawnPose] : []),
+      ...this.fallbacks,
+    ];
+    for (const c of all) {
+      const fy = this.floorBelow(c.feet.x, c.feet.y, c.feet.z);
+      if (fy !== null && Math.abs(fy - c.feet.y) < 0.6)
+        return { feet: new Vector3(c.feet.x, fy + 0.05, c.feet.z), yaw: c.yaw };
+    }
+    return null;
+  }
+
   /**
    * The world's colliders are built: start simulating. A pending saved pose
    * gets a fresh retry window now (the build may have taken longer than it).
@@ -300,7 +323,7 @@ export class Player {
         Math.min(PLAYER.pitchLimit, this.pitch + look.dy),
       );
     }
-    if (!this.frozen && !this.waiting) {
+    if (!this.frozen && !this.waiting && !this.stranded) {
       const move = input ? input.moveAxis() : { x: 0, y: 0 };
       const sprint = input?.sprint ?? false;
       const jump = input?.consumeJump() ?? false;
@@ -316,6 +339,13 @@ export class Player {
       this.checkFall(dt);
     } else {
       this.speed = 0;
+    }
+    if (this.stranded) {
+      const sp = this.safeSpawn();
+      if (sp) {
+        this.stranded = false;
+        this.teleport(sp.feet, sp.yaw);
+      }
     }
     if (!this.waiting) this.stepPending();
     if (!this.frozen && !this.waiting && this.speed > 0.05) {
@@ -350,8 +380,15 @@ export class Player {
     this.airborneOutside = 0;
     this.pending = null;
     clearPose();
-    const sp = this.spawnPose;
-    this.teleport(sp ? sp.feet : new Vector3(0, 0.2, -8), sp?.yaw ?? 0);
+    // Only respawn onto a spot with a floor under it (never loop into a void).
+    const sp = this.safeSpawn();
+    if (sp) {
+      this.teleport(sp.feet, sp.yaw);
+      return;
+    }
+    this.stranded = true;
+    const f = this.spawnPose ?? this.fallbacks[0];
+    this.teleport(f ? f.feet : new Vector3(0, 0.2, -8), f?.yaw ?? 0);
   }
 
   private stepPhysics(dt: number, desired: Vector3, jump: boolean): void {
