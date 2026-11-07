@@ -125,11 +125,37 @@ export class ProjectRoom {
     // ---- Colliders: floor, glazed front (door gap + solid pier/transom).
     const { colliders } = ctx;
     const g = this.group;
+    // Floor: slab + the structural glass strip (see-through) + the balcony
+    // deck outside the outer glazing, with its balustrade (outer + ends).
+    const flat = (x0: number, x1: number, see: boolean) =>
+      colliders.addBox(
+        g,
+        new Vector3((x0 + x1) / 2, -0.1, (z0 + z1) / 2),
+        new Vector3(Math.abs(x1 - x0), 0.2, z1 - z0),
+        0,
+        see ? { seeThrough: true } : undefined,
+      );
+    const gf = layout.glassFloor;
+    const bal = layout.balcony;
+    flat(layout.footprint.x0, gf.x0, false);
+    flat(gf.x0, gf.x1, true);
+    flat(bal.x0, bal.x1, false);
+    const railH = 1.1;
     colliders.addBox(
       g,
-      new Vector3(layout.origin.x, -0.1, layout.origin.z),
-      new Vector3(LAYOUT.ROOM_D, 0.2, z1 - z0),
+      new Vector3(bal.x1 - sx * 0.035, railH / 2, (z0 + z1) / 2),
+      new Vector3(0.1, railH, z1 - z0),
+      0,
+      { seeThrough: true },
     );
+    for (const z of [z0 + 0.05, z1 - 0.05])
+      colliders.addBox(
+        g,
+        new Vector3((bal.x0 + bal.x1) / 2, railH / 2, z),
+        new Vector3(Math.abs(bal.x1 - bal.x0), railH, 0.1),
+        0,
+        { seeThrough: true },
+      );
     const E = (lz: number) => toWorld(entry, 0, 0, lz).z;
     const dz = layout.door.z;
     const half = LAYOUT.DOOR_W / 2;

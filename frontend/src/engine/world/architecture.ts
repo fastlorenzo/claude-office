@@ -736,3 +736,134 @@ export function drawNameplate(
   }
   ctx.fillText(label, h * 0.16, h * 0.62);
 }
+
+// ---------------------------------------------------------------------------
+// Floors with openings + guard rails (elevated spine, balconies, stair wells)
+// ---------------------------------------------------------------------------
+
+export interface PlanRect {
+  x0: number;
+  x1: number;
+  z0: number;
+  z1: number;
+}
+
+/**
+ * Pure: a plan rectangle minus holes, as disjoint rectangles (bands along z,
+ * cut along x). Holes may overlap each other or stick out of `r`.
+ */
+export function rectMinusHoles(
+  r: PlanRect,
+  holes: readonly PlanRect[],
+): PlanRect[] {
+  const hs = holes
+    .map((h) => ({
+      x0: Math.max(r.x0, h.x0),
+      x1: Math.min(r.x1, h.x1),
+      z0: Math.max(r.z0, h.z0),
+      z1: Math.min(r.z1, h.z1),
+    }))
+    .filter((h) => h.x1 - h.x0 > 1e-6 && h.z1 - h.z0 > 1e-6);
+  const zs = [
+    ...new Set([r.z0, r.z1, ...hs.flatMap((h) => [h.z0, h.z1])]),
+  ].sort((a, b) => a - b);
+  const out: PlanRect[] = [];
+  for (let i = 0; i + 1 < zs.length; i++) {
+    const za = zs[i];
+    const zb = zs[i + 1];
+    if (zb - za < 1e-6) continue;
+    const cuts = hs
+      .filter((h) => h.z0 < zb - 1e-6 && h.z1 > za + 1e-6)
+      .sort((a, b) => a.x0 - b.x0);
+    let x = r.x0;
+    for (const c of cuts) {
+      if (c.x0 > x + 1e-6) out.push({ x0: x, x1: c.x0, z0: za, z1: zb });
+      x = Math.max(x, c.x1);
+    }
+    if (r.x1 > x + 1e-6) out.push({ x0: x, x1: r.x1, z0: za, z1: zb });
+  }
+  return out;
+}
+
+/** Floor slab pieces (top at y = 0) + colliders over `rects`. */
+export function floorPieces(
+  b: MeshBatcher,
+  cols: ColliderSink | null,
+  group: string,
+  mat: SurfaceKey,
+  rects: readonly PlanRect[],
+  opts: { thickness?: number; seeThrough?: boolean } = {},
+): void {
+  const t = opts.thickness ?? 0.1;
+  for (const r of rects) {
+    const cx = (r.x0 + r.x1) / 2;
+    const cz = (r.z0 + r.z1) / 2;
+    b.box(mat, v3(cx, -t / 2, cz), v3(r.x1 - r.x0, t, r.z1 - r.z0));
+    cols?.addBox(
+      group,
+      new Vector3(cx, -0.1, cz),
+      new Vector3(r.x1 - r.x0, 0.2, r.z1 - r.z0),
+      0,
+      opts.seeThrough ? { seeThrough: true } : undefined,
+    );
+  }
+}
+
+/** Guard-rail height (glass balustrades: stair wells, balconies). */
+export const RAIL_H = 1.1;
+
+/**
+ * Frameless glass balustrade along `axis` at `fixed`, from a0 to a1: black
+ * base shoe, glass infill, slim handrail. Collider is see-through.
+ */
+export function glassBalustrade(
+  b: MeshBatcher,
+  cols: ColliderSink | null,
+  group: string,
+  axis: "x" | "z",
+  fixed: number,
+  a0: number,
+  a1: number,
+  opts: { y0?: number; h?: number; glass?: SurfaceKey } = {},
+): void {
+  const y0 = opts.y0 ?? 0;
+  const h = opts.h ?? RAIL_H;
+  const len = Math.abs(a1 - a0);
+  if (len < 0.01) return;
+  const c = (a0 + a1) / 2;
+  const put = (mat: SurfaceKey, y: number, hh: number, d: number) =>
+    axis === "z"
+      ? b.box(mat, v3(fixed, y, c), v3(d, hh, len))
+      : b.box(mat, v3(c, y, fixed), v3(len, hh, d));
+  put("blackMetal", y0 + 0.05, 0.1, 0.07); // base shoe
+  put(opts.glass ?? "glass", y0 + 0.1 + (h - 0.14) / 2, h - 0.14, 0.014);
+  put("blackMetal", y0 + h - 0.02, 0.04, 0.05); // handrail
+  if (cols) {
+    const size =
+      axis === "z" ? new Vector3(0.1, h, len) : new Vector3(len, h, 0.1);
+    const ctr =
+      axis === "z"
+        ? new Vector3(fixed, y0 + h / 2, c)
+        : new Vector3(c, y0 + h / 2, fixed);
+    cols.addBox(group, ctr, size, 0, { seeThrough: true });
+  }
+}
+
+/** Guard rails on the open sides of a floor opening (`skip`: sides left open). */
+export function railOpening(
+  b: MeshBatcher,
+  cols: ColliderSink | null,
+  group: string,
+  r: PlanRect,
+  skip: readonly ("x0" | "x1" | "z0" | "z1")[] = [],
+): void {
+  const o = 0.04; // rails stand just outside the opening edge
+  if (!skip.includes("x0"))
+    glassBalustrade(b, cols, group, "z", r.x0 - o, r.z0 - o, r.z1 + o);
+  if (!skip.includes("x1"))
+    glassBalustrade(b, cols, group, "z", r.x1 + o, r.z0 - o, r.z1 + o);
+  if (!skip.includes("z0"))
+    glassBalustrade(b, cols, group, "x", r.z0 - o, r.x0 - o, r.x1 + o);
+  if (!skip.includes("z1"))
+    glassBalustrade(b, cols, group, "x", r.z1 + o, r.x0 - o, r.x1 + o);
+}

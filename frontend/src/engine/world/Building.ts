@@ -43,14 +43,19 @@ import type { Materials } from "@/engine/materials/Materials";
 import type { Colliders } from "@/engine/physics/Colliders";
 import { ArtBatcher } from "@/engine/art/geometry";
 import { v3 } from "@/engine/util/MeshBatcher";
-import { Skyline } from "@/engine/world/Skyline";
+import { Exterior } from "@/engine/world/Exterior";
 import { BrandSign } from "@/engine/world/BrandSign";
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
 import { roomStatus } from "@/engine/logic/status";
+import { buildFactoryLayout } from "@/engine/layout/factoryLayout";
 import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
 import {
   DOOR_H,
+  floorPieces,
+  railOpening,
+  rectMinusHoles,
+  type PlanRect,
   downlight,
   drawSpark,
   FONT_STACK,
@@ -86,6 +91,13 @@ const LOBBY_H = 6.0;
 /** Elevator doors along the sky-lobby west wall (z centres). */
 const ELEVATOR_Z = [-9.55, -7.25, -4.95, -2.65];
 
+/** Structural glass strip down the spine (over the factory main line). */
+export const SPINE_GLASS_W = 1.6;
+/** Glazed tower bay at the control-room end of the spine. */
+export const TOWER_BAY_D = 4;
+/** Balcony door clear width in the outer glazing. */
+export const BALCONY_DOOR_W = 1.4;
+
 /** Control-room door LED line (on the bulkhead over the door). */
 const CONTROL_LED_Y = 2.82;
 const CONTROL_LED_W = 3.0;
@@ -104,7 +116,7 @@ export class Building {
   private empty: Part | null = null;
   private exterior: Part | null = null;
   private bays = -1;
-  private skyline: Skyline | null = null;
+  private skyline: Exterior | null = null;
   private controlLed: LedPanel | null = null;
   /** Control-room floor / ceiling / walls (ControlRoom adds the interior). */
   private controlShell: Mesh[] = [];
@@ -131,6 +143,7 @@ export class Building {
       this.registerProbes(layout);
     }
     this.setEmptyBays(layout, layout.emptySlots);
+    this.setOuterWalls(layout);
   }
 
   /** Live control-room panel summary ("3 WORKING · 1 NEEDS YOU"). */
@@ -164,14 +177,22 @@ export class Building {
   }
 
   get fixtures(): Vector3[] {
-    return [...(this.lobby?.fixtures ?? []), ...(this.shell?.fixtures ?? [])];
+    return [
+      ...(this.lobby?.fixtures ?? []),
+      ...(this.shell?.fixtures ?? []),
+      ...(this.outer?.fixtures ?? []),
+    ];
   }
 
   /** All static meshes (feed render lists for hall views, debugging). */
   get meshes(): Mesh[] {
-    return [this.lobby, this.shell, this.empty, this.exterior].flatMap(
-      (p) => p?.meshes ?? [],
-    );
+    return [
+      this.lobby,
+      this.shell,
+      this.empty,
+      this.outer,
+      this.exterior,
+    ].flatMap((p) => p?.meshes ?? []);
   }
 
   private finish(part: Part, meshes: Mesh[]): void {
@@ -241,12 +262,18 @@ export class Building {
     const T = 0.2;
 
     // ---- Floor / ceiling
-    b.box("floorLobby", v3(0, -0.05, z0 / 2), v3(halfW * 2, 0.1, D));
-    colliders.addBox(
+    // Floor with the stair well down to the factory (rails until it lands).
+    const lobbyHole = buildFactoryLayout(layout).lobbyStair.rect;
+    floorPieces(
+      b,
+      colliders,
       g,
-      new Vector3(0, -0.1, z0 / 2),
-      new Vector3(halfW * 2 + 1, 0.2, D),
+      "floorLobby",
+      rectMinusHoles({ x0: -halfW - 0.5, x1: halfW + 0.5, z0, z1: 0 }, [
+        lobbyHole,
+      ]),
     );
+    railOpening(b, colliders, g, lobbyHole);
     b.box(
       "ceiling",
       v3(0, H + 0.05, z0 / 2),
@@ -725,17 +752,63 @@ export class Building {
     const H = LAYOUT.WALL_H;
     const hallHalf = layout.hall.width / 2;
     const L = layout.hall.length;
-    const outer = hallHalf + LAYOUT.ROOM_D; // 10.5
-    const pitch = LAYOUT.ROOM_W + LAYOUT.ROOM_GAP;
     const T = 0.2;
 
-    // ---- Hall floor / ceiling
-    b.box("floorHall", v3(0, -0.05, L / 2), v3(hallHalf * 2, 0.1, L));
-    colliders.addBox(
+    // ---- Hall floor: an elevated spine over the factory. Microcement
+    // either side of a 1.6 m structural glass strip (over the main line),
+    // a glazed tower bay before the control room, spine-stair wells cut out
+    // with guard rails (the stairs themselves are the factory's).
+    const fl = buildFactoryLayout(layout);
+    const stairHoles = fl.spineStairs.map((st) => st.rect);
+    const strip: PlanRect = {
+      x0: -SPINE_GLASS_W / 2,
+      x1: SPINE_GLASS_W / 2,
+      z0: 0,
+      z1: L - TOWER_BAY_D,
+    };
+    const bay: PlanRect = {
+      x0: -hallHalf,
+      x1: hallHalf,
+      z0: L - TOWER_BAY_D,
+      z1: L,
+    };
+    floorPieces(
+      b,
+      colliders,
       g,
-      new Vector3(0, -0.1, L / 2),
-      new Vector3(hallHalf * 2, 0.2, L),
+      "floorHall",
+      rectMinusHoles({ x0: -hallHalf, x1: hallHalf, z0: 0, z1: L }, [
+        strip,
+        bay,
+        ...stairHoles,
+      ]),
     );
+    floorPieces(b, colliders, g, "glass", rectMinusHoles(strip, stairHoles), {
+      thickness: 0.04,
+      seeThrough: true,
+    });
+    floorPieces(b, colliders, g, "glass", rectMinusHoles(bay, stairHoles), {
+      thickness: 0.04,
+      seeThrough: true,
+    });
+    // Steel edge profiles framing the glass.
+    for (const sx of [-1, 1])
+      b.box(
+        "blackMetal",
+        v3(sx * (SPINE_GLASS_W / 2 + 0.02), -0.01, (L - TOWER_BAY_D) / 2),
+        v3(0.04, 0.022, L - TOWER_BAY_D),
+      );
+    b.box(
+      "blackMetal",
+      v3(0, -0.01, L - TOWER_BAY_D - 0.02),
+      v3(hallHalf * 2, 0.022, 0.04),
+    );
+    // Rails on the open sides (the room fronts close the outer side).
+    for (const h of stairHoles)
+      railOpening(b, colliders, g, h, [
+        ...(Math.abs(h.x1 - hallHalf) < 0.01 ? (["x1"] as const) : []),
+        ...(Math.abs(h.x0 + hallHalf) < 0.01 ? (["x0"] as const) : []),
+      ]);
     b.box("ceiling", v3(0, H + 0.05, L / 2), v3(hallHalf * 2 + 0.4, 0.1, L));
     // Twin recessed LED slots.
     for (const x of [-1.75, 1.75])
@@ -756,7 +829,6 @@ export class Building {
 
     // Project rooms bring their own end walls (ProjectShell); the shell only
     // closes the room bands against the control room and the outside.
-    const sides = layout.sides;
     const CH = layout.controlRoom.size.y;
     // ---- Hall-side wall of the control room (full footprint width, up to
     // its clear height): solid outside the hall band, glazed partition +
@@ -788,32 +860,6 @@ export class Building {
       v3(hallHalf * 2, CH - H, T),
     );
 
-    // ---- Exterior walls along the room bands, one curtain-wall bay per bay
-    // (the rooms' overlook glazing). A hall-overlook side is glazed instead.
-    for (const sx of [-1, 1]) {
-      const side = sx > 0 ? "east" : "west";
-      if (!sides.includes(side)) continue;
-      const wins: Opening[] = [];
-      for (let bay = 0; bay < layout.bays; bay++) {
-        const z0 = bay * pitch;
-        wins.push({
-          a0: z0 + 0.12,
-          a1: z0 + LAYOUT.ROOM_W - 0.12,
-          y0: 0.04,
-          y1: H - 0.06,
-        });
-      }
-      const wx = sx * (outer + T / 2);
-      wallWithOpenings(b, colliders, g, "wall", "z", wx, T, 0, L, H, wins);
-      for (const o of wins)
-        part.fixtures.push(
-          ...windowUnit(b, "z", wx, o, {
-            pitch: 1.2,
-            inward: sx > 0 ? -1 : 1,
-            wallT: T,
-          }),
-        );
-    }
     if (layout.hall.overlook) {
       const sx = layout.hall.overlook === "east" ? 1 : -1;
       const wx = sx * (hallHalf + T / 2);
@@ -944,6 +990,128 @@ export class Building {
   }
 
   // -------------------------------------------------------------------------
+  // Outer walls (rebuilt when the bays or the balcony doors change)
+  // -------------------------------------------------------------------------
+
+  private outer: Part | null = null;
+  private outerKey = "";
+
+  /**
+   * Outer walls along the room bands: full-height curtain wall per bay (the
+   * rooms' overlook glazing onto the factory), with a real door opening to
+   * each project's balcony at its entry bay.
+   */
+  setOuterWalls(layout: BuildingLayout): void {
+    const doors = layout.projects.map((p) => ({
+      side: p.slot.side,
+      z: p.balcony.door.z,
+    }));
+    const key = `${layout.bays}|${layout.sides.join(",")}|${doors
+      .map((d) => `${d.side}:${d.z.toFixed(2)}`)
+      .sort()
+      .join(",")}`;
+    if (key === this.outerKey) return;
+    this.outerKey = key;
+    this.disposePart(this.outer, "outer");
+    const { scene, materials, colliders } = this.ctx;
+    const g = "outer";
+    const part = emptyPart();
+    const b = new ArtBatcher(scene, materials, g, 15);
+    const H = LAYOUT.WALL_H;
+    const L = layout.hall.length;
+    const outer = layout.hall.width / 2 + LAYOUT.ROOM_D;
+    const pitch = LAYOUT.ROOM_W;
+    const T = 0.2;
+    const half = BALCONY_DOOR_W / 2;
+    for (const sx of [-1, 1]) {
+      const side = sx > 0 ? "east" : "west";
+      if (!layout.sides.includes(side)) continue;
+      const doorZ = doors.filter((d) => d.side === side).map((d) => d.z);
+      const wins: Opening[] = [];
+      const gaps: Opening[] = [];
+      for (let bay = 0; bay < layout.bays; bay++) {
+        const z0 = bay * pitch + 0.12;
+        const z1 = (bay + 1) * pitch - 0.12;
+        const dz = doorZ.find((z) => z > z0 && z < z1);
+        if (dz === undefined) {
+          wins.push({ a0: z0, a1: z1, y0: 0.04, y1: H - 0.06 });
+          continue;
+        }
+        wins.push({ a0: z0, a1: dz - half - 0.08, y0: 0.04, y1: H - 0.06 });
+        wins.push({ a0: dz + half + 0.08, a1: z1, y0: 0.04, y1: H - 0.06 });
+        gaps.push({ a0: dz - half, a1: dz + half, y0: 0, y1: DOOR_H });
+      }
+      const wx = sx * (outer + T / 2);
+      wallWithOpenings(b, null, g, "wall", "z", wx, T, 0, L, H, [
+        ...wins,
+        ...gaps,
+      ]);
+      for (const o of wins)
+        part.fixtures.push(
+          ...windowUnit(b, "z", wx, o, {
+            pitch: 1.2,
+            inward: sx > 0 ? -1 : 1,
+            wallT: T,
+          }),
+        );
+      for (const o of gaps) {
+        // Black door frame + threshold (walk-through: no collider in the gap).
+        for (const a of [o.a0 + 0.03, o.a1 - 0.03])
+          b.box(
+            "blackMetal",
+            v3(wx, DOOR_H / 2, a),
+            v3(T + 0.02, DOOR_H, 0.06),
+          );
+        b.box(
+          "blackMetal",
+          v3(wx, DOOR_H + 0.03, (o.a0 + o.a1) / 2),
+          v3(T + 0.02, 0.06, o.a1 - o.a0),
+        );
+        b.box(
+          "blackMetal",
+          v3(wx, -0.02, (o.a0 + o.a1) / 2),
+          v3(T + 0.02, 0.04, o.a1 - o.a0),
+        );
+      }
+      // Colliders: solid except the door gaps (glass blocks, but not sight).
+      let z = 0;
+      for (const o of [...gaps].sort((p, q) => p.a0 - q.a0)) {
+        if (o.a0 > z)
+          colliders.addBox(
+            g,
+            new Vector3(wx, H / 2, (z + o.a0) / 2),
+            new Vector3(T, H, o.a0 - z),
+            0,
+            { seeThrough: true },
+          );
+        colliders.addBox(
+          g,
+          new Vector3(wx, (DOOR_H + H) / 2, (o.a0 + o.a1) / 2),
+          new Vector3(T, H - DOOR_H, o.a1 - o.a0),
+        );
+        z = o.a1;
+      }
+      if (L > z)
+        colliders.addBox(
+          g,
+          new Vector3(wx, H / 2, (z + L) / 2),
+          new Vector3(T, H, L - z),
+          0,
+          { seeThrough: true },
+        );
+    }
+    const meshes = b.build({ receiveShadows: true });
+    markExteriorGlass(meshes);
+    this.finish(part, meshes);
+    for (const m of part.meshes) {
+      m.computeWorldMatrix(true);
+      m.freezeWorldMatrix();
+    }
+    this.outer = part;
+    this.ctx.lighting.invalidateStaticShadows();
+  }
+
+  // -------------------------------------------------------------------------
   // Empty bays
   // -------------------------------------------------------------------------
 
@@ -1059,17 +1227,13 @@ export class Building {
   // -------------------------------------------------------------------------
 
   private buildExterior(layout: BuildingLayout): Part {
-    // High floor: no street-level exterior. The city (near towers + baked far
-    // skyline) is built once around the floor plate's centre.
-    if (!this.skyline) {
-      const min = layout.bounds.min;
-      const max = layout.bounds.max;
-      this.skyline = new Skyline(
-        this.ctx.scene,
-        this.ctx.lighting,
-        new Vector3((min.x + max.x) / 2, 0, (min.z + max.z) / 2),
-      );
-    }
+    // Industrial park around the factory (near geometry + baked far cube).
+    const min = layout.bounds.min;
+    const max = layout.bounds.max;
+    const center = new Vector3((min.x + max.x) / 2, 0, (min.z + max.z) / 2);
+    if (!this.skyline)
+      this.skyline = new Exterior(this.ctx.scene, this.ctx.lighting, center);
+    else this.skyline.setCenter(center);
     return emptyPart();
   }
 
@@ -1089,12 +1253,13 @@ export class Building {
     this.disposePart(this.lobby, "lobby");
     this.disposePart(this.shell, "shell");
     this.disposePart(this.empty, "empty");
+    this.disposePart(this.outer, "outer");
     this.disposePart(this.exterior, "exterior");
     this.skyline?.dispose();
     this.skyline = null;
     this.controlLed?.dispose();
     this.controlLed = null;
-    this.lobby = this.shell = this.empty = this.exterior = null;
+    this.lobby = this.shell = this.empty = this.outer = this.exterior = null;
   }
 }
 

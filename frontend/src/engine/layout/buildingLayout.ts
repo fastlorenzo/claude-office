@@ -88,6 +88,8 @@ export const ENTRY = {
   infoH: 0.74,
   ledW: 3.0,
   ledH: 0.22,
+  /** Balcony door centre (bay-local z): beside the lounge, not behind it. */
+  balconyDoorZ: 1.4,
 } as const;
 
 /** Balcony depth outside the outer glazing (factory overlook). */
@@ -550,7 +552,7 @@ function buildProject(
       x1: xOuter + sx * BALCONY_D,
       z0,
       z1,
-      door: v3(xOuter, 0, ef.oz),
+      door: v3(xOuter, 0, E(0, 0, ENTRY.balconyDoorZ).z),
       doorYaw: outwardYaw,
     },
     glassFloor: { x0: xOuter - sx * GLASS_FLOOR_W, x1: xOuter, z0, z1 },

@@ -31,15 +31,20 @@ import { v3 } from "@/engine/util/MeshBatcher";
 import {
   DOOR_H,
   downlight,
+  glassBalustrade,
   glassPartition,
   linearPendant,
 } from "@/engine/world/architecture";
 import {
+  BALCONY_D,
   BULKHEAD_D,
   ENTRY,
   GLASS_FLOOR_W,
   POD,
 } from "@/engine/layout/buildingLayout";
+
+/** Outer (overlook) wall thickness: Building's curtain wall, outside x = d. */
+const OUTER_WALL_T = 0.2;
 import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
 
 /** Linear mean albedo of the felt texture (Fabric030) — instance tint base. */
@@ -106,6 +111,13 @@ function bayArchitecture(b: ArtBatcher, door: boolean): FixturePoint[] {
   b.box("blackMetal", v3(d - gf, -0.01, 0), v3(0.03, 0.02, w));
   b.box("ceiling", v3(d / 2, H + 0.05, 0), v3(d, 0.1, w));
   b.box("shadowGap", v3(d - 0.012, H - 0.003, 0), v3(0.024, 0.006, w));
+  // Balcony outside the outer glazing (wall face at d + 0.2): oak deck to
+  // the balcony edge + continuous glass balustrade. No underside detail (the
+  // factory draws the soffits).
+  const bx0 = d + OUTER_WALL_T;
+  const bx1 = d + BALCONY_D;
+  b.box("floorOak", v3((bx0 + bx1) / 2, -0.04, 0), v3(bx1 - bx0, 0.08, w));
+  glassBalustrade(b, null, "roomShell", "z", bx1 - 0.035, -w / 2, w / 2);
   const fx: FixturePoint[] = [];
   for (const z of [-1.2, 1.2]) fx.push(downlight(b, C / 2, z, H, 0.7));
   if (!door) {
@@ -189,14 +201,14 @@ function buildEntry(scene: Scene, materials: Materials): Built {
       z: -1.0,
       yaw: -Math.PI / 2,
     },
-    { role: "planterTall", x: 2.35, z: 1.85, yaw: 0 },
+    { role: "planterTall", x: 5.6, z: -2.0, yaw: 0 },
     { role: "planter", x: 9.12, z: -2.05, yaw: 0 },
   ];
   const plants: LocalPlacement[] = [
     {
       role: "plantTall",
-      x: 2.35,
-      z: 1.85,
+      x: 5.6,
+      z: -2.0,
       yaw: 1.1,
       y: PLANTER_SOIL_Y.planterTall,
     },
@@ -239,6 +251,16 @@ function buildEndWall(scene: Scene, materials: Materials): Built {
   arch.rbox("wallFeature", v3(-0.03, H / 2, 0), v3(0.14, H, 0.16), {
     r: 0.006,
   });
+  // Balcony end rail (neighbouring rooms' balconies never connect).
+  glassBalustrade(
+    arch,
+    null,
+    "roomShell",
+    "x",
+    0,
+    d + OUTER_WALL_T,
+    d + BALCONY_D,
+  );
   return {
     arch,
     furn: null,

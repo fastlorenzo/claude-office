@@ -43,6 +43,7 @@ import type {
   CampusStats,
 } from "@/engine/contracts";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
+import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
 import type { Lighting } from "@/engine/fx/Lighting";
 import type { PostFx } from "@/engine/fx/PostFx";
 import type { Materials } from "@/engine/materials/Materials";
@@ -1097,24 +1098,24 @@ export class ControlRoom {
         { group: GROUP },
       );
     for (const sx of [-1, 1]) {
-      assets.instantiate(
-        "plantTall",
-        null,
-        {
-          position: { x: cx + sx * (roomR - 0.7), y: 0, z: p.z0 + 0.8 },
-          yaw: sx,
-        },
-        { group: GROUP },
-      );
-      assets.instantiate(
-        "plantTall",
-        null,
-        {
-          position: { x: cx + sx * (roomR - 0.8), y: 0, z: cz - 0.6 },
-          yaw: -sx,
-        },
-        { group: GROUP },
-      );
+      // Foliage sits IN a planter (base at the soil line), never on the floor.
+      for (const [x, z, yaw] of [
+        [cx + sx * (roomR - 0.7), p.z0 + 0.8, sx],
+        [cx + sx * (roomR - 0.8), cz - 0.6, -sx],
+      ] as const) {
+        assets.instantiate(
+          "planterTall",
+          null,
+          { position: { x, y: 0, z }, yaw: 0 },
+          { group: GROUP },
+        );
+        assets.instantiate(
+          "plantTall",
+          null,
+          { position: { x, y: PLANTER_SOIL_Y.planterTall, z }, yaw },
+          { group: GROUP },
+        );
+      }
     }
     assets.instantiate(
       "securityCamera",

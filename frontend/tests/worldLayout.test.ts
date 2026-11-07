@@ -344,3 +344,97 @@ describe("generateLayout", () => {
     expect(after.bossDesk).toEqual(before.bossDesk);
   });
 });
+
+describe("P1.1 openings (elevated spine, stair wells, balconies)", () => {
+  // Imported lazily: architecture.ts pulls in the Babylon barrel.
+  const load = async () => ({
+    ...(await import("@/engine/world/architecture")),
+    ...(await import("@/engine/layout/factoryLayout")),
+  });
+  const area = (r: { x0: number; x1: number; z0: number; z1: number }) =>
+    (r.x1 - r.x0) * (r.z1 - r.z0);
+  const hit = (
+    a: { x0: number; x1: number; z0: number; z1: number },
+    b: { x0: number; x1: number; z0: number; z1: number },
+  ) =>
+    a.x0 < b.x1 - EPS &&
+    b.x0 < a.x1 - EPS &&
+    a.z0 < b.z1 - EPS &&
+    b.z0 < a.z1 - EPS;
+
+  it("rectMinusHoles tiles the floor around the openings exactly", async () => {
+    const { rectMinusHoles } = await load();
+    const r = { x0: -3.5, x1: 3.5, z0: 0, z1: 40 };
+    const holes = [
+      { x0: -0.8, x1: 0.8, z0: 0, z1: 36 },
+      { x0: 2.3, x1: 3.5, z0: 6.4, z1: 12.8 },
+      { x0: -3.5, x1: -2.3, z0: 25.6, z1: 32 },
+      { x0: -3.5, x1: 3.5, z0: 36, z1: 40 },
+    ];
+    const out = rectMinusHoles(r, holes);
+    const sum = out.reduce((a, p) => a + area(p), 0);
+    expect(sum).toBeCloseTo(area(r) - holes.reduce((a, h) => a + area(h), 0));
+    for (const p of out) for (const h of holes) expect(hit(p, h)).toBe(false);
+    for (const p of out)
+      for (const q of out) if (p !== q) expect(hit(p, q)).toBe(false);
+    // Overlapping / out-of-range holes are clipped, not double counted.
+    const o = rectMinusHoles({ x0: 0, x1: 2, z0: 0, z1: 2 }, [
+      { x0: -1, x1: 1, z0: -1, z1: 1 },
+      { x0: 0.5, x1: 1.5, z0: 0.5, z1: 3 },
+    ]);
+    expect(o.reduce((a, p) => a + area(p), 0)).toBeCloseTo(4 - 1 - 1.25);
+  });
+
+  it("stair wells sit in the hall, clear of the glass strip and of room doors", async () => {
+    const { buildFactoryLayout } = await load();
+    const SPINE_GLASS_W = 1.6; // Building.SPINE_GLASS_W
+    const layout = demoLayout();
+    const f = buildFactoryLayout(layout);
+    expect(f.spineStairs.length).toBeGreaterThan(0);
+    const strip = {
+      x0: -SPINE_GLASS_W / 2,
+      x1: SPINE_GLASS_W / 2,
+      z0: 0,
+      z1: layout.hall.length,
+    };
+    for (const s of f.spineStairs) {
+      expect(Math.abs(s.rect.x0)).toBeLessThanOrEqual(LAYOUT.HALL_W / 2 + EPS);
+      expect(Math.abs(s.rect.x1)).toBeLessThanOrEqual(LAYOUT.HALL_W / 2 + EPS);
+      expect(s.rect.z1).toBeLessThanOrEqual(layout.hall.length);
+      expect(hit(s.rect, strip)).toBe(false);
+      for (const r of layout.projects) {
+        const d = r.doorOutside;
+        const doorZone = {
+          x0: d.x - 0.7,
+          x1: d.x + 0.7,
+          z0: d.z - 1,
+          z1: d.z + 1,
+        };
+        expect(hit(s.rect, doorZone)).toBe(false);
+      }
+    }
+    // The lobby well is inside the lobby, clear of the hall portal.
+    const lh = f.lobbyStair.rect;
+    expect(lh.z1).toBeLessThan(0);
+    expect(lh.z0).toBeGreaterThan(-LAYOUT.LOBBY_D);
+    expect(Math.abs(lh.x1)).toBeGreaterThan(LAYOUT.HALL_W / 2);
+  });
+
+  it("every room has a walk-through balcony door at its entry bay", () => {
+    const layout = demoLayout();
+    for (const r of layout.projects) {
+      const s = r.slot.side === "east" ? 1 : -1;
+      const b = r.balcony;
+      expect(b.door.x).toBe(r.outer.x);
+      // Door on the entry bay, clear of the bay edges (pier + frame).
+      expect(b.door.z - 0.7).toBeGreaterThan(r.footprint.z0 + 0.12);
+      expect(b.door.z + 0.7).toBeLessThan(
+        r.footprint.z0 + LAYOUT.ROOM_W - 0.12,
+      );
+      // Deck beyond the 0.2 m curtain wall is at least 1 m deep.
+      expect(s * (b.x1 - b.x0) - 0.2).toBeGreaterThanOrEqual(1 - EPS);
+      // The glass strip abuts the outer glazing (walkable, see-through).
+      expect(r.glassFloor.x1).toBe(b.x0);
+    }
+  });
+});
