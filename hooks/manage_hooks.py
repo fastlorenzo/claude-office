@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -302,6 +303,56 @@ def unwrap_statusline(dry_run: bool = False) -> bool:
     return True
 
 
+STATUSLINE_VERIFY_PAYLOAD = '{"session_id":"selftest"}'
+STATUSLINE_VERIFY_TIMEOUT = 10  # Seconds
+
+
+def _run_statusline_command(command: str, stdin_json: str) -> str:
+    """Run a statusLine command through the shell (as Claude Code does); return stdout.
+
+    Any failure (spawn error, timeout) yields an empty string so callers can
+    treat it as "produced no output".
+    """
+    env = {**os.environ, "CLAUDE_OFFICE_STATUSLINE_DRY_RUN": "1"}  # never POST selftest data
+    try:
+        proc = subprocess.run(  # noqa: S602 - the user's own configured statusLine command
+            command,
+            shell=True,
+            input=stdin_json,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=STATUSLINE_VERIFY_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout
+
+
+def verify_statusline() -> bool:
+    """Run the wrapped statusLine command on a minimal payload.
+
+    If it prints nothing, the wrap is broken (e.g. the hook tool predates the
+    ``statusline`` subcommand), so the original command is restored and a
+    warning is printed. Returns True when healthy or when nothing is wrapped.
+    """
+    settings_path = get_settings_path()
+    settings = load_settings(settings_path)
+    sl = settings.get("statusLine")
+    if not isinstance(sl, dict) or not is_wrapped(sl.get("command")):
+        print("  [Skip] statusLine: not wrapped, nothing to verify.")
+        return True
+    out = _run_statusline_command(sl["command"], STATUSLINE_VERIFY_PAYLOAD)
+    if out.strip():
+        print("  [OK] statusLine: wrapped command produced output.")
+        return True
+    print("  [Warn] statusLine: wrapped command produced no output; restoring the original.")
+    print("         Check that 'claude-office-hook' is on PATH and up to date, then re-run.")
+    unwrap_statusline()
+    return False
+
+
 def convert_camel_to_snake(name: str) -> str:
     import re
 
@@ -313,7 +364,13 @@ def main():
     parser = argparse.ArgumentParser(description="Manage Claude Office hooks.")
     parser.add_argument(
         "action",
-        choices=["install", "uninstall", "wrap-statusline", "unwrap-statusline"],
+        choices=[
+            "install",
+            "uninstall",
+            "wrap-statusline",
+            "unwrap-statusline",
+            "verify-statusline",
+        ],
         help="Action to perform",
     )
     parser.add_argument("--dry-run", action="store_true", help="Don't save changes")
@@ -329,6 +386,8 @@ def main():
         wrap_statusline(args.hook_cmd, args.dry_run)
     elif args.action == "unwrap-statusline":
         unwrap_statusline(args.dry_run)
+    elif args.action == "verify-statusline":
+        verify_statusline()
 
 
 if __name__ == "__main__":

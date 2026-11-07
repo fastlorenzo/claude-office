@@ -11,6 +11,7 @@ unit tested; ``main`` wires in the real transport.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -18,7 +19,9 @@ from collections.abc import Callable, Sequence
 
 from claude_office_hooks.debug_logger import log_error
 
-__all__ = ["POST_TIMEOUT", "telemetry_url", "run_statusline"]
+__all__ = ["DRY_RUN_ENV", "POST_TIMEOUT", "telemetry_url", "run_statusline"]
+
+DRY_RUN_ENV = "CLAUDE_OFFICE_STATUSLINE_DRY_RUN"
 
 POST_TIMEOUT = 0.15  # seconds: hard cap for the fire-and-forget POST
 
@@ -37,11 +40,17 @@ def run_statusline(
     post: Callable[[bytes], None],
     stdout_write: Callable[[bytes], None],
 ) -> int:
-    """Tee *stdin_data* to *post* (best effort) and run *command* with it."""
+    """Tee *stdin_data* to *post* (best effort) and run *command* with it.
+
+    With ``CLAUDE_OFFICE_STATUSLINE_DRY_RUN=1`` the POST is skipped entirely
+    (used by the installer self-test so no fake session reaches the backend);
+    the wrapped command still runs and its output is relayed.
+    """
+    dry_run = os.environ.get(DRY_RUN_ENV) == "1"
 
     def _post() -> None:
         try:
-            if stdin_data.strip():
+            if stdin_data.strip() and not dry_run:
                 post(stdin_data)
         except Exception as exc:  # never disturb the status line
             log_error(exc, "statusline post failed")

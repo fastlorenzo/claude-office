@@ -100,3 +100,87 @@ def test_wrap_without_statusline_is_noop(tmp_path: Path, monkeypatch: pytest.Mon
     (tmp_path / "settings.json").write_text("{}", encoding="utf-8")
     assert not manage_hooks.wrap_statusline(HOOK)
     assert not manage_hooks.unwrap_statusline()
+
+
+def _fake_hook(tmp_path: Path) -> str:
+    """Stand-in for claude-office-hook: drops ``statusline --`` and runs the rest."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "claude-office-hook"
+    fake.write_text('#!/bin/sh\nshift 2\nexec "$@"\n', encoding="utf-8")
+    fake.chmod(0o755)
+    return str(fake)
+
+
+def test_run_statusline_command_feeds_stdin_through_shell() -> None:
+    assert manage_hooks._run_statusline_command("cat", '{"session_id":"selftest"}') == (
+        '{"session_id":"selftest"}'
+    )
+    assert manage_hooks._run_statusline_command("exit 0", "{}") == ""
+
+
+def test_verify_keeps_healthy_wrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    orig = {"type": "command", "command": "cat"}
+    p = _settings(tmp_path, monkeypatch, orig)
+    hook = _fake_hook(tmp_path)
+    assert manage_hooks.wrap_statusline(hook)
+    wrapped = json.loads(p.read_text())["statusLine"]
+
+    assert manage_hooks.verify_statusline()
+    assert json.loads(p.read_text())["statusLine"] == wrapped  # untouched
+
+
+def test_verify_auto_unwraps_when_wrapped_command_is_silent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orig = {"type": "command", "command": "true", "padding": 2}
+    p = _settings(tmp_path, monkeypatch, orig)
+    assert manage_hooks.wrap_statusline(_fake_hook(tmp_path))
+
+    assert not manage_hooks.verify_statusline()
+    assert json.loads(p.read_text())["statusLine"] == orig
+    assert json.loads(p.read_text())["model"] == "opus"
+    assert not (tmp_path / "claude-office-statusline-original.json").exists()
+
+
+def test_verify_auto_unwraps_when_hook_binary_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orig = {"type": "command", "command": "echo hi"}
+    p = _settings(tmp_path, monkeypatch, orig)
+    assert manage_hooks.wrap_statusline("/nonexistent/claude-office-hook")
+
+    assert not manage_hooks.verify_statusline()
+    assert json.loads(p.read_text())["statusLine"] == orig
+
+
+def test_verify_is_noop_when_not_wrapped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    orig = {"type": "command", "command": "echo hi"}
+    p = _settings(tmp_path, monkeypatch, orig)
+    assert manage_hooks.verify_statusline()
+    assert json.loads(p.read_text())["statusLine"] == orig
+
+
+def test_dry_run_env_skips_post_but_still_relays_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAUDE_OFFICE_STATUSLINE_DRY_RUN", "1")
+    posted: list[bytes] = []
+    out: list[bytes] = []
+    code = run_statusline(
+        [sys.executable, "-c", "import sys; sys.stdout.write('ok:' + sys.stdin.read())"],
+        b'{"session_id":"selftest"}',
+        posted.append,
+        out.append,
+    )
+    assert code == 0
+    assert posted == []  # POST never called
+    assert out == [b'ok:{"session_id":"selftest"}']
+
+
+def test_verify_runner_sets_dry_run_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CLAUDE_OFFICE_STATUSLINE_DRY_RUN", raising=False)
+    assert (
+        manage_hooks._run_statusline_command("printenv CLAUDE_OFFICE_STATUSLINE_DRY_RUN", "{}")
+        == "1\n"
+    )

@@ -122,7 +122,7 @@ echo "Configuration saved."
 # Install the python package as a tool
 echo "Installing claude-office-hook tool..."
 cd "$HOOKS_DIR"
-uv tool install --force -p 3.14 .
+uv tool install --force --reinstall -p 3.14 .
 
 # Use the command name directly - uv tool install adds it to PATH
 # This is cross-platform compatible (works on macOS, Linux, and Windows)
@@ -141,8 +141,21 @@ echo "Configuring Claude settings..."
 uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" install --hook-cmd "$HOOK_CMD"
 
 if [ "$STATUSLINE" = "1" ]; then
-    echo "Wrapping statusLine.command with the telemetry tee..."
-    uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" wrap-statusline --hook-cmd "$HOOK_CMD"
+    # Pre-wrap self-test: a stale cached build may lack the 'statusline'
+    # subcommand. Only wrap if the tool echoes the token back exactly.
+    echo "Self-testing claude-office-hook statusline..."
+    SELFTEST_OUT=$(printf '{}' | CLAUDE_OFFICE_STATUSLINE_DRY_RUN=1 "$HOOK_CMD" statusline -- echo __co_ok__ 2>/dev/null || true)
+    if [ "$SELFTEST_OUT" = "__co_ok__" ]; then
+        echo "Wrapping statusLine.command with the telemetry tee..."
+        uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" wrap-statusline --hook-cmd "$HOOK_CMD"
+        # Post-wrap check: run the wrapped command; auto-unwrap if it prints nothing.
+        echo "Verifying the wrapped statusLine command..."
+        uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" verify-statusline --hook-cmd "$HOOK_CMD" || true
+    else
+        echo "Warning: statusline self-test failed (expected '__co_ok__', got '$SELFTEST_OUT')."
+        echo "         Skipping the statusLine wrap; Claude settings were left untouched."
+        echo "         Fix the hook install (is '$HOOK_CMD' on PATH and up to date?) and re-run with --statusline."
+    fi
 fi
 
 echo ""
