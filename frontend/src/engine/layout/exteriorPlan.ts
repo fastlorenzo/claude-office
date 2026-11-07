@@ -59,6 +59,8 @@ export interface Tree {
   x: number;
   z: number;
   h: number;
+  /** 0 broadleaf · 1 columnar · 2 shrub */
+  species: 0 | 1 | 2;
 }
 
 export interface ExteriorPlan {
@@ -229,12 +231,52 @@ export function planExterior(fp: Footprint, seed = 31337): ExteriorPlan {
         x: s.x0 + (s.x1 - s.x0) * (0.3 + r() * 0.4),
         z,
         h: 4.5 + r() * 3,
+        species: r() < 0.25 ? 1 : 0,
       });
     }
   }
   for (const s of [strips[2], strips[3]]) {
     for (let x = s.x0 + 4; x < s.x1 - 3; x += 8 + r() * 4) {
-      trees.push({ x, z: s.z0 + 2 + r() * 3, h: 3.5 + r() * 2 });
+      trees.push({
+        x,
+        z: s.z0 + 2 + r() * 3,
+        h: 3.5 + r() * 2,
+        species: r() < 0.3 ? 1 : 0,
+      });
+    }
+    // Low shrub hedge along the car-park edge.
+    for (let x = s.x0 + 1.5; x < s.x1 - 1; x += 2.2 + r() * 1.2) {
+      trees.push({ x, z: s.z0 + 0.9, h: 0.9 + r() * 0.7, species: 2 });
+    }
+  }
+  // Groves between the neighbouring sheds, clear of everything built.
+  const treeFree = (x: number, z: number): boolean => {
+    const t = rect(x - 2, x + 2, z - 2, z + 2);
+    return (
+      !keepOut.some((k) => overlaps(k, t)) &&
+      !sheds.some((s) => overlaps(grow(shedRect(s), 3), t))
+    );
+  };
+  for (let g = 0, placed = 0; g < 80 && placed < 14; g++) {
+    const a = r() * Math.PI * 2;
+    const dist = 75 + r() * 150;
+    const gx = cx + Math.sin(a) * dist * 1.25;
+    const gz = cz + Math.cos(a) * dist * 1.1;
+    if (!treeFree(gx, gz)) continue;
+    placed++;
+    const n = 6 + Math.floor(r() * 8);
+    for (let i = 0; i < n; i++) {
+      const ta = r() * Math.PI * 2;
+      const td = Math.sqrt(r()) * 14;
+      const x = gx + Math.cos(ta) * td;
+      const z = gz + Math.sin(ta) * td;
+      if (!treeFree(x, z)) continue;
+      trees.push({
+        x,
+        z,
+        h: 6 + r() * 6,
+        species: r() < 0.2 ? 1 : 0,
+      });
     }
   }
 

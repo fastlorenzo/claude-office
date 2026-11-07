@@ -34,6 +34,23 @@ describe("planExterior", () => {
           expect(overlaps(shedRect(a), shedRect(b))).toBe(false);
     });
 
+    it(`keeps trees off the pavement and out of the sheds (zN=${fp.zN})`, () => {
+      expect(p.trees.length).toBeGreaterThan(20);
+      expect(p.trees.some((t) => t.species === 2)).toBe(true);
+      for (const t of p.trees) {
+        expect([0, 1, 2]).toContain(t.species);
+        const pt = {
+          x0: t.x - 0.1,
+          x1: t.x + 0.1,
+          z0: t.z - 0.1,
+          z1: t.z + 0.1,
+        };
+        expect(overlaps(pt, factory)).toBe(false);
+        for (const a of p.asphalt) expect(overlaps(pt, a)).toBe(false);
+        for (const s of p.sheds) expect(overlaps(pt, shedRect(s))).toBe(false);
+      }
+    });
+
     it(`parks cars only inside the car park (zN=${fp.zN})`, () => {
       expect(p.cars.length).toBeGreaterThan(10);
       const lot = p.asphalt.find((a) => a.z1 === fp.zS - 8)!;
