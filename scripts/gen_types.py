@@ -30,8 +30,13 @@ from app.models.ci import (  # noqa: E402  # type: ignore[import]
     CampusProject,
     CheckRun,
     CheckSummary,
+    LocalCommit,
+    LocalGitState,
+    LocalWorktree,
     PipelineRun,
+    PrLabel,
     PullRequestInfo,
+    ReleaseInfo,
 )
 from app.models.common import (  # noqa: E402  # type: ignore[import]
     BubbleContent,
@@ -125,8 +130,13 @@ MODELS = [
     CampusProject,
     CheckRun,
     CheckSummary,
+    LocalCommit,
+    LocalGitState,
+    LocalWorktree,
     PipelineRun,
+    PrLabel,
     PullRequestInfo,
+    ReleaseInfo,
 ]
 
 # Generate combined JSON schema with camelCase field names (by_alias=True)

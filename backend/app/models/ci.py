@@ -9,16 +9,23 @@ from pydantic.alias_generators import to_camel
 
 __all__ = [
     "CampusProject",
+    "CheckKind",
     "CheckRun",
     "CheckState",
     "CheckSummary",
+    "LocalCommit",
+    "LocalGitState",
+    "LocalWorktree",
     "PipelineRun",
+    "PrLabel",
     "PullRequestInfo",
+    "ReleaseInfo",
 ]
 
 _CFG = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 CheckState = Literal["none", "queued", "running", "success", "failure", "cancelled"]
+CheckKind = Literal["test", "build", "lint", "security", "deploy", "release", "other"]
 
 
 class CheckRun(BaseModel):
@@ -29,6 +36,8 @@ class CheckRun(BaseModel):
     started_at: str | None = None
     duration_s: float | None = None
     url: str | None = None
+    kind: CheckKind = "other"
+    attempt: int | None = None
 
 
 class CheckSummary(BaseModel):
@@ -40,6 +49,13 @@ class CheckSummary(BaseModel):
     failed: int = 0
     pending: int = 0
     runs: list[CheckRun] = Field(default_factory=lambda: cast(list[CheckRun], []))  # <= 12
+
+
+class PrLabel(BaseModel):
+    model_config = _CFG
+
+    name: str
+    color: str | None = None  # "#rrggbb"
 
 
 class PullRequestInfo(BaseModel):
@@ -57,6 +73,15 @@ class PullRequestInfo(BaseModel):
     checks: CheckSummary = Field(default_factory=CheckSummary)
     session_id: str | None = None
     updated_at: str
+    base_branch: str | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    changed_files: int | None = None
+    labels: list[PrLabel] = Field(default_factory=lambda: cast(list[PrLabel], []))
+    bot: bool = False  # dependabot / renovate / github-actions author
+    created_at: str | None = None
+    merged_at: str | None = None
+    closed_at: str | None = None
 
 
 class PipelineRun(BaseModel):
@@ -70,6 +95,46 @@ class PipelineRun(BaseModel):
     started_at: str | None = None
     duration_s: float | None = None
     url: str | None = None
+    event: str | None = None
+    head_sha: str | None = None
+    attempt: int | None = None
+
+
+class ReleaseInfo(BaseModel):
+    model_config = _CFG
+
+    tag: str
+    name: str | None = None
+    published_at: str | None = None
+    prerelease: bool = False
+    url: str | None = None
+
+
+class LocalCommit(BaseModel):
+    model_config = _CFG
+
+    hash: str
+    message: str
+    at: str
+
+
+class LocalWorktree(BaseModel):
+    model_config = _CFG
+
+    path: str
+    branch: str | None = None
+    session_id: str | None = None
+
+
+class LocalGitState(BaseModel):
+    model_config = _CFG
+
+    branch: str | None = None
+    ahead: int = 0
+    behind: int = 0
+    dirty_files: int = 0
+    last_commit: LocalCommit | None = None
+    worktrees: list[LocalWorktree] = Field(default_factory=lambda: cast(list[LocalWorktree], []))
 
 
 class CampusProject(BaseModel):
@@ -86,3 +151,9 @@ class CampusProject(BaseModel):
     pipelines: list[PipelineRun] = Field(default_factory=lambda: cast(list[PipelineRun], []))
     ci_available: bool = False
     updated_at: str
+    main_health: CheckState = "none"  # newest CI run on the default branch
+    releases: list[ReleaseInfo] = Field(default_factory=lambda: cast(list[ReleaseInfo], []))  # <= 5
+    local_git: LocalGitState | None = None
+    stale: bool = False  # last fetch failed, data is last-good
+    ci_error: str | None = None
+    fetched_at: str | None = None

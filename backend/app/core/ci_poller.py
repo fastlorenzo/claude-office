@@ -21,10 +21,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from app.models.ci import (
+    CheckKind,
     CheckRun,
     CheckState,
     CheckSummary,
     PipelineRun,
+    PrLabel,
     PullRequestInfo,
 )
 
@@ -56,9 +58,13 @@ RECENT_PR_WINDOW = timedelta(hours=24)
 
 PR_FIELDS = (
     "number,title,headRefName,author,url,isDraft,state,reviewDecision,mergeable,"
-    "statusCheckRollup,updatedAt,mergedAt,closedAt"
+    "statusCheckRollup,updatedAt,mergedAt,closedAt,baseRefName,additions,deletions,changedFiles,"
+    "labels,createdAt"
 )
-RUN_FIELDS = "databaseId,workflowName,headBranch,event,status,conclusion,createdAt,updatedAt,url"
+RUN_FIELDS = (
+    "databaseId,workflowName,headBranch,headSha,event,status,conclusion,"
+    "createdAt,updatedAt,url,attempt"
+)
 
 
 @dataclass
@@ -142,6 +148,32 @@ def _status_context_state(state: Any) -> CheckState:
     return "none"
 
 
+_KIND_PATTERNS: list[tuple[CheckKind, re.Pattern[str]]] = [
+    (
+        "security",
+        re.compile(r"secur|codeql|snyk|trivy|semgrep|audit|vuln|secret|sast|dependabot", re.I),
+    ),
+    ("deploy", re.compile(r"deploy|rollout|\bcd\b|preview|staging", re.I)),
+    ("release", re.compile(r"release|publish", re.I)),
+    (
+        "lint",
+        re.compile(
+            r"lint|format|fmt|prettier|ruff|eslint|style|typecheck|type-check|mypy|tsc", re.I
+        ),
+    ),
+    ("test", re.compile(r"test|pytest|vitest|jest|spec|e2e|unit|integration|coverage", re.I)),
+    ("build", re.compile(r"build|compile|bundle|package|docker|image", re.I)),
+]
+
+
+def classify_check(name: str) -> CheckKind:
+    """Classify a check name into a CheckKind (first matching pattern wins)."""
+    for kind, pat in _KIND_PATTERNS:
+        if pat.search(name):
+            return kind
+    return "other"
+
+
 def rollup_checks(entries: Any) -> CheckSummary:
     """Roll a ``statusCheckRollup`` array (CheckRun + StatusContext) into a summary.
 
@@ -165,6 +197,7 @@ def rollup_checks(entries: Any) -> CheckSummary:
                     state=state,
                     started_at=_s(e.get("startedAt")),
                     url=_s(e.get("targetUrl")),
+                    kind=classify_check(name),
                 )
             else:
                 name = _s(e.get("name")) or _s(e.get("workflowName")) or "check"
@@ -179,6 +212,7 @@ def rollup_checks(entries: Any) -> CheckSummary:
                     if state in ("success", "failure", "cancelled")
                     else None,
                     url=_s(e.get("detailsUrl")),
+                    kind=classify_check(name),
                 )
             prev = latest.get(name)
             if prev is None or (started or datetime.min.replace(tzinfo=UTC)) >= (
@@ -216,6 +250,36 @@ def rollup_checks(entries: Any) -> CheckSummary:
     )
 
 
+def _int(v: Any) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _labels(raw: Any) -> list[PrLabel]:
+    out: list[PrLabel] = []
+    if isinstance(raw, list):
+        for item in cast(list[Any], raw):
+            if not isinstance(item, dict):
+                continue
+            d = cast(dict[str, Any], item)
+            name = _s(d.get("name"))
+            if not name:
+                continue
+            color = _s(d.get("color"))
+            if color and not color.startswith("#"):
+                color = f"#{color}"
+            out.append(PrLabel(name=name, color=color))
+    return out
+
+
+def _is_bot(author: Any, login: str | None) -> bool:
+    if isinstance(author, dict) and cast(dict[str, Any], author).get("is_bot") is True:
+        return True
+    return bool(login) and bool(_BOT_RE.search(login or ""))
+
+
+_BOT_RE = re.compile(r"dependabot|renovate|github-actions|\[bot\]$|^app/", re.I)
+
+
 def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
     """One ``gh pr list --json`` entry -> PullRequestInfo (None when unusable)."""
     number = raw.get("number")
@@ -236,6 +300,15 @@ def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
         str(raw.get("mergeable") or "").upper()
     )
     return PullRequestInfo(
+        base_branch=_s(raw.get("baseRefName")),
+        additions=_int(raw.get("additions")),
+        deletions=_int(raw.get("deletions")),
+        changed_files=_int(raw.get("changedFiles")),
+        labels=_labels(raw.get("labels")),
+        bot=_is_bot(author, login),
+        created_at=_s(raw.get("createdAt")),
+        merged_at=_s(raw.get("mergedAt")),
+        closed_at=_s(raw.get("closedAt")),
         number=number,
         title=_s(raw.get("title")) or f"#{number}",
         branch=_s(raw.get("headRefName")) or "",
@@ -301,6 +374,9 @@ def map_pipeline_run(raw: dict[str, Any]) -> PipelineRun | None:
         workflow=workflow,
         kind=_pipeline_kind(workflow, str(raw.get("event") or "")),  # type: ignore[arg-type]
         branch=_s(raw.get("headBranch")),
+        event=_s(raw.get("event")),
+        head_sha=_s(raw.get("headSha")),
+        attempt=_int(raw.get("attempt")),
         state=state,
         started_at=_s(raw.get("createdAt")),
         duration_s=_duration(created, updated)

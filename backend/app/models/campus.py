@@ -22,7 +22,7 @@ from app.core.session_summary import extract_refs, project_name_for_root, resolv
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
 from app.core.telemetry import get_telemetry_store
 from app.models.agents import Agent, AgentState, Boss, BossState, OfficeState
-from app.models.ci import CampusProject, PullRequestInfo
+from app.models.ci import CampusProject, CheckState, PipelineRun, PullRequestInfo
 from app.models.common import TodoItem, TodoStatus
 from app.models.overview import OverviewBucket
 from app.models.telemetry import CampusStats, SessionActivityStats, SessionTelemetry
@@ -313,9 +313,20 @@ def build_projects(sessions: list[CampusSession], now: datetime) -> list[CampusP
                 pipelines=list(ci.pipelines) if ci and available else [],
                 ci_available=available,
                 updated_at=updated.isoformat(),
+                main_health=_main_health(ci.pipelines, ref.default_branch if ref else None)
+                if ci and available
+                else "none",
             )
         )
     return out
+
+
+def _main_health(pipelines: list[PipelineRun], default_branch: str | None) -> CheckState:
+    """State of the newest CI pipeline on the default branch (pipelines are newest first)."""
+    for run in pipelines:
+        if run.kind == "ci" and (default_branch is None or run.branch == default_branch):
+            return run.state
+    return "none"
 
 
 def build_campus(sessions: dict[str, StateMachine]) -> CampusState:

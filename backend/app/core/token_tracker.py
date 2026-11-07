@@ -115,7 +115,7 @@ class TokenTracker:
         model = usage.get("model")
         if model and isinstance(model, str):
             self.max_context_tokens = _context_window_for_model(model)
-        logger.info(
+        logger.debug(
             f"Context: {self.context_utilization:.1%} "
             f"({self.total_tokens:,}/{self.max_context_tokens:,} tokens)"
         )

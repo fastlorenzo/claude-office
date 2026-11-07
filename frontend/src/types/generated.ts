@@ -151,22 +151,59 @@ export type State2 = "none" | "queued" | "running" | "success" | "failure" | "ca
 export type Startedat1 = string | null;
 export type Durations = number | null;
 export type Url1 = string | null;
+export type Kind = "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
+export type Attempt = number | null;
 export type Runs = CheckRun[];
 export type Sessionid = string | null;
 export type Updatedat = string;
+export type Basebranch = string | null;
+export type Additions = number | null;
+export type Deletions = number | null;
+export type Changedfiles = number | null;
+export type Name3 = string;
+export type Color2 = string | null;
+export type Labels = PrLabel[];
+export type Bot = boolean;
+export type Createdat = string | null;
+export type Mergedat = string | null;
+export type Closedat = string | null;
 export type Pullrequests = PullRequestInfo[];
 export type Id2 = string;
 export type Workflow = string;
-export type Kind = "ci" | "deploy" | "release" | "other";
+export type Kind1 = "ci" | "deploy" | "release" | "other";
 export type Branch1 = string | null;
 export type State3 = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Startedat2 = string | null;
 export type Durations1 = number | null;
 export type Url2 = string | null;
+export type Event = string | null;
+export type Headsha = string | null;
+export type Attempt1 = number | null;
 export type Pipelines = PipelineRun[];
 export type Ciavailable = boolean;
 export type Updatedat1 = string;
-export type Sessionid1 = string;
+export type Mainhealth = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+export type Tag = string;
+export type Name4 = string | null;
+export type Publishedat = string | null;
+export type Prerelease = boolean;
+export type Url3 = string | null;
+export type Releases = ReleaseInfo[];
+export type Branch2 = string | null;
+export type Ahead = number;
+export type Behind = number;
+export type Dirtyfiles = number;
+export type Hash = string;
+export type Message2 = string;
+export type At = string;
+export type Path = string;
+export type Branch3 = string | null;
+export type Sessionid1 = string | null;
+export type Worktrees = LocalWorktree[];
+export type Stale = boolean;
+export type Cierror = string | null;
+export type Fetchedat = string | null;
+export type Sessionid2 = string;
 export type Bucket = "needs_you" | "working" | "done";
 export type Agents = Agent[];
 export type Deskcount = number;
@@ -208,7 +245,7 @@ export type Summary4 = string | null;
 export type Refs = string[];
 export type Project = string | null;
 export type Projectid = string | null;
-export type Kind1 =
+export type Kind2 =
   | "needs_approval"
   | "waiting_user"
   | "planning"
@@ -266,7 +303,7 @@ export type Linesaddedtoday = number | null;
 export type Linesremovedtoday = number | null;
 export type Updatedat3 = string;
 export type Lastupdated1 = string;
-export type Path = string;
+export type Path1 = string;
 /**
  * Git file status codes.
  *
@@ -278,11 +315,11 @@ export type Staged = boolean;
 /**
  * Short commit hash (7 chars)
  */
-export type Hash = string;
+export type Hash1 = string;
 /**
  * First line of commit message
  */
-export type Message2 = string;
+export type Message3 = string;
 export type Author1 = string;
 export type Timestamp1 = string;
 /**
@@ -351,7 +388,7 @@ export type AgentType1 = string | null;
 export type TaskDescription1 = string | null;
 export type ResultSummary1 = string | null;
 export type NotificationType = string | null;
-export type Message3 = string | null;
+export type Message4 = string | null;
 export type ErrorType = string | null;
 export type Reason = string | null;
 export type Summary5 = string | null;
@@ -383,7 +420,7 @@ export type NativeAgentId3 = string | null;
 export type TranscriptPath3 = string | null;
 export type AgentTranscriptPath3 = string | null;
 export type Summary6 = string | null;
-export type Message4 = string | null;
+export type Message5 = string | null;
 export type TeamName3 = string | null;
 export type TeammateName3 = string | null;
 export type TaskListId3 = string | null;
@@ -395,7 +432,7 @@ export type FloorId3 = string | null;
 export type RoomId3 = string | null;
 export type Filepath = string;
 export type Editcount = number;
-export type Sessionid2 = string;
+export type Sessionid3 = string;
 export type Agents1 = Agent[];
 export type Lastupdated2 = string;
 export type Id4 = string;
@@ -435,15 +472,15 @@ export type Roomid = string | null;
 /**
  * Current branch name
  */
-export type Branch2 = string;
+export type Branch4 = string;
 /**
  * Commits ahead of remote
  */
-export type Ahead = number;
+export type Ahead1 = number;
 /**
  * Commits behind remote
  */
-export type Behind = number;
+export type Behind1 = number;
 export type ChangedFiles = ChangedFile[];
 /**
  * Last 10 commits
@@ -463,7 +500,7 @@ export type NativeAgentId4 = string | null;
 export type TranscriptPath4 = string | null;
 export type AgentTranscriptPath4 = string | null;
 export type Summary8 = string | null;
-export type Message5 = string | null;
+export type Message6 = string | null;
 export type TeamName4 = string | null;
 export type TeammateName4 = string | null;
 export type TaskListId4 = string | null;
@@ -476,7 +513,7 @@ export type RoomId4 = string | null;
 export type NotificationType1 = string | null;
 export type ErrorType1 = string | null;
 export type Reason1 = string | null;
-export type Sessionid3 = string;
+export type Sessionid4 = string;
 export type Bucket1 = "needs_you" | "working" | "done";
 export type Currenttask2 = string | null;
 export type Tododone = number;
@@ -500,7 +537,7 @@ export type NativeAgentId5 = string | null;
 export type TranscriptPath5 = string | null;
 export type AgentTranscriptPath5 = string | null;
 export type Summary9 = string | null;
-export type Message6 = string | null;
+export type Message7 = string | null;
 export type TeamName5 = string | null;
 export type TeammateName5 = string | null;
 export type TaskListId5 = string | null;
@@ -526,7 +563,7 @@ export type NativeAgentId6 = string | null;
 export type TranscriptPath6 = string | null;
 export type AgentTranscriptPath6 = string | null;
 export type Summary10 = string | null;
-export type Message7 = string | null;
+export type Message8 = string | null;
 export type TeamName6 = string | null;
 export type TeammateName6 = string | null;
 export type TaskListId6 = string | null;
@@ -546,7 +583,7 @@ export type NativeAgentId7 = string | null;
 export type TranscriptPath7 = string | null;
 export type AgentTranscriptPath7 = string | null;
 export type Summary11 = string | null;
-export type Message8 = string | null;
+export type Message9 = string | null;
 export type TeamName7 = string | null;
 export type TeammateName7 = string | null;
 export type TaskListId7 = string | null;
@@ -567,7 +604,7 @@ export type NativeAgentId8 = string | null;
 export type TranscriptPath8 = string | null;
 export type AgentTranscriptPath8 = string | null;
 export type Summary12 = string | null;
-export type Message9 = string | null;
+export type Message10 = string | null;
 export type TeamName8 = string | null;
 export type TeammateName8 = string | null;
 export type TaskListId8 = string | null;
@@ -785,6 +822,12 @@ export interface CampusProject {
   pipelines?: Pipelines;
   ciAvailable?: Ciavailable;
   updatedAt: Updatedat1;
+  mainHealth?: Mainhealth;
+  releases?: Releases;
+  localGit?: LocalGitState | null;
+  stale?: Stale;
+  ciError?: Cierror;
+  fetchedAt?: Fetchedat;
   [k: string]: unknown;
 }
 /**
@@ -804,6 +847,15 @@ export interface PullRequestInfo {
   checks?: CheckSummary;
   sessionId?: Sessionid;
   updatedAt: Updatedat;
+  baseBranch?: Basebranch;
+  additions?: Additions;
+  deletions?: Deletions;
+  changedFiles?: Changedfiles;
+  labels?: Labels;
+  bot?: Bot;
+  createdAt?: Createdat;
+  mergedAt?: Mergedat;
+  closedAt?: Closedat;
   [k: string]: unknown;
 }
 /**
@@ -829,6 +881,17 @@ export interface CheckRun {
   startedAt?: Startedat1;
   durationS?: Durations;
   url?: Url1;
+  kind?: Kind;
+  attempt?: Attempt;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "PrLabel".
+ */
+export interface PrLabel {
+  name: Name3;
+  color?: Color2;
   [k: string]: unknown;
 }
 /**
@@ -838,12 +901,60 @@ export interface CheckRun {
 export interface PipelineRun {
   id: Id2;
   workflow: Workflow;
-  kind?: Kind;
+  kind?: Kind1;
   branch?: Branch1;
   state?: State3;
   startedAt?: Startedat2;
   durationS?: Durations1;
   url?: Url2;
+  event?: Event;
+  headSha?: Headsha;
+  attempt?: Attempt1;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "ReleaseInfo".
+ */
+export interface ReleaseInfo {
+  tag: Tag;
+  name?: Name4;
+  publishedAt?: Publishedat;
+  prerelease?: Prerelease;
+  url?: Url3;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "LocalGitState".
+ */
+export interface LocalGitState {
+  branch?: Branch2;
+  ahead?: Ahead;
+  behind?: Behind;
+  dirtyFiles?: Dirtyfiles;
+  lastCommit?: LocalCommit | null;
+  worktrees?: Worktrees;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "LocalCommit".
+ */
+export interface LocalCommit {
+  hash: Hash;
+  message: Message2;
+  at: At;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "LocalWorktree".
+ */
+export interface LocalWorktree {
+  path: Path;
+  branch?: Branch3;
+  sessionId?: Sessionid1;
   [k: string]: unknown;
 }
 /**
@@ -853,7 +964,7 @@ export interface PipelineRun {
  * via the `definition` "CampusSession".
  */
 export interface CampusSession {
-  sessionId: Sessionid1;
+  sessionId: Sessionid2;
   bucket: Bucket;
   boss: Boss1;
   agents: Agents;
@@ -918,7 +1029,7 @@ export interface TodoItem {
  * via the `definition` "SessionPhase".
  */
 export interface SessionPhase {
-  kind: Kind1;
+  kind: Kind2;
   label: Label;
   detail?: Detail;
   since?: Since;
@@ -1014,7 +1125,7 @@ export interface Sessionsbystatus {
  * via the `definition` "ChangedFile".
  */
 export interface ChangedFile {
-  path: Path;
+  path: Path1;
   status: FileStatus;
   staged?: Staged;
   [k: string]: unknown;
@@ -1026,8 +1137,8 @@ export interface ChangedFile {
  * via the `definition` "Commit".
  */
 export interface Commit {
-  hash: Hash;
-  message: Message2;
+  hash: Hash1;
+  message: Message3;
   author: Author1;
   timestamp: Timestamp1;
   relative_time: RelativeTime;
@@ -1061,7 +1172,7 @@ export interface ConversationEntry {
  * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
  * via the `definition` "Event".
  */
-export interface Event {
+export interface Event1 {
   event_type: EventType;
   session_id: SessionId;
   timestamp?: Timestamp3;
@@ -1096,7 +1207,7 @@ export interface EventData {
   task_description?: TaskDescription1;
   result_summary?: ResultSummary1;
   notification_type?: NotificationType;
-  message?: Message3;
+  message?: Message4;
   error_type?: ErrorType;
   reason?: Reason;
   summary?: Summary5;
@@ -1142,7 +1253,7 @@ export interface EventDataBase {
   transcript_path?: TranscriptPath3;
   agent_transcript_path?: AgentTranscriptPath3;
   summary?: Summary6;
-  message?: Message4;
+  message?: Message5;
   team_name?: TeamName3;
   teammate_name?: TeammateName3;
   task_list_id?: TaskListId3;
@@ -1172,7 +1283,7 @@ export interface FileEdit {
  * via the `definition` "GameState".
  */
 export interface GameState {
-  sessionId: Sessionid2;
+  sessionId: Sessionid3;
   boss: Boss1;
   agents: Agents1;
   office: OfficeState;
@@ -1269,9 +1380,9 @@ export interface Fileedits {
  * via the `definition` "GitStatus".
  */
 export interface GitStatus {
-  branch: Branch2;
-  ahead?: Ahead;
-  behind?: Behind;
+  branch: Branch4;
+  ahead?: Ahead1;
+  behind?: Behind1;
   changed_files?: ChangedFiles;
   commits?: Commits;
   last_updated?: LastUpdated;
@@ -1295,7 +1406,7 @@ export interface LifecycleEventData {
   transcript_path?: TranscriptPath4;
   agent_transcript_path?: AgentTranscriptPath4;
   summary?: Summary8;
-  message?: Message5;
+  message?: Message6;
   team_name?: TeamName4;
   teammate_name?: TeammateName4;
   task_list_id?: TaskListId4;
@@ -1319,7 +1430,7 @@ export interface LifecycleEventData {
  * via the `definition` "OverviewEntry".
  */
 export interface OverviewEntry {
-  sessionId: Sessionid3;
+  sessionId: Sessionid4;
   bucket: Bucket1;
   state: BossState;
   currentTask?: Currenttask2;
@@ -1355,7 +1466,7 @@ export interface PromptEventData {
   transcript_path?: TranscriptPath5;
   agent_transcript_path?: AgentTranscriptPath5;
   summary?: Summary9;
-  message?: Message6;
+  message?: Message7;
   team_name?: TeamName5;
   teammate_name?: TeammateName5;
   task_list_id?: TaskListId5;
@@ -1399,7 +1510,7 @@ export interface SessionEventData {
   transcript_path?: TranscriptPath6;
   agent_transcript_path?: AgentTranscriptPath6;
   summary?: Summary10;
-  message?: Message7;
+  message?: Message8;
   team_name?: TeamName6;
   teammate_name?: TeammateName6;
   task_list_id?: TaskListId6;
@@ -1428,7 +1539,7 @@ export interface TaskEventData {
   transcript_path?: TranscriptPath7;
   agent_transcript_path?: AgentTranscriptPath7;
   summary?: Summary11;
-  message?: Message8;
+  message?: Message9;
   team_name?: TeamName7;
   teammate_name?: TeammateName7;
   task_list_id?: TaskListId7;
@@ -1458,7 +1569,7 @@ export interface ToolEventData {
   transcript_path?: TranscriptPath8;
   agent_transcript_path?: AgentTranscriptPath8;
   summary?: Summary12;
-  message?: Message9;
+  message?: Message10;
   team_name?: TeamName8;
   teammate_name?: TeammateName8;
   task_list_id?: TaskListId8;
