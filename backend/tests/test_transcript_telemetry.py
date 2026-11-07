@@ -238,13 +238,40 @@ class TestStoreMerge:
         assert tel.cost_usd == 9.5
         assert tel.context_tokens == 1110  # gap filled from the transcript
 
-    def test_transcript_newer_than_statusline(self, tmp_path: Path) -> None:
+    def test_stale_statusline_still_beats_newer_transcript(self, tmp_path: Path) -> None:
         store = TelemetryStore()
-        store.ingest_statusline({"session_id": "s1", "cost": {"total_cost_usd": 1.0}}, now=1000.0)
+        store.ingest_statusline(
+            {
+                "session_id": "s1",
+                "cost": {"total_cost_usd": 199.15, "total_lines_added": 31404},
+                "context_window": {
+                    "used_percentage": 17,
+                    "context_window_size": 1_000_000,
+                    "total_input_tokens": 168_000,
+                },
+            },
+            now=1000.0,
+        )
         store.refresh_transcript("s1", self._tail_file(tmp_path), now=5000.0)
         tel = store.session_telemetry("s1")
         assert tel is not None
-        assert tel.source == "transcript"
+        assert tel.source == "statusline"
+        assert tel.cost_usd == 199.15
+        assert tel.lines_added == 31404
+        assert (tel.context_used_pct, tel.context_tokens, tel.context_window) == (
+            17,
+            168_000,
+            1_000_000,
+        )
+
+    def test_subagent_transcript_never_feeds_main_session(self, tmp_path: Path) -> None:
+        store = TelemetryStore()
+        sub = tmp_path / "sess" / "subagents"
+        sub.mkdir(parents=True)
+        f = sub / "agent-a1.jsonl"
+        f.write_text(Path(self._tail_file(tmp_path)).read_text())
+        assert store.refresh_transcript("s1", str(f), now=1.0) is False
+        assert store.session_telemetry("s1") is None
 
     def test_stats_exclude_statusline_sessions(self, tmp_path: Path) -> None:
         store = TelemetryStore()

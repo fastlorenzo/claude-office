@@ -39,9 +39,9 @@ SESSION_BUCKETS = 30  # 1-min buckets per session
 BUILDING_BUCKETS = 60  # 1-min buckets building-wide
 COST_BUCKETS = 36  # 5-min buckets (3 h)
 SAMPLE_WINDOW_S = 90 * 60
-BURN_LOOKBACK_S = 60 * 60
-MIN_BURN_SPAN_S = 5 * 60
 WINDOW_LEN_S = {"five_hour": 5 * 3600, "seven_day": 7 * 24 * 3600}
+_CONTEXT_FIELDS = ("context_used_pct", "context_tokens", "context_window")
+MIN_PACE_ELAPSED = 0.02  # no pace estimate in the first 2 % of a window
 _SAVE_MIN_INTERVAL_S = 20.0
 _SESSION_CAP = 512
 
@@ -144,6 +144,8 @@ class TelemetryStore:
                 str(k): _Baseline(float(v[0]), int(v[1]), int(v[2]))
                 for k, v in d.get("base", {}).items()
             }
+            for sid, row in d.get("sessions", {}).items():
+                self.sessions[str(sid)] = SessionTelemetry.model_validate(row)
             for name, rows in d.get("samples", {}).items():
                 if name in self._samples:
                     self._samples[name] = deque((float(t), float(p)) for t, p in rows)
@@ -169,6 +171,9 @@ class TelemetryStore:
             "building": {str(k): v for k, v in self._building.items()},
             "base": {k: [b.cost, b.added, b.removed] for k, b in self._base.items()},
             "samples": {k: list(v) for k, v in self._samples.items()},
+            "sessions": {
+                k: v.model_dump(mode="json") for k, v in list(self.sessions.items())[-64:]
+            },
             "limits": {k: list(v) for k, v in self._limits.items()},
         }
         try:
@@ -319,6 +324,8 @@ class TelemetryStore:
     def refresh_transcript(self, session_id: str, path: str, now: float | None = None) -> bool:
         """Tail *path* for this session's estimated telemetry (blocking file IO)."""
         ts = time.time() if now is None else now
+        if "/subagents/" in path.replace("\\", "/"):
+            return False  # a subagent's transcript never describes the main session
         with self._tail_lock:
             tail = self._tails.get(session_id)
             if tail is None or tail.path != path:
@@ -328,23 +335,28 @@ class TelemetryStore:
             return tail.update(ts)
 
     def session_telemetry(self, session_id: str) -> SessionTelemetry | None:
-        """Status line data when present (it wins when fresher), else the transcript estimate."""
+        """Status line data wins field by field; the transcript estimate only fills gaps.
+
+        The status line refreshes only when the CLI redraws, so an idle session's
+        report may be old, but it is still the truth for every field it carries
+        (an estimate would, for instance, clamp a 1M window to 200k).
+        """
         live = self.sessions.get(session_id)
         tail = self._tails.get(session_id)
         est = tail.snapshot.telemetry if tail is not None else None
         if live is None:
             return est
-        if est is None or live.updated_at >= est.updated_at:
-            if est is None:
-                return live
-            # Fill gaps (e.g. an older Claude Code without a context block) from the estimate.
-            patch = {
-                k: v
-                for k, v in est.model_dump(exclude={"source", "updated_at"}).items()
-                if getattr(live, k) is None and v is not None
-            }
-            return live.model_copy(update=patch) if patch else live
-        return est
+        if est is None:
+            return live
+        patch: dict[str, Any] = {}
+        for k, v in est.model_dump(exclude={"source", "updated_at"}).items():
+            if k in _CONTEXT_FIELDS or v is None or getattr(live, k) is not None:
+                continue
+            patch[k] = v
+        # The context trio is only meaningful as a set (pct/tokens/window must agree).
+        if all(getattr(live, k) is None for k in _CONTEXT_FIELDS):
+            patch.update({k: getattr(est, k) for k in _CONTEXT_FIELDS})
+        return live.model_copy(update=patch) if patch else live
 
     def _estimated_sessions(self) -> list[TailSnapshot]:
         """Transcript snapshots for sessions the status line does not cover."""
@@ -367,29 +379,15 @@ class TelemetryStore:
         )
 
     def _projected(self, name: str, now: float) -> float | None:
+        """End-of-window usage at the current pace, like the status line's ``pace``.
+
+        ``used / elapsed_fraction`` where the fraction of the window already
+        gone comes from ``resets_at`` (short-span sample slopes are far too noisy).
+        """
         lim = self._limits.get(name)
         if lim is None:
             return None
-        pct, resets = lim
-        if resets is None or resets <= now:
-            return None
-        left = resets - now
-        dq = self._samples[name]
-        rate: float | None = None
-        if dq:
-            cutoff = now - BURN_LOOKBACK_S
-            first = next((s for s in dq if s[0] >= cutoff), dq[0])
-            span = dq[-1][0] - first[0]
-            if span >= MIN_BURN_SPAN_S:
-                rate = max(0.0, (dq[-1][1] - first[1]) / span)
-        if rate is None:  # fall back to the pace over the whole window
-            total = WINDOW_LEN_S[name]
-            gone = total - left
-            if gone >= total / 10:
-                rate = pct / gone
-        if rate is None:
-            return None
-        return round(min(max(pct + rate * left, pct), 999.0), 1)
+        return project_pace(lim[0], lim[1], WINDOW_LEN_S[name], now)
 
     def _window(self, name: str, now: float) -> RateLimitWindow | None:
         lim = self._limits.get(name)
@@ -442,6 +440,18 @@ class TelemetryStore:
             lines_removed_today=removed_today,
             updated_at=datetime.fromtimestamp(ts, UTC).isoformat(),
         )
+
+
+def project_pace(
+    used_pct: float, resets: float | None, window_s: float, now: float
+) -> float | None:
+    """``used / elapsed`` over a rate-limit window (None while it is too young)."""
+    if resets is None or resets <= now:
+        return None
+    elapsed = 1.0 - (resets - now) / window_s
+    if elapsed < MIN_PACE_ELAPSED:
+        return None
+    return round(min(max(used_pct / min(elapsed, 1.0), used_pct), 999.0), 1)
 
 
 def _delta(new: float | None, old: float | None, fresh: bool) -> float:

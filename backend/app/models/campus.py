@@ -7,6 +7,7 @@ frontend can render all sessions at once. Heavy ``GameState`` fields
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
@@ -20,6 +21,7 @@ from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
 from app.core.session_root import find_session_root
 from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
+from app.core.subagent_liveness import count_running_subagents, scan_agent_mtimes
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
 from app.core.telemetry import get_telemetry_store
 from app.models.agents import Agent, AgentState, Boss, BossState, OfficeState
@@ -232,17 +234,32 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
 
     settings = get_settings()
     store = get_telemetry_store()
-    activity = last_activity(sm.last_event_at, sm.title_offset_path)
+    last_act = last_activity(sm.last_event_at, sm.title_offset_path)
     bucket = overview_bucket(sm)
-    if sm.alive is not True and is_stale(activity, settings.CAMPUS_STALE_SECONDS):
+    if sm.alive is not True and is_stale(last_act, settings.CAMPUS_STALE_SECONDS):
         bucket = "done"  # possibly alive but silent: show idle, not "working"
+
+    now_ts = time.time()
+    telemetry = store.session_telemetry(session_id)
+    if telemetry is not None and telemetry.context_used_pct is not None:
+        # One source of truth for the context gauge: the status line (or its estimate),
+        # not the token tracker (200k default, fed by hook events).
+        gs.office.context_utilization = max(0.0, min(telemetry.context_used_pct / 100, 1.0))
+    activity = store.session_activity(session_id)
+    activity.subagents_running = count_running_subagents(
+        sm.agents,
+        sm.handin_queue,
+        sm.stopped_native,
+        scan_agent_mtimes(sm.title_offset_path, now_ts),
+        now_ts,
+    )
 
     return CampusSession(
         session_id=session_id,
         bucket=bucket,
         alive=sm.alive,
-        telemetry=store.session_telemetry(session_id),
-        activity=store.session_activity(session_id),
+        telemetry=telemetry,
+        activity=activity,
         last_event_at=sm.last_event_at,
         boss=gs.boss,
         agents=gs.agents,
@@ -347,7 +364,12 @@ def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
         key = "ended" if cs.ended else cs.bucket
         by_status[key] = by_status.get(key, 0) + 1
         if not cs.ended:
-            subagents += sum(1 for a in cs.agents if a.state not in _INACTIVE_AGENT_STATES)
+            running = cs.activity.subagents_running if cs.activity else None
+            subagents += (
+                running
+                if running is not None
+                else sum(1 for a in cs.agents if a.state not in _INACTIVE_AGENT_STATES)
+            )
     now = datetime.now(UTC)
     return CampusState(
         sessions=built,

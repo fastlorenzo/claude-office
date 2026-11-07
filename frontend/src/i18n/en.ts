@@ -594,7 +594,7 @@ const en = {
   "hud.help.ops": "Ops dashboard (all sessions, usage, activity)",
   "ops.title": "Ops dashboard",
   "ops.live": "{n} live",
-  "ops.subagents": "{n} subagents",
+  "ops.subagents": "{n} spawned",
   "ops.ended": "{n} ended",
   "ops.sessions": "Sessions",
   "ops.usage": "Usage",

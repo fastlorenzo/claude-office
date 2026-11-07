@@ -606,7 +606,7 @@ const ptBR: Record<TranslationKey, string> = {
   "hud.help.ops": "Painel de operações (sessões, uso, atividade)",
   "ops.title": "Painel de operações",
   "ops.live": "{n} ativas",
-  "ops.subagents": "{n} subagentes",
+  "ops.subagents": "{n} iniciados",
   "ops.ended": "{n} encerradas",
   "ops.sessions": "Sessões",
   "ops.usage": "Uso",

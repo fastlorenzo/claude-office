@@ -284,6 +284,7 @@ export type Updatedat2 = string;
 export type Eventspermin = number[];
 export type Toolcalls = number;
 export type Subagentsspawned = number;
+export type Subagentsrunning = number | null;
 export type Testruns = number;
 export type Testfailures = number;
 export type Errors = number;
@@ -1066,6 +1067,7 @@ export interface SessionActivityStats {
   toolMix?: Toolmix;
   toolCalls?: Toolcalls;
   subagentsSpawned?: Subagentsspawned;
+  subagentsRunning?: Subagentsrunning;
   testRuns?: Testruns;
   testFailures?: Testfailures;
   errors?: Errors;

@@ -114,6 +114,51 @@ describe("projectWindow", () => {
   });
 });
 
+describe("pace and live crew", () => {
+  const D7 = 7 * 86400_000;
+  it("matches the status line pace for 24 % used, 2d23h left", () => {
+    const left = (2 * 24 + 23) * 3600_000;
+    const w = projectWindow({ usedPct: 24, resetsAt: iso(left) }, D7, NOW);
+    expect(w?.projectedPct).toBeCloseTo(41.6, 1);
+  });
+
+  it("does not alert on an early, noisy pace but does on a trusted one", () => {
+    const mk = (resetsInMs: number): CampusStats => ({
+      sevenDay: { usedPct: 30, resetsAt: iso(resetsInMs), projectedPct: 999 },
+      sessionsByStatus: {},
+      activeSubagents: 0,
+      eventsPerMin: [],
+      updatedAt: iso(0),
+    });
+    const early = buildOpsModel([], mk(D7 - 3600_000), NOW);
+    expect(early.alerts.map((a) => a.kind)).not.toContain("limit7d");
+    const later = buildOpsModel([], mk(D7 / 2), NOW);
+    expect(later.alerts.map((a) => a.kind)).toContain("limit7d");
+  });
+
+  it("crew is the live count, not the cumulative spawned number", () => {
+    const m = buildOpsModel(
+      [
+        session({
+          sessionId: "c",
+          agents: [],
+          activity: {
+            eventsPerMin: [],
+            toolMix: {},
+            toolCalls: 0,
+            subagentsSpawned: 8,
+            subagentsRunning: 6,
+          },
+        }),
+      ],
+      undefined,
+      NOW,
+    );
+    expect(m.rows[0].subagents).toBe(6);
+    expect(m.activity.subagentsSpawned).toBe(8);
+  });
+});
+
 describe("buildOpsModel", () => {
   it("sorts needs-you first, then working, done, ended", () => {
     const m = buildOpsModel(

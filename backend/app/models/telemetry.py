@@ -58,7 +58,9 @@ class SessionActivityStats(BaseModel):
     events_per_min: list[int] = Field(default_factory=lambda: cast(list[int], []))
     tool_mix: dict[PhaseKind, int] = Field(default_factory=lambda: cast(dict[PhaseKind, int], {}))
     tool_calls: int = 0
-    subagents_spawned: int = 0
+    subagents_spawned: int = 0  # cumulative, this backend run
+    # Subagents running right now (None: unknown, the UI falls back to the crew list).
+    subagents_running: int | None = None
     test_runs: int = 0
     test_failures: int = 0
     errors: int = 0

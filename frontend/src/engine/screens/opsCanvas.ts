@@ -1016,7 +1016,7 @@ export function drawActivityPanel(
     "Tool calls",
     fmtCount(a.toolCalls),
     C.text,
-    a.subagentsSpawned != null ? `${a.subagentsSpawned} subagents` : undefined,
+    a.subagentsSpawned != null ? `${a.subagentsSpawned} spawned` : undefined,
   );
   if (tf > 0) {
     // Recolour the failing sub-line.

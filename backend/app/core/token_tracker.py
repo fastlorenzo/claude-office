@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from app.core.path_utils import is_safe_transcript_path
-from app.models.events import AnyEvent
+from app.models.events import AnyEvent, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +43,17 @@ def _context_window_for_model(model: str) -> int:
     ``claude-haiku-4-5`` → 200k.
     """
     model_lower = model.lower()
+    if "[1m]" in model_lower:
+        return 1_000_000
     for family, window in _CONTEXT_WINDOWS.items():
         if family in model_lower:
             return window
     return 200_000
+
+
+_SUBAGENT_EVENT_TYPES = frozenset(
+    {EventType.SUBAGENT_START, EventType.SUBAGENT_INFO, EventType.SUBAGENT_STOP}
+)
 
 
 @dataclass
@@ -88,6 +95,10 @@ class TokenTracker:
         if not event.data:
             return
 
+        # A subagent's usage belongs to the subagent, never to the main context gauge.
+        if event.event_type in _SUBAGENT_EVENT_TYPES:
+            return
+
         # Fast path: token counts embedded directly in event data.
         if event.data.input_tokens is not None or event.data.output_tokens is not None:
             if event.data.input_tokens is not None:
@@ -101,8 +112,8 @@ class TokenTracker:
             return
 
         # Slow path: parse the JSONL transcript for usage data.
-        transcript_path = event.data.transcript_path or event.data.agent_transcript_path
-        if not transcript_path:
+        transcript_path = event.data.transcript_path
+        if not transcript_path or "/subagents/" in transcript_path.replace("\\", "/"):
             return
 
         usage = self._extract_token_usage_from_jsonl(transcript_path)
@@ -115,6 +126,8 @@ class TokenTracker:
         model = usage.get("model")
         if model and isinstance(model, str):
             self.max_context_tokens = _context_window_for_model(model)
+        if self.total_tokens > self.max_context_tokens:
+            self.max_context_tokens = 1_000_000  # evidently a 1M session
         logger.debug(
             f"Context: {self.context_utilization:.1%} "
             f"({self.total_tokens:,}/{self.max_context_tokens:,} tokens)"

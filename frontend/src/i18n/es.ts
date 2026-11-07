@@ -608,7 +608,7 @@ const es: Record<TranslationKey, string> = {
   "hud.help.ops": "Panel de operaciones (sesiones, uso, actividad)",
   "ops.title": "Panel de operaciones",
   "ops.live": "{n} activas",
-  "ops.subagents": "{n} subagentes",
+  "ops.subagents": "{n} lanzados",
   "ops.ended": "{n} finalizadas",
   "ops.sessions": "Sesiones",
   "ops.usage": "Uso",

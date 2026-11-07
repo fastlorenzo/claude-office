@@ -299,8 +299,11 @@ export function buildRow(
     effort: tel?.effort?.trim() || null,
     durationMs: num(tel?.durationMs),
     cacheMinsLeft,
-    subagents: (cs.agents ?? []).filter((a) => !INACTIVE_AGENT.has(a.state))
-      .length,
+    // Running right now: the backend's liveness count (transcript-aware) when
+    // present, else the crew list.
+    subagents:
+      num(cs.activity?.subagentsRunning) ??
+      (cs.agents ?? []).filter((a) => !INACTIVE_AGENT.has(a.state)).length,
     todoDone: todos.filter((t) => t.status === "completed").length,
     todoTotal: todos.length,
     alive: !ended && cs.alive !== false,
@@ -337,10 +340,19 @@ export function sortRows<T extends { status: RoomStatus; sessionId: string }>(
 
 const FIVE_H = 5 * 3600_000;
 const SEVEN_D = 7 * 24 * 3600_000;
+const MIN_PACE_ELAPSED = 0.02;
+/** A projection is only alert-worthy once a tenth of the window has elapsed. */
+const ALERT_MIN_ELAPSED = 0.1;
+
+function paceTrusted(w: OpsWindow, windowMs: number): boolean {
+  return (
+    w.resetsInMs != null && 1 - w.resetsInMs / windowMs >= ALERT_MIN_ELAPSED
+  );
+}
 
 /**
- * Backend projection when present, else a linear pace projection from the
- * share of the window already elapsed (none in the first 5 % of a window).
+ * Backend projection when present, else the status line's pace: used divided
+ * by the share of the window already elapsed (none in the first 2 %).
  */
 export function projectWindow(
   w: RateLimitWindow | null | undefined,
@@ -354,7 +366,7 @@ export function projectWindow(
   let projected = num(w.projectedPct);
   if (projected == null && resetsInMs != null) {
     const elapsed = windowMs - resetsInMs;
-    if (elapsed > windowMs * 0.05) projected = (used * windowMs) / elapsed;
+    if (elapsed >= windowMs * MIN_PACE_ELAPSED) projected = (used * windowMs) / elapsed;
   }
   return {
     usedPct: used,
@@ -521,25 +533,43 @@ export function buildAlerts(
       });
   }
   const five = usage.fiveHour;
-  if (five && ((five.projectedPct ?? 0) > 100 || five.usedPct >= 90))
+  if (
+    five &&
+    ((paceTrusted(five, FIVE_H) && (five.projectedPct ?? 0) > 100) ||
+      five.usedPct >= 90)
+  )
     out.push({
       id: "limit5h",
       kind: "limit5h",
       severity: "high",
       sessionId: null,
       project: null,
-      value: Math.round(Math.max(five.projectedPct ?? 0, five.usedPct)),
+      value: Math.round(
+        Math.max(
+          paceTrusted(five, FIVE_H) ? (five.projectedPct ?? 0) : 0,
+          five.usedPct,
+        ),
+      ),
       detail: null,
     });
   const seven = usage.sevenDay;
-  if (seven && ((seven.projectedPct ?? 0) > 100 || seven.usedPct >= 90))
+  if (
+    seven &&
+    ((paceTrusted(seven, SEVEN_D) && (seven.projectedPct ?? 0) > 100) ||
+      seven.usedPct >= 90)
+  )
     out.push({
       id: "limit7d",
       kind: "limit7d",
       severity: "medium",
       sessionId: null,
       project: null,
-      value: Math.round(Math.max(seven.projectedPct ?? 0, seven.usedPct)),
+      value: Math.round(
+        Math.max(
+          paceTrusted(seven, SEVEN_D) ? (seven.projectedPct ?? 0) : 0,
+          seven.usedPct,
+        ),
+      ),
       detail: null,
     });
   return out.sort(

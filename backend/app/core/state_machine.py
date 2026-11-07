@@ -53,6 +53,10 @@ def _empty_agents() -> dict[str, Agent]:
     return cast(dict[str, Agent], {})
 
 
+def _empty_float_dict() -> dict[str, float]:
+    return {}
+
+
 def _empty_str_list() -> list[str]:
     return cast(list[str], [])
 
@@ -422,6 +426,13 @@ def _handle_subagent_stop(sm: "StateMachine", event: AnyEvent) -> None:
         # Stop carries both ids (synchronous agents): learn the link anyway.
         sm.link_native_agent(event.data.agent_id, event.data.native_agent_id)
 
+    stopped_nid = event.data.native_agent_id or (resolved.agent.native_id if resolved else None)
+    if stopped_nid:
+        stamp = event.timestamp if event.timestamp.tzinfo else event.timestamp.replace(tzinfo=UTC)
+        sm.stopped_native[stopped_nid] = stamp.timestamp()
+        if len(sm.stopped_native) > 256:
+            sm.stopped_native.pop(next(iter(sm.stopped_native)))
+
     if resolved:
         agent_id = resolved.agent_id
         stopping_agent = resolved.agent
@@ -654,6 +665,9 @@ class StateMachine:
     ai_title: str | None = None
     title_offset: int = 0
     title_offset_path: str | None = None
+    # native subagent id -> epoch of its last SubagentStop (liveness: a background
+    # agent may be resumed after it handed back a report; see subagent_liveness).
+    stopped_native: dict[str, float] = field(default_factory=_empty_float_dict)
     # One-line description of the latest tool call ("Running make checkall").
     latest_activity: str | None = None
     # Live tool tracking for the campus phase (main agent only): the current /

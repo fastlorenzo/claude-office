@@ -154,7 +154,10 @@ export interface SessionActivityStats {
   /** Tool-call counts in this session by coarse kind (same kinds as SessionPhaseKind where they apply). */
   toolMix: Partial<Record<SessionPhaseKind, number>>;
   toolCalls: number;
+  /** Cumulative subagents spawned (not the live count). */
   subagentsSpawned: number;
+  /** Subagents running right now (liveness-checked); absent = unknown. */
+  subagentsRunning?: number | null;
   /** Test runs seen (Bash classified as testing) and how many exited non-zero, if known. */
   testRuns?: number;
   testFailures?: number;

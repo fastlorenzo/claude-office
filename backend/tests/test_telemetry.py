@@ -87,23 +87,38 @@ def test_day_rollover_resets_today() -> None:
     assert st.stats({}, 0, now=T0 + 2 * 86400).cost_today_usd == 0.0
 
 
-def test_projection_from_recent_burn_and_fallbacks() -> None:
+def test_pace_is_used_over_elapsed_fraction() -> None:
     st = TelemetryStore(None)
-    resets = T0 + 3600 + 3600  # 2h left
-    st.ingest_statusline(_payload(pct=10, resets=resets), now=T0)
-    # one sample only, 3h elapsed of 5h -> pace fallback: 10% over 3h -> +6.67 over 2h
-    w = st.stats({}, 0, now=T0 + 10).five_hour
-    assert w is not None and w.projected_pct == pytest.approx(10 + 10 / 10800 * 7190, abs=0.5)
-    st.ingest_statusline(_payload(pct=20, resets=resets), now=T0 + 1800)  # +10% in 30 min
-    w = st.stats({}, 0, now=T0 + 1800).five_hour
-    assert w is not None and w.used_pct == 20
-    # burn 10%/1800s over remaining 5400s -> +30
-    assert w.projected_pct == pytest.approx(50.0, abs=0.5)
-    # window reset clears history
-    st.ingest_statusline(_payload(pct=1, resets=resets + 18000), now=T0 + 1900)
+    resets = T0 + 2 * 86400 + 23 * 3600  # 2d23h left of the 7d window
+    p = _payload(pct=10, resets=T0 + 3600)
+    p["rate_limits"]["seven_day"] = {"used_percentage": 24, "resets_at": resets}
+    st.ingest_statusline(p, now=T0)
+    s7 = st.stats({}, 0, now=T0).seven_day
+    assert s7 is not None and s7.used_pct == 24
+    assert s7.projected_pct == pytest.approx(41.6, abs=0.1)  # status line says ~41%
+    # many noisy samples over a short span must not change the answer
+    for i in range(1, 6):
+        st.ingest_statusline(p, now=T0 + i)
+    s7 = st.stats({}, 0, now=T0 + 5).seven_day
+    assert s7 is not None and s7.projected_pct == pytest.approx(41.6, abs=0.1)
+    # 5h window with 1h left: 10% used -> 12.5% at the same pace
+    five = st.stats({}, 0, now=T0).five_hour
+    assert five is not None and five.projected_pct == pytest.approx(
+        10 / (1 - 3600 / 18000), abs=0.1
+    )
+
+
+def test_pace_hidden_in_young_window_and_when_expired() -> None:
+    st = TelemetryStore(None)
+    resets = T0 + 5 * 3600 - 60  # 1 min into the 5h window (< 2 %)
+    st.ingest_statusline(_payload(pct=30, resets=resets), now=T0)
+    five = st.stats({}, 0, now=T0).five_hour
+    assert five is not None and five.projected_pct is None
+    assert st.stats({}, 0, now=resets + 10).five_hour is None
+    # window reset clears the sample history
+    st.ingest_statusline(_payload(pct=50, resets=T0 + 3 * 3600), now=T0 + 10)
+    st.ingest_statusline(_payload(pct=1, resets=T0 + 8 * 3600), now=T0 + 20)
     assert len(st._samples["five_hour"]) == 1
-    # expired window is dropped
-    assert st.stats({}, 0, now=resets + 18010).five_hour is None
 
 
 def test_activity_counters() -> None:
@@ -185,3 +200,13 @@ def test_endpoint_stores_and_rate_limits_broadcast() -> None:
         assert r.status_code == 200
         assert get_telemetry_store().session_telemetry("bad id!") is None
     json.dumps({})
+
+
+def test_statusline_session_survives_restart(tmp_path: Path) -> None:
+    path = str(tmp_path / "t.json")
+    st = TelemetryStore(path)
+    st.ingest_statusline(_payload(cost=199.15), now=T0)
+    st.save(force=True)
+    tel = TelemetryStore(path).session_telemetry("s1")
+    assert tel is not None and tel.source == "statusline"
+    assert tel.cost_usd == 199.15 and tel.context_window == 1_000_000
