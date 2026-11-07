@@ -27,12 +27,14 @@ from app.models.events import (
     AgentEventData,
     EventDataBase,
     EventType,
+    ToolEvent,
 )
 
 __all__ = [
     "handle_subagent_start",
     "handle_subagent_info",
     "handle_subagent_stop",
+    "handle_agent_link",
     "handle_agent_update",
     "enrich_agent_with_summaries",
     "enrich_agent_from_transcript",
@@ -152,21 +154,15 @@ async def handle_subagent_info(
             f"(missed due to backend restart)"
         )
 
+    # Never guess which unlinked agent this native id belongs to: parallel
+    # starts and infos interleave arbitrarily. Linking happens on the Agent
+    # tool's PostToolUse (see handle_agent_link). Here we only act on an agent
+    # that is already linked to this native id.
     ensure_transcript_poller_fn()
     poller = get_transcript_poller()
     if poller:
         for agent_id, agent in sm.agents.items():
-            # Link and enrich agents that have not yet been assigned a native_id.
-            if agent.native_id is None:
-                agent.native_id = native_agent_id
-                logger.info(f"Linked agent {agent_id} to native ID {native_agent_id}")
-                await enrich_agent_from_transcript(
-                    agent,
-                    transcript_path,
-                    event.data.agent_type,
-                    {a.name for aid, a in sm.agents.items() if aid != agent_id and a.name},
-                )
-            if not await poller.is_polling(agent_id):
+            if agent.native_id == native_agent_id and not await poller.is_polling(agent_id):
                 logger.info(
                     f"Starting transcript polling for {agent_id} "
                     f"(native: {native_agent_id}) at {transcript_path}"
@@ -185,6 +181,35 @@ async def handle_subagent_info(
             event.data.agent_type,
             {a.name for a in sm.agents.values() if a.name},
         )
+
+
+async def handle_agent_link(
+    sm: StateMachine,
+    event: ToolEvent,
+    ensure_transcript_poller_fn: EnsureTranscriptPollFn,
+) -> None:
+    """Start polling for an agent just linked to its native id.
+
+    ``sm.transition`` already linked ``subagent_<tool_use_id>`` to the native
+    ``agentId`` carried by the Agent tool's PostToolUse; this starts the
+    transcript poller for it (the SubagentStart-derived info event cannot say
+    which tool call it belongs to).
+    """
+    data = event.data
+    if data.tool_name not in ("Task", "Agent") or not data.tool_use_id:
+        return
+    native_agent_id = data.native_agent_id
+    transcript_path = data.agent_transcript_path
+    if not native_agent_id or not transcript_path:
+        return
+    agent_id = f"subagent_{data.tool_use_id}"
+    agent = sm.agents.get(agent_id)
+    if agent is None or agent.native_id != native_agent_id:
+        return
+    ensure_transcript_poller_fn()
+    poller = get_transcript_poller()
+    if poller and not await poller.is_polling(agent_id):
+        await poller.start_polling(agent_id, event.session_id, transcript_path)
 
 
 async def handle_subagent_stop(
@@ -206,7 +231,6 @@ async def handle_subagent_stop(
     # Use shared resolution logic with fallback linking
     resolved = resolve_agent_for_stop(
         agents=sm.agents,
-        arrival_queue=sm.arrival_queue,
         agent_id=event.data.agent_id,
         native_agent_id=event.data.native_agent_id,
     )
@@ -215,7 +239,7 @@ async def handle_subagent_stop(
         logger.warning(
             f"SUBAGENT_STOP for unknown agent "
             f"(agent_id={event.data.agent_id}, native_agent_id={event.data.native_agent_id}), "
-            f"skipping"
+            f"ignoring (duplicate, already removed, or not correlated)"
         )
         return
 

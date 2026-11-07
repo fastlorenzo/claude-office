@@ -13,6 +13,7 @@ from app.core.handlers.agent_handler import (
     enrich_agent_from_transcript,
     enrich_agent_with_summaries,
     extract_and_set_agent_speech,
+    handle_agent_link,
     handle_agent_update,
     handle_subagent_info,
     handle_subagent_start,
@@ -45,6 +46,7 @@ __all__ = [
     "derive_task_list_id_from_root",
     # agent
     "handle_subagent_start",
+    "handle_agent_link",
     "handle_subagent_info",
     "handle_subagent_stop",
     "handle_agent_update",

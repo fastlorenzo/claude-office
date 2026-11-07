@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     # a viewer that briefly drops and reconnects still finds the session warm.
     SESSION_IDLE_EVICT_SECONDS: int = 21600  # 6h
 
+    # /ws/campus (3D office) shows every session that is "active" in the DB,
+    # not only those already in memory. Active sessions updated within this
+    # window are restored from the DB (once per process) when the campus
+    # snapshot is built; older "active" rows are left to the stale reaper.
+    CAMPUS_RESTORE_WINDOW_SECONDS: int = 86400  # 24h
+    # Minimum spacing between DB scans for restorable campus sessions.
+    CAMPUS_RESTORE_REFRESH_SECONDS: int = 60
+    # Max sessions restored per scan, newest first (bounds replay cost).
+    CAMPUS_RESTORE_MAX_PER_SCAN: int = 16
+
     # Event-record retention (ARC-015). 0 = keep forever (default). When > 0,
     # ``_reap_stale_sessions`` deletes EventRecord rows for sessions whose
     # ``status == "completed"`` and ``updated_at`` is older than this many

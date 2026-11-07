@@ -11,6 +11,7 @@ Public surface (unchanged from before the refactor):
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -35,6 +36,7 @@ from app.core.floor_config import get_cached_building_config
 from app.core.handlers import (
     enrich_agent_from_transcript,
     ensure_task_poller_running,
+    handle_agent_link,
     handle_agent_update,
     handle_pre_tool_use,
     handle_session_end,
@@ -204,6 +206,12 @@ class EventProcessor:
         # Same coalescing for the 3D-office /ws/campus feed (heavier payload).
         self._campus_flush_task: asyncio.Task[None] | None = None
         self._campus_flush_interval = 0.1  # 100 ms debounce window
+        # Campus restore of DB-active sessions: sessions we already tried to
+        # restore (restore at most once per process), scan throttle, and a lock
+        # so concurrent connects/flushes never replay the same session twice.
+        self._campus_restore_attempted: set[str] = set()
+        self._campus_restore_lock = asyncio.Lock()
+        self._campus_last_restore_scan: float | None = None
         # Single-flight restore claims, keyed by session id (values are plain
         # completion futures; waiters only need to know the restore finished).
         # The first pipeline call to see an uncached session plants a future
@@ -239,6 +247,7 @@ class EventProcessor:
             EventType.STOP: self._enrich_stop,
             EventType.USER_PROMPT_SUBMIT: self._enrich_user_prompt_submit,
             EventType.PRE_TOOL_USE: self._enrich_pre_tool_use,
+            EventType.POST_TOOL_USE: self._enrich_post_tool_use,
             EventType.TASK_CREATED: self._enrich_task_created,
             EventType.TASK_COMPLETED: self._enrich_task_completed,
             EventType.TEAMMATE_IDLE: self._enrich_teammate_idle,
@@ -459,6 +468,12 @@ class EventProcessor:
     ) -> None:
         assert isinstance(event, AgentEvent), "dispatch routes SUBAGENT_INFO only"
         await handle_subagent_info(sm, event, self._ensure_transcript_poller)
+
+    async def _enrich_post_tool_use(
+        self, sm: StateMachine, event: AnyEvent, agent_id: str, _entry_id: str, _summary: str
+    ) -> None:
+        assert isinstance(event, ToolEvent), "dispatch routes POST_TOOL_USE only"
+        await handle_agent_link(sm, event, self._ensure_transcript_poller)
 
     async def _enrich_agent_update(
         self, sm: StateMachine, event: AnyEvent, agent_id: str, _entry_id: str, _summary: str
@@ -788,6 +803,7 @@ class EventProcessor:
         """Wait out the debounce window, then broadcast a single campus state."""
         try:
             await asyncio.sleep(self._campus_flush_interval)
+            await self.restore_active_sessions_for_campus()
             await broadcast_campus_state(self.sessions, self._sessions_lock)
         except asyncio.CancelledError:  # pragma: no cover - shutdown path
             raise
@@ -798,8 +814,72 @@ class EventProcessor:
         """Build the campus state under ``_sessions_lock`` (``/ws/campus`` connect)."""
         from app.models.campus import build_campus
 
+        await self.restore_active_sessions_for_campus(force=True)
         async with self._sessions_lock:
             return build_campus(self.sessions)
+
+    async def restore_active_sessions_for_campus(self, force: bool = False) -> int:
+        """Restore DB-active sessions missing from memory so the campus shows them.
+
+        After a backend restart (or for sessions never viewed) the DB lists
+        sessions as ``active`` that are not in ``self.sessions``. Restores those
+        updated within ``CAMPUS_RESTORE_WINDOW_SECONDS``, newest first, at most
+        ``CAMPUS_RESTORE_MAX_PER_SCAN`` per scan. Each session is attempted once
+        per process (no replay storms, no churn after idle eviction), scans are
+        throttled to ``CAMPUS_RESTORE_REFRESH_SECONDS`` unless ``force``, and a
+        restored machine never replaces one that went live meanwhile. Restored
+        sessions follow the normal idle-eviction rules (fresh idle timer; no
+        pinning).
+
+        Returns:
+            Number of sessions restored.
+        """
+        settings = get_settings()
+        async with self._campus_restore_lock:
+            now = time.monotonic()
+            last = self._campus_last_restore_scan
+            if (
+                not force
+                and last is not None
+                and now - last < settings.CAMPUS_RESTORE_REFRESH_SECONDS
+            ):
+                return 0
+            self._campus_last_restore_scan = now
+
+            cutoff = datetime.now(UTC) - timedelta(seconds=settings.CAMPUS_RESTORE_WINDOW_SECONDS)
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(SessionRecord.id)
+                        .where(SessionRecord.status == "active", SessionRecord.updated_at >= cutoff)
+                        .order_by(SessionRecord.updated_at.desc())
+                    )
+                    candidates = list(result.scalars().all())
+            except Exception:
+                logger.exception("Campus restore: failed to list active sessions")
+                return 0
+
+            restored = 0
+            for sid in candidates:
+                if restored >= settings.CAMPUS_RESTORE_MAX_PER_SCAN:
+                    break
+                if sid in self.sessions or sid in self._campus_restore_attempted:
+                    continue
+                self._campus_restore_attempted.add(sid)
+                try:
+                    sm = await self._build_restored_state_machine(sid)
+                except Exception:
+                    logger.exception(f"Campus restore: failed to restore session {sid}")
+                    continue
+                if sm is None:
+                    continue
+                async with self._sessions_lock:
+                    if sid not in self.sessions:
+                        self.sessions[sid] = sm
+                        restored += 1
+            if restored:
+                logger.info(f"Campus restore: restored {restored} active session(s) from DB")
+            return restored
 
     async def shutdown(self) -> None:
         """Cancel a pending debounced overview broadcast on app shutdown.
@@ -1055,10 +1135,10 @@ class EventProcessor:
                         if evt.data.agent_transcript_path:
                             native_agent_id = evt.data.native_agent_id
                             transcript_path = evt.data.agent_transcript_path
+                            # Only enrich the agent already linked to this native
+                            # id (link happens via POST_TOOL_USE in transition()).
                             for agent in sm.agents.values():
-                                if agent.native_id == native_agent_id or agent.native_id is None:
-                                    if native_agent_id and agent.native_id is None:
-                                        agent.native_id = native_agent_id
+                                if native_agent_id and agent.native_id == native_agent_id:
                                     if (
                                         not agent.current_task
                                         or agent.current_task == "Resumed mid-session"

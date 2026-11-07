@@ -98,60 +98,37 @@ class ResolvedAgent:
 
 def resolve_agent_for_stop(
     agents: dict[str, Agent],
-    arrival_queue: list[str],
     agent_id: str | None,
     native_agent_id: str | None,
 ) -> ResolvedAgent | None:
-    """Resolve an agent for SUBAGENT_STOP by ID, native ID, or fallback linking.
+    """Resolve the agent a SUBAGENT_STOP refers to.
 
-    Resolution order:
-    1. Direct agent_id match (synchronous agents)
-    2. Native ID match (agents that received SubagentInfo)
-    3. Fallback: link oldest unlinked agent from arrival_queue (missed SubagentInfo)
+    Resolution order (exact matches only):
+    1. Direct agent_id match (``subagent_<tool_use_id>``, synchronous stops).
+    2. Native ID match (agent linked via the Agent tool's PostToolUse, which is
+       the only event carrying both ``tool_use_id`` and the native ``agentId``).
 
-    The fallback prefers the oldest unlinked agent (FIFO) to handle cases where
-    multiple background agents started but SubagentInfo was missed for some.
+    There is deliberately NO positional/FIFO fallback: guessing which unlinked
+    agent a native stop belongs to removed the wrong agents when several
+    subagents ran in parallel. An unmatched stop returns None and is ignored.
 
     Args:
         agents: Dict of agent_id -> Agent
-        arrival_queue: List of agent_ids in arrival order
         agent_id: Optional agent_id from event
         native_agent_id: Optional native_agent_id from event
 
     Returns:
         ResolvedAgent if found, None otherwise
     """
-    # 1. Try direct agent_id match
     if agent_id and agent_id in agents:
         return ResolvedAgent(agent_id=agent_id, agent=agents[agent_id])
 
     if not native_agent_id:
         return None
 
-    # 2. Try native_id match
     for aid, agent in agents.items():
         if agent.native_id == native_agent_id:
             return ResolvedAgent(agent_id=aid, agent=agent)
-
-    # 3. Fallback: link oldest unlinked agent (FIFO from arrival_queue)
-    for aid in arrival_queue:
-        agent = agents.get(aid)
-        if agent and agent.native_id is None:
-            agent.native_id = native_agent_id
-            logger.info(
-                f"Late-linked agent {aid} to native ID {native_agent_id} (SubagentInfo was missed)"
-            )
-            return ResolvedAgent(agent_id=aid, agent=agent, was_late_linked=True)
-
-    # 4. Last resort: any unlinked agent not in arrival_queue
-    for aid, agent in agents.items():
-        if agent.native_id is None:
-            agent.native_id = native_agent_id
-            logger.warning(
-                f"Late-linked orphan agent {aid} to native ID {native_agent_id} "
-                f"(not in arrival_queue)"
-            )
-            return ResolvedAgent(agent_id=aid, agent=agent, was_late_linked=True)
 
     return None
 
@@ -320,6 +297,16 @@ def _handle_post_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     elif agent_id in sm.agents and sm.agents[agent_id].state == AgentState.WAITING_PERMISSION:
         sm.agents[agent_id].state = AgentState.WORKING
 
+    # The Agent/Task tool's PostToolUse is the one event that carries both the
+    # tool_use_id (-> "subagent_<id>") and the native agentId. It is the
+    # reliable key for correlating a start with later native SubagentStop events.
+    if (
+        event.data.tool_name in ("Task", "Agent")
+        and event.data.tool_use_id
+        and event.data.native_agent_id
+    ):
+        sm.link_native_agent(f"subagent_{event.data.tool_use_id}", event.data.native_agent_id)
+
     sm.tool_uses_since_compaction += 1
     sm.whiteboard.track_tool_use(event)
 
@@ -358,10 +345,13 @@ def _handle_subagent_stop(sm: "StateMachine", event: AnyEvent) -> None:
     assert isinstance(event, AgentEvent)
     resolved = resolve_agent_for_stop(
         agents=sm.agents,
-        arrival_queue=sm.arrival_queue,
         agent_id=event.data.agent_id,
         native_agent_id=event.data.native_agent_id,
     )
+
+    if event.data.native_agent_id and event.data.agent_id:
+        # Stop carries both ids (synchronous agents): learn the link anyway.
+        sm.link_native_agent(event.data.agent_id, event.data.native_agent_id)
 
     if resolved:
         agent_id = resolved.agent_id
@@ -704,6 +694,25 @@ class StateMachine:
             floor_id=self.floor_id,
             room_id=self.room_id,
         )
+
+    def link_native_agent(self, agent_id: str, native_agent_id: str) -> bool:
+        """Link a tracked agent to its native Claude Code agent id.
+
+        Returns True if the link was (or already is) established. Never
+        re-links an agent, and never gives one native id to two agents.
+        """
+        agent = self.agents.get(agent_id)
+        if agent is None:
+            return False
+        if agent.native_id == native_agent_id:
+            return True
+        if agent.native_id is not None:
+            return False
+        if any(a.native_id == native_agent_id for a in self.agents.values()):
+            return False
+        agent.native_id = native_agent_id
+        logger.info(f"Linked agent {agent_id} to native ID {native_agent_id}")
+        return True
 
     def remove_agent(self, agent_id: str) -> None:
         """Remove an agent from the office and all queues.

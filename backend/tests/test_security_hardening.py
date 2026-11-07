@@ -682,3 +682,46 @@ class TestLocalhostOnlySetting:
         called, response = self._dispatch("192.168.65.1")
         assert not called
         assert response is not None and response.status_code == 403
+
+
+class TestAuthErrorsCarryCors:
+    """401/403 from the auth middlewares must still carry CORS headers.
+
+    Otherwise the browser surfaces an opaque network error ("Cannot reach
+    backend") instead of the real status.
+    """
+
+    ORIGIN = "http://localhost:3000"
+
+    def test_401_has_cors_headers(self) -> None:
+        from app.main import app
+
+        settings = get_settings()
+        original = settings.CLAUDE_OFFICE_API_KEY
+        settings.CLAUDE_OFFICE_API_KEY = ""
+        try:
+            client = TestClient(app)
+            resp = client.post(
+                f"{settings.API_V1_STR}/sessions/some-session/focus",
+                headers={"Origin": self.ORIGIN},
+            )
+            assert resp.status_code == 401
+            assert resp.headers.get("access-control-allow-origin") == self.ORIGIN
+        finally:
+            settings.CLAUDE_OFFICE_API_KEY = original
+
+    def test_preflight_for_focus_succeeds(self) -> None:
+        from app.main import app
+
+        settings = get_settings()
+        client = TestClient(app)
+        resp = client.options(
+            f"{settings.API_V1_STR}/sessions/some-session/focus",
+            headers={
+                "Origin": self.ORIGIN,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "x-api-key",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == self.ORIGIN

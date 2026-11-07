@@ -181,6 +181,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Starlette wraps in reverse order of registration: the LAST middleware added is
+# the OUTERMOST. CORS must be outermost so that 401/403 responses produced by
+# the auth / localhost middlewares still carry Access-Control-Allow-* headers;
+# otherwise the browser reports an opaque network error instead of the status.
+app.add_middleware(LocalhostOnlyMiddleware)
+app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -188,9 +194,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(LocalhostOnlyMiddleware)
-app.add_middleware(ApiKeyMiddleware)
 
 app.include_router(events.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(floors.router, prefix=f"{settings.API_V1_STR}")

@@ -339,33 +339,15 @@ sequenceDiagram
 
 ### Agent ID Resolution
 
-When a `SUBAGENT_STOP` event arrives, the backend must identify which agent to stop. This is handled by `resolve_agent_for_stop()` in `state_machine.py`:
+A subagent appears as `subagent_<tool_use_id>` (from the Agent/Task tool's PreToolUse). Native `SubagentStart`/`SubagentStop` hooks only carry Claude Code's native `agent_id`, and their timing is not reliably tied to any one start, so they cannot be matched by order.
 
-**Resolution Order:**
-1. **Direct agent_id match** - For synchronous subagents (spawned with explicit agent_id)
-2. **Native ID lookup** - For agents that received `SUBAGENT_INFO` (linked to `native_agent_id`)
-3. **Fallback linking** - For agents that missed `SUBAGENT_INFO` (late-link to `native_agent_id`)
+**Correlation key:** the Agent tool's PostToolUse carries both `tool_use_id` and the native `agentId`. `StateMachine.transition` uses it to link `subagent_<tool_use_id>` to its `native_id` (`link_native_agent`), including for background agents (which stay at their desks until the native SubagentStop).
 
-### Fallback Linking
+When a `SUBAGENT_STOP` event arrives, `resolve_agent_for_stop()` in `state_machine.py` resolves it by exact match only:
+1. **Direct agent_id match** (`subagent_<tool_use_id>`)
+2. **Native ID lookup** (agent linked via PostToolUse)
 
-When native `SubagentStart` hooks don't produce `SUBAGENT_INFO` events (e.g., backend restart, missed hook), agents remain unlinked (`native_id=None`). The fallback logic:
-
-1. **FIFO from arrival_queue** - Links the oldest unlinked agent first
-2. **Last resort** - Links any unlinked agent not in the arrival queue
-
-```python
-# Example: Fallback linking flow
-agents = {
-    "subagent_abc": Agent(native_id=None),  # Unlinked
-    "subagent_def": Agent(native_id="xyz"),  # Already linked
-}
-arrival_queue = ["subagent_abc", "subagent_def"]
-
-# SUBAGENT_STOP with native_agent_id="new_id"
-# Resolves to: subagent_abc (oldest unlinked)
-```
-
-**Why FIFO?** When multiple background agents start in parallel without `SUBAGENT_INFO`, FIFO linking matches the most likely completion order (oldest starts first, likely finishes first).
+There is no FIFO/positional fallback: an unmatched, duplicate or re-delivered stop is logged and ignored, and never removes a different agent. `SUBAGENT_INFO` events never link agents; they only start transcript polling for an already-linked agent (or synthesise an agent when its start was missed and nothing is waiting to be linked).
 
 ### CLEANUP Event Persistence
 
