@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -39,6 +39,8 @@ class SessionTelemetry(BaseModel):
     cache_expires_at: str | None = None
     repo: str | None = None
     output_style: str | None = None
+    # Where the numbers come from: the status line tee, or estimated from the transcript.
+    source: Literal["statusline", "transcript"] | None = None
     updated_at: str
 
 

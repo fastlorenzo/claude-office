@@ -18,6 +18,7 @@ from sqlalchemy import delete, select, update
 from app.api.middleware import ApiKeyMiddleware, LocalhostOnlyMiddleware
 from app.api.routes import events, floors, preferences, sessions, telemetry, websockets
 from app.config import get_settings
+from app.core.ci_poller import get_ci_poller
 from app.core.event_processor import EventProcessor, get_event_processor
 from app.core.summary_service import get_summary_service
 from app.db.database import Base, get_engine
@@ -94,8 +95,21 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         )
     )
 
+    ci_task: asyncio.Task[None] | None = None
+    if settings.CI_POLL_ENABLED:
+        ci_poller = get_ci_poller()
+        ci_poller.configure(
+            on_change=get_event_processor().request_campus_broadcast,
+            interval=settings.CI_POLL_INTERVAL_SECONDS,
+        )
+        ci_task = asyncio.create_task(ci_poller.run())
+
     yield
 
+    if ci_task is not None:
+        ci_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await ci_task
     liveness.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await liveness

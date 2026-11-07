@@ -131,7 +131,7 @@ class TestBroadcast:
         msg = ws.send_json.call_args.args[0]
         assert msg["type"] == "state_update"
         state = msg["state"]
-        assert set(state) == {"sessions", "stats", "lastUpdated"}
+        assert set(state) == {"sessions", "projects", "stats", "lastUpdated"}
         sess = state["sessions"][0]
         assert set(sess) == {
             "sessionId",
@@ -148,6 +148,7 @@ class TestBroadcast:
             "summary",
             "refs",
             "project",
+            "projectId",
             "phase",
             "gitBranch",
             "ended",

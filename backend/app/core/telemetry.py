@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ from typing import Any, cast
 
 from app.config import get_settings
 from app.core.session_phase import PhaseKind, classify_tool
+from app.core.transcript_telemetry import TailSnapshot, TranscriptTail
 from app.models.events import AnyEvent, EventType
 from app.models.telemetry import (
     CampusStats,
@@ -99,6 +101,9 @@ class TelemetryStore:
     def __init__(self, path: str | None = None) -> None:
         self._path = Path(path) if path else None
         self.sessions: dict[str, SessionTelemetry] = {}
+        # Fallback: per-transcript accumulators (estimates) when no status line reports.
+        self._tails: dict[str, TranscriptTail] = {}
+        self._tail_lock = threading.Lock()
         self._act: dict[str, _SessionAct] = {}
         self._building: dict[int, int] = {}
         self._base: dict[str, _Baseline] = {}
@@ -213,6 +218,7 @@ class TelemetryStore:
                 cache_expires_at=_iso_epoch(_dig(payload, "prompt_cache", "expires_at")),
                 repo=_repo(payload),
                 output_style=_str(_dig(payload, "output_style", "name")),
+                source="statusline",
                 updated_at=datetime.fromtimestamp(ts, UTC).isoformat(),
             )
             if len(self.sessions) >= _SESSION_CAP and sid not in self.sessions:
@@ -310,8 +316,39 @@ class TelemetryStore:
 
     # -- views -------------------------------------------------------------
 
+    def refresh_transcript(self, session_id: str, path: str, now: float | None = None) -> bool:
+        """Tail *path* for this session's estimated telemetry (blocking file IO)."""
+        ts = time.time() if now is None else now
+        with self._tail_lock:
+            tail = self._tails.get(session_id)
+            if tail is None or tail.path != path:
+                if len(self._tails) >= _SESSION_CAP and session_id not in self._tails:
+                    self._tails.pop(next(iter(self._tails)))
+                tail = self._tails[session_id] = TranscriptTail(path)
+            return tail.update(ts)
+
     def session_telemetry(self, session_id: str) -> SessionTelemetry | None:
-        return self.sessions.get(session_id)
+        """Status line data when present (it wins when fresher), else the transcript estimate."""
+        live = self.sessions.get(session_id)
+        tail = self._tails.get(session_id)
+        est = tail.snapshot.telemetry if tail is not None else None
+        if live is None:
+            return est
+        if est is None or live.updated_at >= est.updated_at:
+            if est is None:
+                return live
+            # Fill gaps (e.g. an older Claude Code without a context block) from the estimate.
+            patch = {
+                k: v
+                for k, v in est.model_dump(exclude={"source", "updated_at"}).items()
+                if getattr(live, k) is None and v is not None
+            }
+            return live.model_copy(update=patch) if patch else live
+        return est
+
+    def _estimated_sessions(self) -> list[TailSnapshot]:
+        """Transcript snapshots for sessions the status line does not cover."""
+        return [t.snapshot for sid, t in list(self._tails.items()) if sid not in self.sessions]
 
     def session_activity(self, session_id: str, now: float | None = None) -> SessionActivityStats:
         ts = time.time() if now is None else now
@@ -377,12 +414,23 @@ class TelemetryStore:
         self._roll_day(ts)
         minute = int(ts // 60)
         b5 = int(ts // 300)
-        series = [round(self._cost5.get(k, 0.0), 4) for k in range(b5 - COST_BUCKETS + 1, b5 + 1)]
-        last_hour = sum(self._cost5.get(k, 0.0) for k in range(b5 - 11, b5 + 1))
+        est = self._estimated_sessions()
+        today = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        cost5 = dict(self._cost5)
+        for snap in est:
+            for k, v in snap.cost_by_bucket.items():
+                cost5[k] = cost5.get(k, 0.0) + v
+        series = [
+            round(max(cost5.get(k, 0.0), 0.0), 4) for k in range(b5 - COST_BUCKETS + 1, b5 + 1)
+        ]
+        last_hour = sum(max(cost5.get(k, 0.0), 0.0) for k in range(b5 - 11, b5 + 1))
+        cost_today = self._cost_today + sum(x.cost_by_day.get(today, 0.0) for x in est)
+        added_today = self._added_today + sum(x.added_by_day.get(today, 0) for x in est)
+        removed_today = self._removed_today + sum(x.removed_by_day.get(today, 0) for x in est)
         return CampusStats(
             five_hour=self._window("five_hour", ts),
             seven_day=self._window("seven_day", ts),
-            cost_today_usd=round(self._cost_today, 4),
+            cost_today_usd=round(cost_today, 4),
             burn_usd_per_hour=round(last_hour, 4),
             sessions_by_status=sessions_by_status,
             active_subagents=active_subagents,
@@ -390,8 +438,8 @@ class TelemetryStore:
                 self._building.get(m, 0) for m in range(minute - BUILDING_BUCKETS + 1, minute + 1)
             ],
             cost_series=series,
-            lines_added_today=self._added_today,
-            lines_removed_today=self._removed_today,
+            lines_added_today=added_today,
+            lines_removed_today=removed_today,
             updated_at=datetime.fromtimestamp(ts, UTC).isoformat(),
         )
 

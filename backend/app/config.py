@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # Min spacing of telemetry-triggered campus broadcasts.
     TELEMETRY_BROADCAST_MIN_INTERVAL: float = 1.0
 
+    # CI/CD polling through the gh CLI (only while a /ws/campus client is connected).
+    CI_POLL_ENABLED: bool = True
+    CI_POLL_INTERVAL_SECONDS: float = 60.0
+
     DATABASE_URL: str = f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}"
     GIT_POLL_INTERVAL: int = 5
 

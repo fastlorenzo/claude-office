@@ -61,6 +61,7 @@ from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
 from app.core.telemetry import get_telemetry_store
 from app.core.transcript_poller import init_transcript_poller
+from app.core.transcript_telemetry import refresh_transcript_telemetry
 from app.db.database import AsyncSessionLocal
 from app.db.models import EventRecord, SessionRecord
 from app.models.agents import AgentState
@@ -643,7 +644,7 @@ class EventProcessor:
         if applied:
             get_telemetry_store().record_event(event.session_id, event)
             sm.transition(event)
-            await self._refresh_titles(sm, event.data.transcript_path)
+            await self._refresh_titles(sm, event.data.transcript_path, event.session_id)
 
         # Apply resolved floor/room to in-memory state machine.
         if resolved_floor_id:
@@ -808,6 +809,10 @@ class EventProcessor:
         if self._campus_flush_task is not None and not self._campus_flush_task.done():
             return
         self._campus_flush_task = asyncio.create_task(self._flush_campus_broadcast())
+
+    def request_campus_broadcast(self) -> None:
+        """Public debounced campus broadcast (CI poller updates)."""
+        self._schedule_campus_broadcast()
 
     def schedule_telemetry_broadcast(self) -> None:
         """Debounced campus broadcast for a telemetry report, at most once per interval."""
@@ -1092,12 +1097,16 @@ class EventProcessor:
         return restored
 
     @staticmethod
-    async def _refresh_titles(sm: StateMachine, transcript_path: str | None) -> None:
-        """Tail the transcript for Claude Code's session titles (never raises)."""
+    async def _refresh_titles(
+        sm: StateMachine, transcript_path: str | None, session_id: str | None = None
+    ) -> None:
+        """Tail the transcript for session titles and estimated telemetry (never raises)."""
         try:
             await refresh_session_titles(sm, transcript_path)
         except Exception:
             logger.debug("Session title refresh failed", exc_info=True)
+        if session_id:
+            await refresh_transcript_telemetry(session_id, transcript_path or sm.title_offset_path)
 
     async def _build_restored_state_machine(
         self, session_id: str, exclude_row_id: int | None = None
@@ -1161,7 +1170,7 @@ class EventProcessor:
                         )
                         continue
                     sm.transition(evt)
-                    await self._refresh_titles(sm, evt.data.transcript_path)
+                    await self._refresh_titles(sm, evt.data.transcript_path, evt.session_id)
 
                     agent_id = evt.data.agent_id or "main"
                     # Same id scheme as the live path, so a re-render after a

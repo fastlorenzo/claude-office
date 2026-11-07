@@ -14,12 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from app.config import get_settings
+from app.core.ci_poller import get_ci_poller
+from app.core.projects import ProjectRef, get_project_ref, resolve_project
 from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
 from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
 from app.core.telemetry import get_telemetry_store
 from app.models.agents import Agent, AgentState, Boss, BossState, OfficeState
+from app.models.ci import CampusProject, PullRequestInfo
 from app.models.common import TodoItem, TodoStatus
 from app.models.overview import OverviewBucket
 from app.models.telemetry import CampusStats, SessionActivityStats, SessionTelemetry
@@ -33,6 +36,7 @@ __all__ = [
     "CampusState",
     "SessionPhase",
     "build_campus",
+    "build_projects",
     "build_campus_session",
 ]
 
@@ -90,6 +94,8 @@ class CampusSession(BaseModel):
     summary: str | None = None
     refs: list[str] = Field(default_factory=lambda: cast(list[str], []))
     project: str | None = None
+    # Key of the CampusProject this session belongs to (CampusState.projects[].id).
+    project_id: str | None = None
     phase: SessionPhase | None = None
     git_branch: str | None = None
     ended: bool = False
@@ -107,6 +113,7 @@ class CampusState(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     sessions: list[CampusSession] = Field(default_factory=lambda: cast(list[CampusSession], []))
+    projects: list[CampusProject] | None = None
     stats: CampusStats | None = None
     last_updated: datetime
 
@@ -214,6 +221,7 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
 
     root = git_service.get_session_root(session_id)
     branch = get_branch(root)
+    proj = resolve_project(root)
     session_name = _one_line(sm.custom_title, SESSION_NAME_MAX_CHARS)
     objective = _one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS)
 
@@ -259,6 +267,7 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
             prompts=sm.first_prompts,
         ),
         project=project_name_for_root(root),
+        project_id=proj.id if proj else None,
         phase=compute_phase(sm, gs.agents),
         focus=compute_focus(sm, gs.todos),
         work_items=compute_work_items(gs.todos, gs.agents),
@@ -266,6 +275,47 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
         ended=sm.phase == OfficePhase.ENDED,
         last_updated=gs.last_updated,
     )
+
+
+def build_projects(sessions: list[CampusSession], now: datetime) -> list[CampusProject]:
+    """Group live sessions by project; attach cached CI data (no IO)."""
+    groups: dict[str, list[CampusSession]] = {}
+    for cs in sessions:
+        if cs.project_id and not cs.ended:
+            groups.setdefault(cs.project_id, []).append(cs)
+    poller = get_ci_poller()
+    out: list[CampusProject] = []
+    for pid in sorted(groups):
+        members = groups[pid]
+        ref: ProjectRef | None = get_project_ref(pid)
+        repo = ref.repo if ref else None
+        ci = poller.note_repo(repo, ref.default_branch if ref else None) if repo else None
+        available = bool(ci and ci.available)
+        by_branch = {m.git_branch: m.session_id for m in members if m.git_branch}
+        prs: list[PullRequestInfo] = []
+        if ci and available:
+            prs = [
+                pr.model_copy(update={"session_id": by_branch.get(pr.branch)})
+                for pr in ci.pull_requests
+            ]
+        updated = max(
+            (m.last_updated for m in members),
+            default=now,
+        )
+        out.append(
+            CampusProject(
+                id=pid,
+                name=ref.name if ref else (members[0].project or pid),
+                repo=repo,
+                default_branch=ref.default_branch if ref else None,
+                session_ids=[m.session_id for m in members],
+                pull_requests=prs,
+                pipelines=list(ci.pipelines) if ci and available else [],
+                ci_available=available,
+                updated_at=updated.isoformat(),
+            )
+        )
+    return out
 
 
 def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
@@ -285,6 +335,7 @@ def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
     now = datetime.now(UTC)
     return CampusState(
         sessions=built,
+        projects=build_projects(built, now),
         stats=get_telemetry_store().stats(by_status, subagents),
         last_updated=now,
     )
