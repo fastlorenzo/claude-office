@@ -1,0 +1,239 @@
+"use client";
+
+import { useEffect, useRef, type ReactNode } from "react";
+import type { IWorld, SyncInput } from "@/engine/contracts";
+import { useCampusStore } from "@/stores/campusStore";
+import { usePreferencesStore } from "@/stores/preferencesStore";
+import { useAttentionStore } from "@/stores/attentionStore";
+import { useWorldUiStore } from "@/stores/worldUiStore";
+import type { Session } from "@/hooks/useSessions";
+import { sessionLabel, toSessionMeta } from "./sessionMeta";
+import { enterSession, setEnterContext } from "./enterSession";
+import { setWorld } from "./worldRef";
+
+const SYNC_THROTTLE_MS = 50;
+
+interface WorldCanvasProps {
+  sessions: Session[];
+  sessionId: string;
+  onSessionSelect: (id: string) => Promise<void>;
+  isMobile: boolean;
+}
+
+/**
+ * Full-bleed Babylon canvas. The world is created exactly once per mount in an
+ * effect (guarded so StrictMode / HMR double-mounts dispose the first
+ * instance). All data flows in through store subscriptions — no React state.
+ */
+export function WorldCanvas({
+  sessions,
+  sessionId,
+  onSessionSelect,
+  isMobile,
+}: WorldCanvasProps): ReactNode {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Latest props for the long-lived subscriptions below.
+  const sessionsRef = useRef(sessions);
+  const selectedRef = useRef(sessionId);
+  const selectRef = useRef(onSessionSelect);
+  const isMobileRef = useRef(isMobile);
+  const syncNowRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+    selectedRef.current = sessionId;
+    selectRef.current = onSessionSelect;
+    isMobileRef.current = isMobile;
+    syncNowRef.current?.();
+  }, [sessions, sessionId, onSessionSelect, isMobile]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    let disposed = false;
+    let world: IWorld | null = null;
+    let inited = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let raf = 0;
+    const teardown: (() => void)[] = [];
+    const ui = useWorldUiStore.getState();
+
+    const buildInput = (): SyncInput => ({
+      campus: useCampusStore.getState().sessions,
+      sessions: sessionsRef.current.map((s) =>
+        toSessionMeta(
+          s,
+          useCampusStore.getState().sessions.find((c) => c.sessionId === s.id),
+        ),
+      ),
+      selectedSessionId: selectedRef.current || null,
+    });
+
+    const flush = (): void => {
+      timer = null;
+      if (!world || !inited || disposed) return;
+      world.sync(buildInput());
+    };
+    // Trailing throttle: at most one sync per window, always with fresh data.
+    const schedule = (): void => {
+      if (!inited || timer) return;
+      timer = setTimeout(flush, SYNC_THROTTLE_MS);
+    };
+    syncNowRef.current = schedule;
+    setEnterContext({
+      select: (id) => selectRef.current(id),
+      selectedId: () => selectedRef.current,
+      label: (id) => {
+        const s = sessionsRef.current.find((x) => x.id === id);
+        return s
+          ? sessionLabel(
+              s,
+              useCampusStore
+                .getState()
+                .sessions.find((c) => c.sessionId === id),
+            )
+          : id.slice(0, 8);
+      },
+    });
+
+    const updateInput = (): void => {
+      if (!world) return;
+      const s = useWorldUiStore.getState();
+      const blocked =
+        s.panels.length > 0 ||
+        s.peerPopup !== null ||
+        useAttentionStore.getState().focusPopup !== null;
+      world.setInputEnabled(!blocked);
+    };
+
+    void (async () => {
+      try {
+        const { createWorld } = await import("@/engine/world/World");
+        if (disposed) return;
+        const prefs = usePreferencesStore.getState();
+        const w = createWorld(canvas, {
+          quality: prefs.graphicsQuality,
+          graphics: prefs.graphics,
+          cameraMode: useWorldUiStore.getState().cameraMode,
+          isMobile: isMobileRef.current,
+          assetBase: "/assets",
+        });
+        world = w;
+        setWorld(w);
+        // Graphics menu: push settings into the live world as they change.
+        teardown.push(
+          usePreferencesStore.subscribe((st, prev) => {
+            if (st.graphics !== prev.graphics) w.setGraphics?.(st.graphics);
+          }),
+        );
+
+        teardown.push(
+          w.on("error", ({ message }) =>
+            useWorldUiStore.getState().setError(message),
+          ),
+          w.on("interaction", (e) => useWorldUiStore.getState().setPrompt(e)),
+          w.on("pose", (p) => useWorldUiStore.getState().setPose(p)),
+          w.on("stats", (s) => useWorldUiStore.getState().setStats(s)),
+          w.on("pointerLock", (l) =>
+            useWorldUiStore.getState().setPointerLocked(l),
+          ),
+          w.on("cameraMode", (m) =>
+            useWorldUiStore.getState().setCameraMode(m),
+          ),
+          w.on("layout", (l) => useWorldUiStore.getState().setLayout(l)),
+          w.on("action", ({ action, target, screenPos }) => {
+            const store = useWorldUiStore.getState();
+            if (action === "enter") {
+              void enterSession(target.sessionId);
+            } else if (action === "inspect") {
+              store.openInspect(target);
+            } else if (action === "popup" && target.kind === "character") {
+              if (target.sessionId === selectedRef.current) {
+                useAttentionStore
+                  .getState()
+                  .openFocusPopup(
+                    target.agentId ?? "boss",
+                    screenPos.x,
+                    screenPos.y,
+                  );
+              } else {
+                store.setPeerPopup({
+                  sessionId: target.sessionId,
+                  x: screenPos.x,
+                  y: screenPos.y,
+                });
+              }
+            }
+          }),
+          w.on("ready", () => useWorldUiStore.getState().setReady(true)),
+        );
+
+        await w.init();
+        if (disposed) return;
+        inited = true;
+        useWorldUiStore.getState().setReady(true);
+        w.sync(buildInput());
+        updateInput();
+
+        teardown.push(
+          useCampusStore.subscribe((s, prev) => {
+            if (s.sessions !== prev.sessions) schedule();
+          }),
+          usePreferencesStore.subscribe((s, prev) => {
+            if (s.graphicsQuality !== prev.graphicsQuality)
+              w.setQuality(s.graphicsQuality);
+          }),
+          useWorldUiStore.subscribe((s, prev) => {
+            if (s.panels !== prev.panels || s.peerPopup !== prev.peerPopup)
+              updateInput();
+          }),
+          useAttentionStore.subscribe((s, prev) => {
+            if (s.focusPopup !== prev.focusPopup) updateInput();
+          }),
+        );
+      } catch (err) {
+        if (disposed) return;
+        const message = err instanceof Error ? err.message : String(err);
+        useWorldUiStore.getState().setError(message);
+      }
+    })();
+
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => world?.resize());
+    });
+    ro.observe(container);
+
+    return () => {
+      disposed = true;
+      syncNowRef.current = null;
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
+      teardown.forEach((off) => off());
+      setWorld(null);
+      setEnterContext(null);
+      world?.dispose();
+      world = null;
+      ui.reset();
+    };
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      data-tour-id="game-canvas"
+      className="absolute inset-0 overflow-hidden bg-slate-950"
+    >
+      <canvas
+        ref={canvasRef}
+        className="block h-full w-full touch-none outline-none"
+        tabIndex={0}
+      />
+    </div>
+  );
+}

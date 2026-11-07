@@ -50,6 +50,7 @@ import AttentionToasts from "@/components/attention/AttentionToasts";
 import AgentPopup from "@/components/attention/AgentPopup";
 import { useAttentionStore } from "@/stores/attentionStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
+import { WorldView } from "@/components/world/WorldView";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { Session } from "@/hooks/useSessions";
 
@@ -151,6 +152,8 @@ export default function V2TestPage(): React.ReactNode {
     (state) => state.loadPersistedDebugSettings,
   );
   const loadPreferences = usePreferencesStore((s) => s.loadPreferences);
+  const renderer = usePreferencesStore((s) => s.renderer);
+  const prefsLoaded = usePreferencesStore((s) => s.isLoaded);
 
   // Navigation store
   const view = useNavigationStore((s) => s.view);
@@ -482,7 +485,25 @@ export default function V2TestPage(): React.ReactNode {
       {/* ----------------------------------------------------------------
           Main Content
       ---------------------------------------------------------------- */}
-      {isMobile ? (
+      {(isMobile || view === "single") && !prefsLoaded ? (
+        /* Wait for preferences so the wrong renderer never flashes. */
+        <div className="flex-grow min-h-0 rounded-lg border border-slate-800 overflow-hidden">
+          <LoadingFallback />
+        </div>
+      ) : (isMobile || view === "single") && renderer === "3d" ? (
+        /* ----------------------------------------------------------------
+            3D renderer (Babylon): fills all space under the header
+        ---------------------------------------------------------------- */
+        <WorldView
+          sessions={sessions}
+          sessionsLoading={sessionsLoading}
+          sessionId={sessionId}
+          onSessionSelect={handleSessionSelect}
+          onDeleteSession={setSessionPendingDelete}
+          onRenameSession={handleRenameSession}
+          isMobile={isMobile}
+        />
+      ) : isMobile ? (
         <div className="flex-grow flex flex-col gap-1.5 overflow-hidden min-h-0">
           <div className="flex-[3] border border-slate-800 rounded-lg shadow-2xl bg-slate-900 overflow-hidden relative min-h-0">
             <OfficeGame />

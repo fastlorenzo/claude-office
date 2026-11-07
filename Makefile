@@ -1,4 +1,4 @@
-.PHONY: install install-all dev backend frontend simulate checkall lint fmt test typecheck gen-types \
+.PHONY: install assets install-all dev backend frontend simulate checkall lint fmt test typecheck gen-types \
 	hooks-install hooks-uninstall hooks-reinstall hooks-status hooks-logs hooks-logs-follow hooks-logs-clear \
 	hooks-debug-on hooks-debug-off clean clean-db clean-all \
 	opencode-install opencode-uninstall opencode-reinstall opencode-build \
@@ -17,6 +17,10 @@ install:			# Install all component dependencies
 	cd frontend && $(PKG_INSTALL)
 	cd hooks && uv sync
 	cd opencode-plugin && $(PKG_INSTALL)
+	$(MAKE) assets
+
+assets:			# Download CC0 3D assets (Poly Haven) + Havok wasm into frontend/public
+	cd frontend && $(PKG_MGR) run assets
 
 install-all: install hooks-install opencode-install		# Install everything including hooks and plugins
 	@echo "All components installed including hooks and OpenCode plugin"

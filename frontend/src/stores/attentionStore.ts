@@ -3,7 +3,8 @@
 import { create } from "zustand";
 import type { EventType } from "@/types";
 import { usePreferencesStore } from "@/stores/preferencesStore";
-import { apiFetch } from "@/utils/api";
+import { apiFetch, getApiKey } from "@/utils/api";
+import { getTranslation, type TranslationKey } from "@/i18n";
 
 // ============================================================================
 // TYPES
@@ -48,6 +49,9 @@ interface AttentionState {
     taskDescription?: string | null;
     errorType?: string | null;
     message?: string | null;
+    /** Override the derived title and urgency (e.g. soft info/warning toasts). */
+    title?: string;
+    level?: UrgencyLevel;
   }) => void;
   dismissToast: (id: string) => void;
   clearAllToasts: () => void;
@@ -69,12 +73,27 @@ interface AttentionState {
 const MAX_VISIBLE_TOASTS = 5;
 
 /** Map event types to urgency scores and auto-dismiss timing. */
-function scoreEvent(eventType: EventType): {
+function scoreEvent(
+  eventType: EventType,
+  forced?: UrgencyLevel,
+): {
   urgency: number;
   level: UrgencyLevel;
   autoDismissMs: number | null;
 } {
   const prefs = usePreferencesStore.getState();
+  if (forced === "info")
+    return {
+      urgency: 10,
+      level: "info",
+      autoDismissMs: prefs.toastAutoDismissInfo,
+    };
+  if (forced === "low")
+    return {
+      urgency: 30,
+      level: "low",
+      autoDismissMs: prefs.toastAutoDismissLow,
+    };
   switch (eventType) {
     case "permission_request":
       return { urgency: 90, level: "critical", autoDismissMs: null };
@@ -104,6 +123,36 @@ function scoreEvent(eventType: EventType): {
 }
 
 // ============================================================================
+// TERMINAL FOCUS HELPERS
+// ============================================================================
+
+/** Map a failed focus response to a soft (non-error) toast. */
+export function mapFocusFailure(status: number): {
+  level: UrgencyLevel;
+  key: TranslationKey;
+} {
+  if (status === 401 || status === 403)
+    return { level: "low", key: "focus.needsToken" };
+  if (status === 404) return { level: "info", key: "focus.notFound" };
+  if (status >= 500) return { level: "info", key: "focus.unsupported" };
+  return { level: "info", key: "focus.failed" };
+}
+
+/**
+ * Whether "Open terminal" can plausibly work: the backend only supports it on
+ * macOS and the endpoint is token-gated. No endpoint exposes the server
+ * platform, so infer from the browser (same machine in the dev setup).
+ */
+export function canFocusTerminal(
+  userAgent: string | null = typeof navigator === "undefined"
+    ? null
+    : navigator.userAgent,
+  token: string | null = getApiKey(),
+): boolean {
+  return !!token && !!userAgent && /Macintosh|Mac OS X/i.test(userAgent);
+}
+
+// ============================================================================
 // STORE
 // ============================================================================
 
@@ -114,7 +163,10 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
   focusPopup: null,
 
   processEvent: (event) => {
-    const { urgency, level, autoDismissMs } = scoreEvent(event.type);
+    const { urgency, level, autoDismissMs } = scoreEvent(
+      event.type,
+      event.level,
+    );
     // Skip very low urgency events that aren't in our explicit list
     if (urgency <= 5) return;
 
@@ -125,7 +177,7 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
       eventType: event.type,
       urgency,
       urgencyLevel: level,
-      title: event.type.replace(/_/g, " "),
+      title: event.title ?? event.type.replace(/_/g, " "),
       description:
         event.taskDescription ?? event.errorType ?? event.message ?? "",
       createdAt: Date.now(),
@@ -183,15 +235,20 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
         body: JSON.stringify({}),
       });
       if (!res.ok) {
+        const f = mapFocusFailure(res.status);
+        const t = getTranslation(usePreferencesStore.getState().language);
         get().processEvent({
-          type: "error",
-          message: `Focus terminal failed: ${res.statusText}`,
+          type: "background_task_notification",
+          level: f.level,
+          title: t("focus.title"),
+          message: t(f.key),
         });
       }
     } catch {
+      const t = getTranslation(usePreferencesStore.getState().language);
       get().processEvent({
         type: "error",
-        message: "Cannot reach backend — is the server running?",
+        message: t("focus.unreachable"),
       });
     }
     get().closeFocusPopup();

@@ -113,3 +113,8 @@ frontend/public/sprites/paid/
 .superpowers
 docs/superpowers
 .cc2cc-session-id
+
+# --- Downloaded 3D assets (bun run assets) ---
+frontend/public/assets/*
+!frontend/public/assets/NOTICE.md
+frontend/public/havok/

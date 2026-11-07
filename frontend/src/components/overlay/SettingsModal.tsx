@@ -9,18 +9,19 @@ import {
 } from "@/stores/preferencesStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import { locales, type Locale } from "@/i18n";
+import { GraphicsPanel } from "@/components/world/hud/GraphicsPanel";
 import { BuildingTab } from "@/components/settings/BuildingTab";
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-type SettingsTab = "general" | "building";
+type SettingsTab = "general" | "building" | "graphics";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "general" | "building";
+  initialTab?: SettingsTab;
 }
 
 // ============================================================================
@@ -97,6 +98,10 @@ export default function SettingsModal({
   const setClockFormat = usePreferencesStore((s) => s.setClockFormat);
   const language = usePreferencesStore((s) => s.language);
   const setLanguage = usePreferencesStore((s) => s.setLanguage);
+  const renderer = usePreferencesStore((s) => s.renderer);
+  const setRenderer = usePreferencesStore((s) => s.setRenderer);
+  const graphicsQuality = usePreferencesStore((s) => s.graphicsQuality);
+  const setGraphicsQuality = usePreferencesStore((s) => s.setGraphicsQuality);
   const setAutoFollowNewSessions = usePreferencesStore(
     (s) => s.setAutoFollowNewSessions,
   );
@@ -180,7 +185,7 @@ export default function SettingsModal({
     >
       {/* Tab bar */}
       <div className="flex gap-1 mb-6 p-1 bg-slate-800/50 rounded-lg border border-slate-700">
-        {(["general", "building"] as const).map((tab) => (
+        {(["general", "graphics", "building"] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -401,6 +406,63 @@ export default function SettingsModal({
             </div>
           </div>
 
+          {/* Renderer + graphics quality */}
+          <div className="pt-4 border-t border-slate-800">
+            <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">
+              {t("settings.renderer")}
+            </label>
+            <div className="flex gap-2">
+              {(["3d", "pixel"] as const).map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setRenderer(r)}
+                  aria-pressed={renderer === r}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+                    renderer === r
+                      ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                      : "bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600"
+                  }`}
+                >
+                  {r === "3d"
+                    ? t("settings.renderer3d")
+                    : t("settings.rendererPixel")}
+                </button>
+              ))}
+            </div>
+            <p className="text-slate-500 text-xs mt-2">
+              {t("settings.rendererDesc")}
+            </p>
+
+            <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mt-4 mb-3">
+              {t("settings.graphicsQuality")}
+            </label>
+            <div className="flex gap-2">
+              {(["auto", "high", "low"] as const).map((q) => (
+                <button
+                  key={q}
+                  onClick={() => setGraphicsQuality(q)}
+                  aria-pressed={graphicsQuality === q}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border transition-colors ${
+                    graphicsQuality === q
+                      ? "bg-orange-500/20 text-orange-400 border-orange-500/40"
+                      : "bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-600"
+                  }`}
+                >
+                  {t(
+                    q === "auto"
+                      ? "settings.graphicsQualityAuto"
+                      : q === "high"
+                        ? "settings.graphicsQualityHigh"
+                        : "settings.graphicsQualityLow",
+                  )}
+                </button>
+              ))}
+            </div>
+            <p className="text-slate-500 text-xs mt-2">
+              {t("settings.graphicsQualityDesc")}
+            </p>
+          </div>
+
           {/* Attention Settings */}
           <div className="pt-4 border-t border-slate-800">
             <label className="block text-slate-400 text-xs font-bold uppercase tracking-wider mb-3">
@@ -448,6 +510,10 @@ export default function SettingsModal({
           <div className="pt-4 border-t border-slate-800">
             <p className="text-slate-500 text-xs">{t("settings.clockTip")}</p>
           </div>
+        </div>
+      ) : activeTab === "graphics" ? (
+        <div className="-mx-6 -mb-6 rounded-lg border border-slate-800 bg-slate-950/60 sm:mx-0 sm:mb-0">
+          <GraphicsPanel closeOnEscape={false} />
         </div>
       ) : (
         <BuildingTab onDirtyChange={handleDirtyChange} />

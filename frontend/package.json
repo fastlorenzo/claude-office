@@ -26,9 +26,16 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "assets": "bun scripts/fetch-assets.ts",
+    "characters": "bun scripts/fetch-characters.ts",
+    "materials": "bun scripts/fetch-materials.ts"
   },
   "dependencies": {
+    "@babylonjs/core": "9.31.3",
+    "@babylonjs/gui": "9.31.3",
+    "@babylonjs/havok": "1.3.14",
+    "@babylonjs/loaders": "9.31.3",
     "@pixi/react": "8.0.5",
     "@xstate/react": "6.1.0",
     "clsx": "2.1.1",
@@ -46,6 +53,9 @@
     "zustand": "5.0.16"
   },
   "devDependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
     "@happy-dom/global-registrator": "^21.0.4",
     "@tailwindcss/postcss": "^4.3.4",
     "@types/node": "^26.6.6",
@@ -56,6 +66,7 @@
     "eslint-config-next": "16.4.5",
     "json-schema-to-typescript": "^16.0.0",
     "prettier": "^3.9.10",
+    "sharp": "0.35.5",
     "tailwindcss": "^4.3.4",
     "typescript": "^6.0.3",
     "vitest": "^5.1.0"

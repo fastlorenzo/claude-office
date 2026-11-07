@@ -2,7 +2,12 @@
 
 import { useEffect, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useAttentionStore, selectFocusPopup } from "@/stores/attentionStore";
+import {
+  canFocusTerminal,
+  useAttentionStore,
+  selectFocusPopup,
+} from "@/stores/attentionStore";
+import { canEnterSession, enterSession } from "@/components/world/enterSession";
 import { useGameStore, selectSessionId } from "@/stores/gameStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { AgentAnimationState } from "@/stores/gameStore";
@@ -23,6 +28,12 @@ export default function AgentPopup(): ReactNode {
     if (!sessionId) return;
     focusAgentTerminal(sessionId, focusPopup?.agentId ?? null);
   }, [sessionId, focusAgentTerminal, focusPopup]);
+
+  const handleEnter = useCallback(() => {
+    if (!sessionId) return;
+    closeFocusPopup();
+    void enterSession(sessionId);
+  }, [sessionId, closeFocusPopup]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -63,6 +74,13 @@ export default function AgentPopup(): ReactNode {
   const displayTask = isBoss ? boss.currentTask : agent?.currentTask;
   const displayType = isBoss ? "lead" : (agent?.characterType ?? "subagent");
   const displayDesk = isBoss ? null : agent?.desk;
+
+  const showTerminal = canFocusTerminal();
+  const showEnter = canEnterSession();
+  const primary =
+    "flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors";
+  const secondary =
+    "flex-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors";
 
   const popup = (
     <div
@@ -115,12 +133,19 @@ export default function AgentPopup(): ReactNode {
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={handleFocusTerminal}
-            className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors"
-          >
-            {t("attention.popup.focusTerminal")}
-          </button>
+          {showEnter && (
+            <button
+              onClick={handleEnter}
+              className={showTerminal ? secondary : primary}
+            >
+              {t("world.action.enter")}
+            </button>
+          )}
+          {showTerminal && (
+            <button onClick={handleFocusTerminal} className={primary}>
+              {t("attention.popup.focusTerminal")}
+            </button>
+          )}
           <button
             onClick={closeFocusPopup}
             className="bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors"

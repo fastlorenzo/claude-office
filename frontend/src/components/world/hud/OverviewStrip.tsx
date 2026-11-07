@@ -1,0 +1,370 @@
+"use client";
+
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { Activity, GitBranch } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { useCampusStore } from "@/stores/campusStore";
+import { STATUS_COLORS, type CampusSession } from "@/engine/contracts";
+import { roomStatus } from "@/engine/logic/status";
+import type { Session } from "@/hooks/useSessions";
+import { labelMap, projectBasename } from "../sessionMeta";
+import { enterSession } from "../enterSession";
+import { GLASS, LABEL } from "./glass";
+import {
+  activeAgents,
+  sessionBranch,
+  sessionFocus,
+  sessionHeadline,
+  sessionWorkItems,
+  shouldCollapse,
+  sortSessions,
+  todoProgress,
+} from "./sessionGlance";
+
+// ----------------------------------------------------------------------------
+// Visibility: a tiny external store so the toggle key and the component share
+// state without effects. Persisted per browser (best effort).
+// ----------------------------------------------------------------------------
+
+export const OVERVIEW_KEY = "p";
+const STORAGE_KEY = "claude-office.world.overview";
+let visible = true;
+try {
+  if (typeof localStorage !== "undefined") {
+    visible = localStorage.getItem(STORAGE_KEY) !== "0";
+  }
+} catch {
+  // storage unavailable: keep default
+}
+const listeners = new Set<() => void>();
+
+export function setOverviewVisible(next: boolean): void {
+  visible = next;
+  try {
+    localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+  } catch {
+    // ignore
+  }
+  listeners.forEach((l) => l());
+}
+
+export function toggleOverview(): void {
+  setOverviewVisible(!visible);
+}
+
+function useOverviewVisible(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      listeners.add(cb);
+      return () => listeners.delete(cb);
+    },
+    () => visible,
+    () => true,
+  );
+}
+
+function isTyping(el: Element | null): boolean {
+  if (!el) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    (el as HTMLElement).isContentEditable
+  );
+}
+
+/** P toggles the Overview strip. */
+export function useOverviewKey(): void {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      if (e.key.toLowerCase() !== OVERVIEW_KEY) return;
+      if (document.querySelector("[role='dialog'][aria-modal='true']")) return;
+      if (isTyping(document.activeElement)) return;
+      e.preventDefault();
+      toggleOverview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+}
+
+// ----------------------------------------------------------------------------
+
+function StatusDot({
+  color,
+  pulse,
+  size = 10,
+}: {
+  color: string;
+  pulse: boolean;
+  size?: number;
+}): ReactNode {
+  return (
+    <span
+      className="relative inline-flex shrink-0"
+      style={{ width: size, height: size }}
+    >
+      {pulse && (
+        <span
+          className="absolute inset-0 animate-ping rounded-full"
+          style={{ backgroundColor: color, opacity: 0.55 }}
+        />
+      )}
+      <span
+        className="relative rounded-full"
+        style={{
+          width: size,
+          height: size,
+          backgroundColor: color,
+          boxShadow: pulse ? `0 0 8px ${color}` : "none",
+        }}
+      />
+    </span>
+  );
+}
+
+interface CardProps {
+  cs: CampusSession;
+  label: string;
+  sub: string | null;
+  portrait: boolean;
+  dotsOnly: boolean;
+}
+
+function SessionCard({
+  cs,
+  label,
+  sub,
+  portrait,
+  dotsOnly,
+}: CardProps): ReactNode {
+  const { t } = useTranslation();
+  const [hover, setHover] = useState(false);
+  const status = roomStatus(cs);
+  const color = STATUS_COLORS[status];
+  const needs = status === "needs_you";
+  const headline = sessionHeadline(cs);
+  const hasObjective = !!cs.objective?.trim();
+  const focus = sessionFocus(cs);
+  const branch = sessionBranch(cs);
+  const { done, total, pct } = todoProgress(cs);
+  const agents = activeAgents(cs);
+  const items = sessionWorkItems(cs);
+  const recent = cs.recentActivity.slice(-3).reverse();
+  const title = headline ?? label;
+
+  if (dotsOnly) {
+    return (
+      <button
+        type="button"
+        tabIndex={-1}
+        title={`${label}: ${title}`}
+        aria-label={label}
+        onClick={() => void enterSession(cs.sessionId)}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${GLASS}`}
+      >
+        <StatusDot color={color} pulse={needs} size={9} />
+      </button>
+    );
+  }
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => void enterSession(cs.sessionId)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          void enterSession(cs.sessionId);
+        }
+      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocus={() => setHover(true)}
+      onBlur={() => setHover(false)}
+      className={`cursor-pointer rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-900/80 ${GLASS} ${
+        portrait ? "w-[240px] shrink-0" : "w-[260px] max-w-full"
+      }`}
+      style={{ borderLeft: `3px solid ${color}` }}
+    >
+      <div className="flex items-center gap-2">
+        <StatusDot color={color} pulse={needs} />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-300">
+          {label}
+        </span>
+        {branch && (
+          <span
+            className="flex max-w-[45%] items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[9px] text-slate-400"
+            title={branch}
+          >
+            <GitBranch className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{branch}</span>
+          </span>
+        )}
+        {needs && (
+          <span
+            className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-slate-950"
+            style={{ backgroundColor: color }}
+          >
+            {t("hud.overview.needsYou")}
+          </span>
+        )}
+      </div>
+
+      {sub && (
+        <div className="truncate text-[10px] text-slate-500" title={sub}>
+          {sub}
+        </div>
+      )}
+      <div
+        className="mt-1 truncate text-[13px] font-bold leading-tight text-white"
+        title={headline ?? undefined}
+      >
+        {headline ?? t(`hud.status.${status}`)}
+      </div>
+      {hasObjective && focus && (
+        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
+          <Activity className="h-3 w-3 shrink-0" style={{ color }} />
+          <span className="truncate" title={focus}>
+            {focus}
+          </span>
+        </div>
+      )}
+
+      <div className="mt-1.5 flex items-center gap-2">
+        <div
+          className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10"
+          role="progressbar"
+          aria-label={t("hud.overview.todos")}
+          aria-valuenow={done}
+          aria-valuemax={total}
+        >
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${pct}%`, backgroundColor: color }}
+          />
+        </div>
+        <span className="shrink-0 font-mono text-[10px] text-slate-400">
+          {total ? `${done}/${total}` : "–"}
+        </span>
+        {agents.length > 0 && (
+          <span
+            className="flex shrink-0 items-center gap-0.5"
+            title={`${t("hud.overview.agents")}: ${agents.length}`}
+          >
+            {agents.slice(0, 5).map((a) => (
+              <span
+                key={a.id}
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: a.color }}
+              />
+            ))}
+            <span className="ml-0.5 font-mono text-[10px] text-slate-400">
+              {agents.length}
+            </span>
+          </span>
+        )}
+      </div>
+
+      {hover && (items.length > 0 || recent.length > 0) && (
+        <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
+          {items.length > 0 && (
+            <div>
+              <div className={`${LABEL} mb-0.5 !text-[9px]`}>
+                {t("hud.overview.workItems")}
+              </div>
+              <ul className="space-y-0.5 text-[11px] text-slate-200">
+                {items.map((w, i) => (
+                  <li key={i} className="flex gap-1.5">
+                    <span
+                      className="mt-1.5 h-1 w-1 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="min-w-0 break-words">{w}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {recent.length > 0 && (
+            <div>
+              <div className={`${LABEL} mb-0.5 !text-[9px]`}>
+                {t("hud.overview.recent")}
+              </div>
+              <ul className="space-y-0.5 font-mono text-[10px] text-slate-400">
+                {recent.map((a, i) => (
+                  <li key={`${a.timestamp}-${i}`} className="truncate">
+                    {a.summary}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function OverviewStrip({
+  sessions,
+  portrait,
+}: {
+  sessions: Session[];
+  portrait: boolean;
+}): ReactNode {
+  const { t } = useTranslation();
+  useOverviewKey();
+  const shown = useOverviewVisible();
+  const campus = useCampusStore((s) => s.sessions);
+  const [hover, setHover] = useState(false);
+
+  const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
+  const subs = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const s of sessions) {
+      const base = projectBasename(s);
+      const l = labels.get(s.id);
+      if (base && l && base.toLowerCase() !== l.toLowerCase())
+        out.set(s.id, base);
+    }
+    return out;
+  }, [sessions, labels]);
+  const sorted = useMemo(() => sortSessions(campus), [campus]);
+
+  if (!shown || sorted.length === 0) return null;
+  const dotsOnly = shouldCollapse(sorted.length) && !hover;
+
+  return (
+    <div
+      aria-label={t("hud.overview.title")}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className={`pointer-events-auto absolute top-14 flex gap-1.5 ${
+        portrait
+          ? "inset-x-3 flex-row overflow-x-auto pb-1"
+          : "left-3 max-h-[calc(100%-9rem)] flex-col overflow-y-auto pr-1"
+      }`}
+    >
+      {sorted.map((cs) => (
+        <SessionCard
+          key={cs.sessionId}
+          cs={cs}
+          label={labels.get(cs.sessionId) ?? cs.sessionId.slice(0, 8)}
+          sub={subs.get(cs.sessionId) ?? null}
+          portrait={portrait}
+          dotsOnly={dotsOnly}
+        />
+      ))}
+    </div>
+  );
+}

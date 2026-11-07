@@ -18,6 +18,9 @@ RUN bun install --frozen-lockfile
 # Copy frontend source
 COPY frontend/ ./
 
+# Download CC0 3D assets (Poly Haven) and Havok wasm
+RUN bun run assets
+
 # Build static export
 RUN bun run build
 

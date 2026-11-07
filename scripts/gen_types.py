@@ -20,6 +20,11 @@ from app.models.agents import (  # noqa: E402  # type: ignore[import]
     Boss,
     OfficeState,
 )
+from app.models.campus import (  # noqa: E402  # type: ignore[import]
+    CampusActivity,
+    CampusSession,
+    CampusState,
+)
 from app.models.common import (  # noqa: E402  # type: ignore[import]
     BubbleContent,
     SpeechContent,
@@ -41,11 +46,6 @@ from app.models.git import (  # noqa: E402  # type: ignore[import]
     ChangedFile,
     Commit,
     GitStatus,
-)
-from app.models.campus import (  # noqa: E402  # type: ignore[import]
-    CampusActivity,
-    CampusSession,
-    CampusState,
 )
 from app.models.overview import OverviewEntry, OverviewState  # noqa: E402  # type: ignore[import]
 from app.models.sessions import (  # noqa: E402  # type: ignore[import]

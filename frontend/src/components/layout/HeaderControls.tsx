@@ -4,6 +4,7 @@ import { Activity, HelpCircle, Settings, Bell, LayoutGrid } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useAttentionStore, selectUnreadCount } from "@/stores/attentionStore";
+import { usePreferencesStore } from "@/stores/preferencesStore";
 import { HeaderMoreMenu } from "@/components/layout/HeaderMoreMenu";
 
 // ============================================================================
@@ -53,9 +54,35 @@ export function HeaderControls({
   const goToCommand = useNavigationStore((s) => s.goToCommand);
   const unreadCount = useAttentionStore(selectUnreadCount);
   const openCommandBar = useAttentionStore((s) => s.openCommandBar);
+  const renderer = usePreferencesStore((s) => s.renderer);
+  const setRenderer = usePreferencesStore((s) => s.setRenderer);
 
   return (
     <div className="flex gap-3 items-center">
+      {/* 3D / Pixel renderer switch */}
+      <div
+        role="group"
+        aria-label={t("settings.renderer")}
+        className="flex items-center p-0.5 rounded border border-slate-700 bg-slate-900"
+      >
+        {(["3d", "pixel"] as const).map((r) => (
+          <button
+            key={r}
+            onClick={() => setRenderer(r)}
+            aria-pressed={renderer === r}
+            className={`px-2.5 py-1 rounded-sm text-[11px] font-bold tracking-wide transition-colors ${
+              renderer === r
+                ? "bg-orange-500/20 text-orange-400"
+                : "text-slate-500 hover:text-slate-300"
+            }`}
+          >
+            {r === "3d"
+              ? t("settings.renderer3d")
+              : t("settings.rendererPixel")}
+          </button>
+        ))}
+      </div>
+
       {unreadCount > 0 && (
         <button
           onClick={openCommandBar}

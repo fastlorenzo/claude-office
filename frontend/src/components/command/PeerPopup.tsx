@@ -4,7 +4,7 @@ import { useCallback, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Terminal, ArrowRight } from "lucide-react";
 import { useAttentionStore } from "@/stores/attentionStore";
-import { useTranslation } from "@/hooks/useTranslation";
+import { useTranslation, type TranslationKey } from "@/hooks/useTranslation";
 import { ZONE_BY_KEY } from "./layout";
 import type { CommandPeer } from "./useCommandCenterPeers";
 
@@ -21,6 +21,10 @@ interface PeerPopupProps {
   popup: PeerPopupState | null;
   onClose: () => void;
   onDrillIn: (sessionId: string) => void;
+  /** Label for the drill-in button (defaults to "Drill in"). */
+  drillLabelKey?: TranslationKey;
+  /** Hide "Open terminal" when it cannot work (defaults to shown). */
+  showTerminal?: boolean;
 }
 
 /**
@@ -32,6 +36,8 @@ export function PeerPopup({
   popup,
   onClose,
   onDrillIn,
+  drillLabelKey = "commandCenter.popup.drillIn",
+  showTerminal = true,
 }: PeerPopupProps): ReactNode {
   const { t } = useTranslation();
   const focusAgentTerminal = useAttentionStore((s) => s.focusAgentTerminal);
@@ -131,19 +137,21 @@ export function PeerPopup({
         </div>
 
         <div className="flex gap-2">
-          <button
-            onClick={handleFocusTerminal}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors"
-          >
-            <Terminal size={13} />
-            {t("commandCenter.popup.terminal")}
-          </button>
+          {showTerminal && (
+            <button
+              onClick={handleFocusTerminal}
+              className="flex-1 flex items-center justify-center gap-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded-lg transition-colors"
+            >
+              <Terminal size={13} />
+              {t("commandCenter.popup.terminal")}
+            </button>
+          )}
           <button
             onClick={handleDrill}
             className="flex-1 flex items-center justify-center gap-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-xs font-bold py-1.5 px-3 rounded-lg transition-colors"
           >
             <ArrowRight size={13} />
-            {t("commandCenter.popup.drillIn")}
+            {t(drillLabelKey)}
           </button>
         </div>
       </div>

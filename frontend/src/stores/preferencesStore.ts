@@ -3,6 +3,13 @@
 import { create } from "zustand";
 import { isLocale, type Locale } from "@/i18n";
 import { apiFetch } from "@/utils/api";
+import {
+  applyPreset,
+  defaultGraphicsSettings,
+  parseGraphicsSettings,
+  serializeGraphicsSettings,
+  type GraphicsSettings,
+} from "@/engine/fx/graphicsSettings";
 
 // ============================================================================
 // TYPES
@@ -10,12 +17,18 @@ import { apiFetch } from "@/utils/api";
 
 export type ClockType = "analog" | "digital";
 export type ClockFormat = "12h" | "24h";
+export type Renderer = "3d" | "pixel";
+export type GraphicsQuality = "auto" | "high" | "low";
 
 export interface PreferencesState {
   clockType: ClockType;
   clockFormat: ClockFormat;
   autoFollowNewSessions: boolean;
   language: Locale;
+  renderer: Renderer;
+  graphicsQuality: GraphicsQuality;
+  /** Full 3D graphics settings (Graphics menu); persisted as "graphics_settings". */
+  graphics: GraphicsSettings;
   isLoaded: boolean;
 
   // Attention settings
@@ -34,6 +47,12 @@ export interface PreferencesState {
   setClockFormat: (format: ClockFormat) => Promise<void>;
   setAutoFollowNewSessions: (enabled: boolean) => Promise<void>;
   setLanguage: (language: Locale) => Promise<void>;
+  setRenderer: (renderer: Renderer) => Promise<void>;
+  setGraphicsQuality: (quality: GraphicsQuality) => Promise<void>;
+  /** Replace graphics settings; applied immediately, persisted debounced. */
+  setGraphics: (graphics: GraphicsSettings) => void;
+  /** Flush a pending debounced graphics save right away. */
+  flushGraphics: () => Promise<void>;
   cycleClockMode: () => Promise<void>;
   setCommandBarEnabled: (enabled: boolean) => Promise<void>;
   setClickToFocusEnabled: (enabled: boolean) => Promise<void>;
@@ -55,6 +74,8 @@ const DEFAULT_CLOCK_TYPE: ClockType = "analog";
 const DEFAULT_CLOCK_FORMAT: ClockFormat = "12h";
 const DEFAULT_AUTO_FOLLOW_NEW_SESSIONS = true;
 const DEFAULT_LANGUAGE: Locale = "en";
+const DEFAULT_RENDERER: Renderer = "3d";
+const DEFAULT_GRAPHICS_QUALITY: GraphicsQuality = "auto";
 const DEFAULT_COMMAND_BAR_ENABLED = true;
 const DEFAULT_CLICK_TO_FOCUS_ENABLED = false;
 const DEFAULT_TOAST_FILTER_PERMISSION = true;
@@ -63,6 +84,37 @@ const DEFAULT_TOAST_FILTER_TASK_COMPLETE = true;
 const DEFAULT_TOAST_FILTER_ARRIVAL = false;
 const DEFAULT_TOAST_AUTO_DISMISS_LOW = 5000;
 const DEFAULT_TOAST_AUTO_DISMISS_INFO = 3000;
+
+// ============================================================================
+// PARSERS
+// ============================================================================
+
+/** Explicit parse: anything other than "pixel" (incl. missing) is "3d". */
+export function parseRenderer(raw: string | undefined): Renderer {
+  return raw === "pixel" ? "pixel" : DEFAULT_RENDERER;
+}
+
+export function parseGraphicsQuality(raw: string | undefined): GraphicsQuality {
+  return raw === "high" || raw === "low" ? raw : DEFAULT_GRAPHICS_QUALITY;
+}
+
+/**
+ * graphics_settings JSON wins; otherwise derive from the legacy
+ * graphics_quality (auto/high/low → preset).
+ */
+export function resolveGraphics(
+  prefs: Record<string, string>,
+  isMobile = false,
+): GraphicsSettings {
+  if (prefs.graphics_settings)
+    return parseGraphicsSettings(prefs.graphics_settings, isMobile);
+  const base = defaultGraphicsSettings(isMobile);
+  const q = parseGraphicsQuality(prefs.graphics_quality);
+  return prefs.graphics_quality ? applyPreset(q, base) : base;
+}
+
+const GRAPHICS_SAVE_DEBOUNCE_MS = 300;
+let graphicsTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ============================================================================
 // API HELPERS
@@ -101,6 +153,9 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
   clockFormat: DEFAULT_CLOCK_FORMAT,
   autoFollowNewSessions: DEFAULT_AUTO_FOLLOW_NEW_SESSIONS,
   language: DEFAULT_LANGUAGE,
+  renderer: DEFAULT_RENDERER,
+  graphicsQuality: DEFAULT_GRAPHICS_QUALITY,
+  graphics: defaultGraphicsSettings(),
   commandBarEnabled: DEFAULT_COMMAND_BAR_ENABLED,
   clickToFocusEnabled: DEFAULT_CLICK_TO_FOCUS_ENABLED,
   toastFilterPermission: DEFAULT_TOAST_FILTER_PERMISSION,
@@ -134,6 +189,12 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
           : DEFAULT_CLOCK_FORMAT,
       autoFollowNewSessions,
       language: isLocale(language) ? language : DEFAULT_LANGUAGE,
+      renderer: parseRenderer(prefs.renderer),
+      graphicsQuality: parseGraphicsQuality(prefs.graphics_quality),
+      graphics: resolveGraphics(
+        prefs,
+        typeof window !== "undefined" && window.innerWidth < 768,
+      ),
       commandBarEnabled: prefs.commandBarEnabled !== "false",
       clickToFocusEnabled: prefs.clickToFocusEnabled !== "false",
       toastFilterPermission: prefs.toastFilterPermission !== "false",
@@ -168,6 +229,40 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
   setLanguage: async (language) => {
     set({ language });
     await setPreference("language", language);
+  },
+
+  setRenderer: async (renderer) => {
+    set({ renderer });
+    await setPreference("renderer", renderer);
+  },
+
+  setGraphicsQuality: async (graphicsQuality) => {
+    set({ graphicsQuality });
+    // Keep the full settings in step with the legacy auto/high/low switch.
+    get().setGraphics(applyPreset(graphicsQuality, get().graphics));
+    await setPreference("graphics_quality", graphicsQuality);
+  },
+
+  setGraphics: (graphics) => {
+    set({ graphics });
+    if (graphicsTimer) clearTimeout(graphicsTimer);
+    graphicsTimer = setTimeout(() => {
+      graphicsTimer = null;
+      void setPreference(
+        "graphics_settings",
+        serializeGraphicsSettings(get().graphics),
+      );
+    }, GRAPHICS_SAVE_DEBOUNCE_MS);
+  },
+
+  flushGraphics: async () => {
+    if (!graphicsTimer) return;
+    clearTimeout(graphicsTimer);
+    graphicsTimer = null;
+    await setPreference(
+      "graphics_settings",
+      serializeGraphicsSettings(get().graphics),
+    );
   },
 
   cycleClockMode: async () => {
@@ -247,6 +342,10 @@ export const selectClockFormat = (state: PreferencesState) => state.clockFormat;
 export const selectAutoFollowNewSessions = (state: PreferencesState) =>
   state.autoFollowNewSessions;
 export const selectLanguage = (state: PreferencesState) => state.language;
+export const selectRenderer = (state: PreferencesState) => state.renderer;
+export const selectGraphicsQuality = (state: PreferencesState) =>
+  state.graphicsQuality;
+export const selectGraphics = (state: PreferencesState) => state.graphics;
 export const selectIsLoaded = (state: PreferencesState) => state.isLoaded;
 export const selectCommandBarEnabled = (state: PreferencesState) =>
   state.commandBarEnabled;

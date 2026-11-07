@@ -1,9 +1,12 @@
-.PHONY: dev build build-static start lint typecheck test format checkall gen-types
+.PHONY: assets dev build build-static start lint typecheck test format checkall gen-types
 
 BACKEND_STATIC_DIR := ../backend/static
 
 # Detect package manager: prefer bun if available, otherwise use npm
 PKG_MGR := $(shell command -v bun >/dev/null 2>&1 && echo "bun" || echo "npm")
+
+assets:
+	$(PKG_MGR) run assets
 
 dev:
 	$(PKG_MGR) run dev
