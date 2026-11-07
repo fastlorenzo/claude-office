@@ -452,6 +452,14 @@ export interface ConveyorSegments {
   guard: BoxInstance[];
   merges: MergeInfo[];
   geoms: PathGeom[];
+  /** Belt instance range [start, end) of every path (per-lane scroll). */
+  beltRanges: BeltRange[];
+}
+
+export interface BeltRange {
+  id: string;
+  start: number;
+  end: number;
 }
 
 /** Stable identity of a path set (rebuild only when this changes). */
@@ -522,6 +530,7 @@ export function buildConveyorSegments(
   const belt: BoxInstance[] = [];
   const frame: BoxInstance[] = [];
   const guard: BoxInstance[] = [];
+  const beltRanges: BeltRange[] = [];
   const C = CONVEYOR;
 
   for (const g of geoms) {
@@ -535,6 +544,7 @@ export function buildConveyorSegments(
       if (m.into === g.id) openings[m.side].push([m.s - m.half, m.s + m.half]);
 
     const slices = slicePath(g);
+    const beltStart = belt.length;
     const skirtO = w / 2 - C.skirtThickness / 2;
     const railO = w / 2 - 0.03;
     for (const sl of slices) {
@@ -588,6 +598,8 @@ export function buildConveyorSegments(
         }
       }
     }
+
+    beltRanges.push({ id: g.id, start: beltStart, end: belt.length });
 
     // Rail brackets every ~1 m.
     const nb = Math.max(1, Math.floor((g.end - 0.4) / 1));
@@ -689,7 +701,7 @@ export function buildConveyorSegments(
       });
     }
   }
-  return { belt, frame, guard, merges, geoms };
+  return { belt, frame, guard, merges, geoms, beltRanges };
 }
 
 /**

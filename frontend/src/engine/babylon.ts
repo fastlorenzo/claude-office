@@ -216,3 +216,6 @@ export { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 // ---------------------------------------------------------------------------
 export { CreateBoxVertexData } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 export { CreateCylinderVertexData } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
+
+// Added by the factory life agent (additive)
+export { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";

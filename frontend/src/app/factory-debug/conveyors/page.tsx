@@ -9,6 +9,9 @@
  *   shot=1                     set document.title = "ready" ~N frames after ready
  *   frames=40                  frames to wait before "ready" when shot=1
  *   t=0.03                     frozen animation time (s) when shot=1
+ *   anim=1                     scripted state changes: arms, beacons, belts move
+ *                              (with shot=1: fixed 30 fps steps, frames=N → N/30 s)
+ *   radius=30                  arm animation radius (m); 1000 = stress worst case
  *
  * Controls: WASD move, Q/E down/up, drag to look.
  * `window.__worldStats` = { draws (median of 5), conveyors, stations, … }.
@@ -37,6 +40,8 @@ function parseParams(): SandboxParams {
     shot: q.get("shot") === "1",
     frames: Number(q.get("frames") ?? 40) || 40,
     t: q.get("t") ? Number(q.get("t")) || 0 : 0.03,
+    anim: q.get("anim") === "1",
+    radius: Number(q.get("radius") ?? 30) || 30,
     lanes: Math.max(1, Math.min(60, Number(q.get("lanes") ?? 3) || 3)),
   };
 }
@@ -50,7 +55,12 @@ interface Stats {
     animated: number;
     bufferWrites: number;
     partialWrites: number;
+    armsActive?: number;
+    armsWrittenLast?: number;
+    armsSkipped?: number;
+    updateMs?: number;
   };
+  animMs?: number;
 }
 
 export default function ConveyorSandboxPage() {
@@ -106,6 +116,12 @@ export default function ConveyorSandboxPage() {
               writes {stats.stations.bufferWrites} full ·{" "}
               {stats.stations.partialWrites} beacon · {stats.stations.animated}{" "}
               animated
+            </div>
+            <div>
+              arms {stats.stations.armsWrittenLast ?? 0} written /{" "}
+              {stats.stations.armsActive ?? 0} active /{" "}
+              {stats.stations.armsSkipped ?? 0} skipped · cpu{" "}
+              {(stats.animMs ?? 0).toFixed(3)} ms
             </div>
           </>
         )}

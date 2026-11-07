@@ -100,7 +100,7 @@ export function beaconBase(state: CheckState): Rgb {
 }
 
 export function isAnimated(state: CheckState): boolean {
-  return state === "running" || state === "failure";
+  return state === "running" || state === "failure" || state === "queued";
 }
 
 /** Steady beacon intensity per state (HDR multiplier; > 1 blooms). */
@@ -113,15 +113,30 @@ const BEACON_LEVEL: Record<CheckState, number> = {
   none: 1,
 };
 
+/** Slow amber blink period (s). */
+export const QUEUED_PERIOD = 1.6;
+/** Blue running beacon: sweeps per second of the "rotating" highlight. */
+export const RUNNING_HZ = 1.25;
+
 /**
- * Beacon intensity at time `t` (s): running breathes (0.8 Hz), failure is a
- * red double-flash strobe (1 Hz), everything else is steady.
+ * Beacon intensity at time `t` (s):
+ *   queued   slow soft-square amber blink (1.6 s period)
+ *   running  rotating-beacon pulse (a sharp highlight sweeping at 1.25 Hz)
+ *   failure  red double-flash strobe (1 Hz)
+ *   others   steady (success green; cancelled / none are grey, see below)
  */
 export function beaconLevel(state: CheckState, t: number): number {
   const base = BEACON_LEVEL[state];
+  if (state === "queued") {
+    const k = Math.min(
+      1,
+      Math.max(0, 0.5 + 1.3 * Math.sin((2 * Math.PI * t) / QUEUED_PERIOD)),
+    );
+    return base * (0.08 + 0.92 * k);
+  }
   if (state === "running") {
-    const k = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.8 * t);
-    return base * (0.45 + 0.75 * k);
+    const c = 0.5 + 0.5 * Math.cos(2 * Math.PI * RUNNING_HZ * t);
+    return base * (0.3 + 0.95 * c * c * c);
   }
   if (state === "failure") {
     const ph = ((t % 1) + 1) % 1;
@@ -134,9 +149,39 @@ export function beaconLevel(state: CheckState, t: number): number {
 /** Unlit lens (no / cancelled check): frosted grey, not a black hole. */
 export const BEACON_OFF: Rgb = [0.2, 0.21, 0.23];
 
+const BASE_RGB: Record<CheckState, Rgb> = {
+  success: beaconBase("success"),
+  queued: beaconBase("queued"),
+  running: beaconBase("running"),
+  failure: beaconBase("failure"),
+  cancelled: beaconBase("cancelled"),
+  none: beaconBase("none"),
+};
+
+/** Allocation-free `beaconColor`: writes RGBA at `out[o..o+3]`. */
+export function writeBeaconRgba(
+  state: CheckState,
+  t: number,
+  out: Float32Array,
+  o: number,
+): void {
+  if (state === "none" || state === "cancelled") {
+    out[o] = BEACON_OFF[0];
+    out[o + 1] = BEACON_OFF[1];
+    out[o + 2] = BEACON_OFF[2];
+  } else {
+    const c = BASE_RGB[state];
+    const k = beaconLevel(state, t);
+    out[o] = c[0] * k;
+    out[o + 1] = c[1] * k;
+    out[o + 2] = c[2] * k;
+  }
+  out[o + 3] = 1;
+}
+
 export function beaconColor(state: CheckState, t: number): Rgb {
   if (state === "none" || state === "cancelled") return [...BEACON_OFF];
-  const c = beaconBase(state);
+  const c = BASE_RGB[state];
   const k = beaconLevel(state, t);
   return [c[0] * k, c[1] * k, c[2] * k];
 }
@@ -287,17 +332,19 @@ export function writeBeaconColors(
   count: number,
   t: number,
   out: Float32Array,
+  /** Optional per-instance time offsets (s); default: index-based stagger. */
+  phases?: Float32Array,
 ): void {
-  for (let i = 0; i < count; i++) {
-    const c = beaconColor(order[i].state, t + phaseOf(i));
-    out[i * 4] = c[0];
-    out[i * 4 + 1] = c[1];
-    out[i * 4 + 2] = c[2];
-    out[i * 4 + 3] = 1;
-  }
+  for (let i = 0; i < count; i++)
+    writeBeaconRgba(
+      order[i].state,
+      t + (phases ? phases[i] : beaconPhase(i)),
+      out,
+      i * 4,
+    );
 }
 
 /** Tiny per-station phase offset so a row of running beacons isn't lock-stepped. */
-function phaseOf(i: number): number {
+export function beaconPhase(i: number): number {
   return ((i * 0.618) % 1) * 0.35;
 }

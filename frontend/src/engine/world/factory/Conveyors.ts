@@ -2,14 +2,18 @@
  * Conveyors — ONE thin-instanced pool for every belt of the plant (lanes,
  * project trunks, the main line): 3 draw calls in total.
  *
- *   belt   rubber (shared PBR, procedural ribbed albedo + normal, UV scroll)
+ *   belt   rubber (shared PBR, procedural ribbed albedo + normal). The UV
+ *          scroll is a per-instance float attribute ("beltScroll", added to
+ *          the albedo / normal UVs by a PBR material plugin), so every lane
+ *          has its own speed while all belts stay ONE draw call
  *   frame  satin metal unit box, per-instance colour (skirts, legs, feet,
  *          braces, rail brackets, end covers)
  *   guard  satin polymer unit cylinder, per-instance colour (guide rails,
  *          safety-yellow end bumpers)
  *
  * `setPaths()` rebuilds the buffers only when the path set's key changes;
- * `update(dt)` scrolls the belt texture (a uniform, never a buffer write).
+ * `update(dt)` advances the moving lanes only (`setLaneSpeed`, 0 = stopped)
+ * and uploads the belt scroll attribute only while something moves.
  * Geometry planning lives in `conveyorPlan.ts` (pure, unit-tested).
  */
 import {
@@ -18,6 +22,7 @@ import {
   CreateBoxVertexData,
   CreateCylinderVertexData,
   Matrix,
+  MaterialPluginBase,
   Mesh,
   PBRMaterial,
   RawTexture,
@@ -25,6 +30,7 @@ import {
   Texture,
   VertexData,
 } from "@/engine/babylon";
+import { LaneScroll } from "./factoryAnim";
 import {
   buildConveyorSegments,
   conveyorKey,
@@ -43,6 +49,50 @@ export interface ConveyorStats {
   guard: number;
   rebuilds: number;
   bufferWrites: number;
+  /** Lanes (paths) currently moving, and scroll attribute uploads so far. */
+  lanesMoving: number;
+  scrollUploads: number;
+}
+
+/**
+ * PBR plugin: adds the per-instance "beltScroll" attribute (in UV units) to
+ * the albedo / normal-map V coordinate. GLSL only (the engine is WebGL).
+ */
+class BeltScrollPlugin extends MaterialPluginBase {
+  constructor(material: PBRMaterial) {
+    super(material, "BeltScroll", 210, { BELT_SCROLL: false });
+    this._enable(true);
+  }
+
+  override getClassName(): string {
+    return "BeltScrollPlugin";
+  }
+
+  override prepareDefines(defines: Record<string, unknown>): void {
+    defines["BELT_SCROLL"] = true;
+  }
+
+  override getAttributes(attributes: string[]): void {
+    attributes.push("beltScroll");
+  }
+
+  override getCustomCode(shaderType: string): Record<string, string> | null {
+    if (shaderType !== "vertex") return null;
+    return {
+      CUSTOM_VERTEX_DEFINITIONS: "attribute float beltScroll;",
+      CUSTOM_VERTEX_MAIN_END: `
+#ifdef MAINUV1
+vMainUV1.y += beltScroll;
+#endif
+#if defined(ALBEDO) && ALBEDODIRECTUV == 0
+vAlbedoUV.y += beltScroll;
+#endif
+#if defined(BUMP) && BUMPDIRECTUV == 0
+vBumpUV.y += beltScroll;
+#endif
+`,
+    };
+  }
 }
 
 /** Ribs per texture tile (one tile ≈ one 1 m slice). */
@@ -99,8 +149,8 @@ export class Conveyors {
   private readonly rubber: PBRMaterial;
   private readonly textures: Texture[] = [];
   private key: string | null = null;
-  private scroll = 0;
-  private speed = 0.3;
+  private readonly lanes = new LaneScroll();
+  private scrollUploads = 0;
   private rebuilds = 0;
   private bufferWrites = 0;
   private last: ConveyorSegments | null = null;
@@ -116,7 +166,11 @@ export class Conveyors {
     this.textures.push(albedo, normal);
     this.rubber.albedoTexture = albedo;
     this.rubber.bumpTexture = normal;
-    normal.level = 0.55; // fine ribs alias into moiré under raking sun at full strength
+    // Fine ribs alias into moiré at grazing angles: soft normal, specular
+    // anti-aliasing, max anisotropy (see rubberTextures for the profile).
+    normal.level = 0.4;
+    this.rubber.enableSpecularAntiAliasing = true;
+    new BeltScrollPlugin(this.rubber);
     this.rubber.albedoColor = Color3.White();
     this.rubber.metallic = 0;
     this.rubber.roughness = 0.66;
@@ -159,22 +213,44 @@ export class Conveyors {
     const seg = buildConveyorSegments(paths);
     this.last = seg;
     this.bufferWrites += this.belt.write(seg.belt);
+    this.lanes.setRanges(seg.beltRanges, seg.belt.length);
+    this.bindScroll(seg.belt.length);
     this.bufferWrites += this.frame.write(seg.frame);
     this.bufferWrites += this.guard.write(seg.guard);
     this.rebuilds++;
     return true;
   }
 
-  /** Belt surface speed (m/s); per-lane speeds come with Phase 3. */
+  /** Default belt surface speed (m/s) for lanes without their own speed. */
   setSpeed(mps: number): void {
-    this.speed = mps;
+    this.lanes.setDefault(mps);
   }
 
-  /** Scroll the shared rubber texture (uniform update, no buffer writes). */
+  /** Belt speed (m/s) of one path (lane / trunk / main); 0 stops it. */
+  setLaneSpeed(pathId: string, mps: number): void {
+    this.lanes.setLane(pathId, mps);
+  }
+
+  /** Advance moving lanes; stopped lanes cost nothing (no buffer writes). */
   update(dt: number): void {
-    if (this.speed === 0 || dt <= 0) return;
-    this.scroll = (this.scroll - this.speed * dt) % 1;
-    for (const t of this.textures) t.vOffset = this.scroll;
+    if (this.lanes.step(Math.min(dt, 0.1)) === 0) return;
+    this.belt.mesh.thinInstancePartialBufferUpdate(
+      "beltScroll",
+      this.lanes.hi - this.lanes.lo,
+      this.lanes.lo,
+    );
+    this.scrollUploads++;
+  }
+
+  /** (Re)attach the per-instance scroll attribute to the belt mesh. */
+  private bindScroll(n: number): void {
+    if (n === 0) return;
+    this.belt.mesh.thinInstanceSetBuffer(
+      "beltScroll",
+      this.lanes.offsets,
+      1,
+      false,
+    );
   }
 
   setVisible(on: boolean): void {
@@ -200,6 +276,8 @@ export class Conveyors {
       guard: this.guard.count,
       rebuilds: this.rebuilds,
       bufferWrites: this.bufferWrites,
+      lanesMoving: this.lanes.moving(),
+      scrollUploads: this.scrollUploads,
     };
   }
 
@@ -294,7 +372,7 @@ function rubberTextures(scene: Scene): { albedo: Texture; normal: Texture } {
     t.wrapU = Texture.WRAP_ADDRESSMODE;
     t.wrapV = Texture.WRAP_ADDRESSMODE;
     t.gammaSpace = srgb;
-    t.anisotropicFilteringLevel = 8;
+    t.anisotropicFilteringLevel = 16;
     return t;
   };
   return {

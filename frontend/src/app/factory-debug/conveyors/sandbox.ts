@@ -39,6 +39,10 @@ export interface SandboxParams {
   t: number;
   /** Station count multiplier for stress tests (lanes per cell). */
   lanes: number;
+  /** Animate: states change over time, arms / beacons / belts move. */
+  anim: boolean;
+  /** Arm animation radius (m); default 30. */
+  radius: number;
 }
 
 export interface SandboxHandle {
@@ -66,6 +70,33 @@ const LANE_STATES: CheckState[][] = [
   ["success", "success", "success", "success", "success", "running"],
   ["success", "success", "failure", "none", "none", "none"],
 ];
+
+/** Scripted state cycle for the `anim` demo (deterministic, per station). */
+const SCRIPT: CheckState[] = [
+  "none",
+  "queued",
+  "running",
+  "success",
+  "queued",
+  "running",
+  "failure",
+  "none",
+  "queued",
+  "running",
+  "success",
+  "success",
+];
+const STEP_S = 3.5;
+
+export function scriptState(id: string, t: number): CheckState {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const k = Math.floor(t / STEP_S) + ((h >>> 0) % SCRIPT.length);
+  return SCRIPT[k % SCRIPT.length];
+}
 
 export function laneZ(i: number): number {
   return 1.2 + i * 2.4;
@@ -284,7 +315,37 @@ export async function createSandbox(
   const conveyors = new Conveyors(scene);
   conveyors.setPaths(sandboxPaths(p.lanes));
   const stations = new Stations(scene);
-  stations.setStations(sandboxStations(p.lanes));
+  const baseStations = sandboxStations(p.lanes);
+  stations.setStations(baseStations);
+  stations.setAnimationRadius(p.radius);
+  conveyors.setSpeed(0);
+  let simT = 0;
+  let lastStep = -1;
+  const laneRunning = new Set<string>();
+  // Advance the scripted demo: restate stations and set per-lane belt speeds.
+  const advanceScript = () => {
+    const step = Math.floor(simT / STEP_S);
+    if (step === lastStep) return;
+    lastStep = step;
+    laneRunning.clear();
+    const next = baseStations.map((s) => {
+      const state = scriptState(s.id, simT);
+      if (state === "running") {
+        const m = /^st-(\d+)-/.exec(s.id);
+        laneRunning.add(m ? `lane-${m[1]}` : "main");
+      }
+      return { ...s, state };
+    });
+    stations.setStations(next);
+    for (let i = 0; i < p.lanes; i++)
+      conveyors.setLaneSpeed(
+        `lane-${i}`,
+        laneRunning.has(`lane-${i}`) ? 0.45 : 0,
+      );
+    conveyors.setLaneSpeed("trunk", laneRunning.size > 0 ? 0.45 : 0);
+    conveyors.setLaneSpeed("main", laneRunning.size > 0 ? 0.45 : 0);
+  };
+  if (p.anim) advanceScript();
   lighting.addStaticCasters([
     ...conveyors.meshes(),
     ...stations.casterMeshes(),
@@ -292,20 +353,42 @@ export async function createSandbox(
   for (const m of [...conveyors.meshes(), ...stations.casterMeshes()])
     lighting.addShadowCaster(m);
 
-  if (p.shot) {
+  if (p.shot && !p.anim) {
     // Deterministic frame: fixed animation time, belts frozen.
     stations.update(p.t);
     conveyors.setSpeed(0);
   }
+  let cpuSum = 0;
+  let cpuN = 0;
+  let cpuMean = 0;
 
   const drawHist: number[] = [];
   let lastStats = 0;
   engine.runRenderLoop(() => {
-    const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
-    if (!p.shot) {
+    const real = Math.min(0.05, engine.getDeltaTime() / 1000);
+    // shot + anim: fixed 30 fps simulation steps, so frames=N is repeatable.
+    const dt = p.shot ? 1 / 30 : real;
+    const c0 = performance.now();
+    if (p.anim) {
+      simT += dt;
+      advanceScript();
+      stations.setViewer(
+        camera.position.x,
+        camera.position.y,
+        camera.position.z,
+      );
+      conveyors.update(dt);
+      stations.update(dt);
+    } else if (!p.shot) {
       conveyors.update(dt);
       stations.update(dt);
     } else stations.update(0);
+    cpuSum += performance.now() - c0;
+    if (++cpuN >= 120) {
+      cpuMean = cpuSum / cpuN;
+      cpuSum = 0;
+      cpuN = 0;
+    }
     lighting.update(dt, camera.position);
     scene.render();
     const now = performance.now();
@@ -319,6 +402,8 @@ export async function createSandbox(
         active: scene.getActiveMeshes().length,
         conveyors: conveyors.stats(),
         stations: stations.stats(),
+        animMs: cpuMean,
+        simT,
         merges: conveyors.segments?.merges.length ?? 0,
       };
     }

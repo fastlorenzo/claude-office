@@ -6,16 +6,21 @@
  *            (vertex-coloured satin paint, static)
  *   hood     inspection light under the sensor box (unlit, instance colour)
  *   arm1-3   3-segment robot arm (shoulder/upper arm, elbow/forearm,
- *            wrist/sensor head); static poses per state, `setArmPose` is the
- *            Phase 3 motion hook
+ *            wrist/sensor head); P3.2: `StationAnimator` (factoryAnim.ts)
+ *            animates running (scan sweep, probe dip, return), success (nod),
+ *            failure (stop pose); only visible / in-LOD arms are written,
+ *            `setArmPose` still overrides one station
  *   beacon   lens, instance colour = `stateColor` (CHECK_COLORS) in HDR so
- *            the pipeline bloom picks it up; running breathes, failure strobes
+ *            the pipeline bloom picks it up; queued blinks amber, running
+ *            pulses blue, failure strobes red (+ hood flash), success steady
  *   glyph    per-CheckKind "kind drum" on both faces of the sensor box
  *            (one atlas, face chosen by the instance rotation)
  *
  * `setStations()` is a no-op (zero buffer writes) when the station key is
  * unchanged; `update(dt)` re-uploads only the contiguous prefix of animated
- * beacons (running / failure), and nothing at all when there are none.
+ * beacons (queued / running / failure) and the touched range of animated
+ * arms, and nothing at all when there are none. No per-frame allocations
+ * beyond Babylon's tiny partial-update views.
  * Planning / colours / kinematics live in `stationPlan.ts` (pure, tested).
  */
 import {
@@ -33,10 +38,9 @@ import {
 import { roundedBoxData } from "@/engine/art/geometry";
 import {
   GLYPH_KINDS,
+  QUEUED_PERIOD,
   GLYPH_LABELS,
   STATION,
-  armMatrices,
-  armPoseFor,
   drumApothem,
   glyphColor,
   glyphMatrices,
@@ -49,7 +53,14 @@ import {
   type StationInstance,
 } from "./stationPlan";
 import { hexToLinear, rotZ, transformPoint, type Mat4 } from "./poolMath";
-import type { CheckKind } from "@/engine/contracts";
+import {
+  StationAnimator,
+  phaseOf,
+  writeArmMatrices,
+  newPose,
+  writeArmBase,
+} from "./factoryAnim";
+import type { CheckKind, CheckState } from "@/engine/contracts";
 
 export type { StationInstance, ArmPose } from "./stationPlan";
 
@@ -62,6 +73,17 @@ export interface StationStats {
   /** Partial beacon-prefix uploads since creation. */
   partialWrites: number;
   rebuilds: number;
+  /** Arms animating right now (work list) / written last frame / total writes. */
+  armsActive: number;
+  armsWrittenLast: number;
+  armWrites: number;
+  /** Arms skipped last frame (outside the LOD radius and not in a full cell). */
+  armsSkipped: number;
+  /** Partial arm-matrix uploads and hood-flash writes since creation. */
+  armUploads: number;
+  hoodWrites: number;
+  /** Mean CPU ms per `update()` over the last ~120 calls. */
+  updateMs: number;
 }
 
 type Part = "housing" | "hood" | "arm1" | "arm2" | "arm3" | "beacon" | "glyph";
@@ -141,6 +163,15 @@ export class Stations {
   private rebuilds = 0;
   private readonly poses = new Map<string, ArmPose>();
   private armsDirty = false;
+  private readonly anim = new StationAnimator();
+  private beaconPhases = new Float32Array(0);
+  private readonly range = new Int32Array(2);
+  private armUploads = 0;
+  private armsWrittenLast = 0;
+  private armsSkippedLast = 0;
+  private msSum = 0;
+  private msN = 0;
+  private msMean = 0;
 
   constructor(private readonly scene: Scene) {
     // Satin painted steel (housing) and glossy robot paint (arm).
@@ -225,6 +256,10 @@ export class Stations {
     const { order, animated } = orderStations(list);
     this.order = order;
     this.animated = animated;
+    this.beaconPhases = Float32Array.from(
+      order,
+      (s) => phaseOf(s.id) * QUEUED_PERIOD,
+    );
     const live = new Set(order.map((s) => s.id));
     for (const id of [...this.poses.keys()])
       if (!live.has(id)) this.poses.delete(id);
@@ -234,8 +269,8 @@ export class Stations {
   }
 
   /**
-   * Phase 3 hook: override one station's arm pose (null → state default).
-   * Arm matrices are re-uploaded on the next `update()`.
+   * Override one station's arm pose (null → animated state default). Arm
+   * matrices are re-written on the next `update()`.
    */
   setArmPose(id: string, pose: ArmPose | null): void {
     if (pose) this.poses.set(id, pose);
@@ -243,19 +278,82 @@ export class Stations {
     this.armsDirty = true;
   }
 
-  /** Beacon pulse / strobe; zero buffer writes when nothing animates. */
+  /** Viewer position for the arm LOD (arms animate within `radius`). */
+  setViewer(x: number, y: number, z: number): void {
+    this.anim.setViewer(x, y, z);
+  }
+
+  /** Arm animation radius in metres (default 30). */
+  setAnimationRadius(r: number): void {
+    this.anim.radius = r;
+  }
+
+  /** Stations of these ids (`full` cells) always animate; null clears. */
+  setFullStations(ids: ReadonlySet<string> | null): void {
+    this.anim.setFullIds(ids);
+  }
+
+  /** Master switch for arm animation (beacons keep running). */
+  setAnimationEnabled(on: boolean): void {
+    this.anim.enabled = on;
+  }
+
+  /** Advance time: arm motion, hood flash, beacon patterns. */
   update(dt: number): void {
+    const t0 = performance.now();
     this.time += dt;
+    const P = this.pools;
     if (this.armsDirty) {
       this.armsDirty = false;
       this.writeArms();
     }
-    if (this.animated === 0) return;
-    const beacon = this.pools.beacon;
-    if (!beacon.cols || beacon.count === 0) return;
-    writeBeaconColors(this.order, this.animated, this.time, beacon.cols);
-    beacon.mesh.thinInstancePartialBufferUpdate("color", this.animated, 0);
-    this.partialWrites++;
+    if (this.order.length > 0) {
+      const arms = this.armBufs();
+      const r = this.anim.step(this.time, arms);
+      this.armsWrittenLast = r.written;
+      this.armsSkippedLast = r.skipped;
+      if (r.written > 0) {
+        const cnt = r.hi - r.lo + 1;
+        for (const p of ["arm1", "arm2", "arm3"] as const)
+          P[p].mesh.thinInstancePartialBufferUpdate("matrix", cnt, r.lo);
+        this.armUploads++;
+      }
+      const hood = P.hood;
+      if (hood.cols && this.anim.flashing > 0) {
+        if (this.anim.stepFlash(this.time, hood.cols, hoodColor3, this.range)) {
+          hood.mesh.thinInstancePartialBufferUpdate(
+            "color",
+            this.range[1] - this.range[0] + 1,
+            this.range[0],
+          );
+        }
+      }
+    }
+    if (this.animated > 0) {
+      const beacon = P.beacon;
+      if (beacon.cols && beacon.count > 0) {
+        writeBeaconColors(
+          this.order,
+          this.animated,
+          this.time,
+          beacon.cols,
+          this.beaconPhases,
+        );
+        beacon.mesh.thinInstancePartialBufferUpdate("color", this.animated, 0);
+        this.partialWrites++;
+      }
+    }
+    this.msSum += performance.now() - t0;
+    if (++this.msN >= 120) {
+      this.msMean = this.msSum / this.msN;
+      this.msSum = 0;
+      this.msN = 0;
+    }
+  }
+
+  private armBufs() {
+    const P = this.pools;
+    return { a1: P.arm1.mats, a2: P.arm2.mats, a3: P.arm3.mats };
   }
 
   private writeAll(): void {
@@ -276,22 +374,54 @@ export class Stations {
       setRgb(P.glyph.cols!, i * 2, g);
       setRgb(P.glyph.cols!, i * 2 + 1, g);
     }
-    writeBeaconColors(this.order, n, this.time, P.beacon.cols!);
+    writeBeaconColors(
+      this.order,
+      n,
+      this.time,
+      P.beacon.cols!,
+      this.beaconPhases,
+    );
     this.fillArms();
     for (const p of PARTS)
       this.bufferWrites += P[p].upload(p === "glyph" ? n * 2 : n);
   }
 
+  /** Pose every arm at the current time (+ overrides) and arm the animator. */
   private fillArms(): void {
     const P = this.pools;
-    for (let i = 0; i < this.order.length; i++) {
-      const st = this.order[i];
-      const pose = this.poses.get(st.id) ?? armPoseFor(st.state);
-      const [a, b, c] = armMatrices(st, pose);
-      P.arm1.mats.set(a, i * 16);
-      P.arm2.mats.set(b, i * 16);
-      P.arm3.mats.set(c, i * 16);
+    this.anim.rebuild(
+      this.order,
+      this.time,
+      this.armBufs(),
+      hoodColor3,
+      P.hood.cols,
+    );
+    if (this.poses.size > 0) {
+      const tmp = newPose();
+      for (let i = 0; i < this.order.length; i++) {
+        const o = this.poses.get(this.order[i].id);
+        if (!o) continue;
+        Object.assign(tmp, o);
+        this.anim.setFixed(i, true);
+        writeArmMatrices(
+          this.animBase(i),
+          0,
+          tmp,
+          P.arm1.mats,
+          P.arm2.mats,
+          P.arm3.mats,
+          i * 16,
+        );
+      }
     }
+  }
+
+  private animBase(i: number): Float32Array {
+    // Overrides are rare; recompute the (cheap) base frame instead of
+    // exposing the animator's cache.
+    const out = new Float32Array(16);
+    writeArmBase(this.order[i], out, 0);
+    return out;
   }
 
   private writeArms(): void {
@@ -299,6 +429,13 @@ export class Stations {
     this.fillArms();
     for (const p of ["arm1", "arm2", "arm3"] as const)
       this.bufferWrites += this.pools[p].upload(this.order.length);
+    const hood = this.pools.hood;
+    if (hood.cols) {
+      for (let i = 0; i < this.order.length; i++)
+        setRgb(hood.cols, i, HOOD_BASE[this.order[i].state]);
+      hood.mesh.thinInstanceSetBuffer("color", hood.cols, 4, false);
+      this.bufferWrites++;
+    }
   }
 
   meshes(): Mesh[] {
@@ -325,6 +462,13 @@ export class Stations {
       bufferWrites: this.bufferWrites,
       partialWrites: this.partialWrites,
       rebuilds: this.rebuilds,
+      armsActive: this.anim.workSize,
+      armsWrittenLast: this.armsWrittenLast,
+      armWrites: this.anim.armWrites,
+      armsSkipped: this.armsSkippedLast,
+      armUploads: this.armUploads,
+      hoodWrites: this.anim.hoodWrites,
+      updateMs: this.msMean,
     };
   }
 
@@ -334,6 +478,16 @@ export class Stations {
     this.atlas.dispose();
   }
 }
+
+const HOOD_BASE: Record<CheckState, [number, number, number]> = {
+  queued: hoodColor("queued"),
+  running: hoodColor("running"),
+  success: hoodColor("success"),
+  failure: hoodColor("failure"),
+  cancelled: hoodColor("cancelled"),
+  none: hoodColor("none"),
+};
+const hoodColor3 = (state: CheckState) => HOOD_BASE[state];
 
 function setRgb(out: Float32Array, i: number, c: [number, number, number]) {
   out[i * 4] = c[0];
