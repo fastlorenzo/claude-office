@@ -253,7 +253,7 @@ const en = {
   "attention.toast.error": "{agentName} encountered an error",
   "attention.toast.taskCompleted": "{agentName} completed a task",
   "attention.toast.agentArrived": "{agentName} joined the office",
-  "attention.toast.stop": "{agentName} stopped",
+  "attention.toast.stop": "{label} · finished — waiting for you",
   "attention.toast.backgroundTask": "{agentName}: {taskDescription}",
   "attention.commandBar.placeholder": "Type a command...",
   "attention.commandBar.focusAgent": "Focus Agent: {name}",

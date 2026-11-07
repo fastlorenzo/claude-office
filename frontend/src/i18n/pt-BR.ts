@@ -255,7 +255,7 @@ const ptBR: Record<TranslationKey, string> = {
   "attention.toast.taskCompleted": "{agentName} completou uma tarefa",
   "attention.toast.error": "{agentName} encontrou um erro",
   "attention.toast.agentArrived": "{agentName} entrou no escritório",
-  "attention.toast.stop": "{agentName} parou",
+  "attention.toast.stop": "{label} · concluiu — aguardando você",
   "attention.toast.backgroundTask": "{agentName}: {taskDescription}",
   "attention.commandBar.placeholder": "Digite um comando...",
   "attention.commandBar.focusAgent": "Focar Agente: {name}",

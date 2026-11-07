@@ -14,6 +14,8 @@ export type UrgencyLevel = "critical" | "high" | "low" | "info";
 
 export interface AttentionToast {
   id: string;
+  /** Session the toast belongs to (null when the event carried none). */
+  sessionId: string | null;
   agentId: string | null;
   agentName: string | null;
   eventType: EventType;
@@ -44,6 +46,10 @@ interface AttentionState {
   // Actions
   processEvent: (event: {
     type: EventType;
+    /** Owning Claude Code session; keys stop-toast dedupe and reactivation. */
+    sessionId?: string | null;
+    /** Human label for the session (project or session name), used by stop toasts. */
+    label?: string | null;
     agentId?: string | null;
     agentName?: string | null;
     taskDescription?: string | null;
@@ -53,6 +59,8 @@ interface AttentionState {
     title?: string;
     level?: UrgencyLevel;
   }) => void;
+  /** Drop the session's stop toast: called when the session is active again. */
+  markSessionActive: (sessionId: string) => void;
   dismissToast: (id: string) => void;
   clearAllToasts: () => void;
   openCommandBar: () => void;
@@ -98,8 +106,14 @@ function scoreEvent(
     case "permission_request":
       return { urgency: 90, level: "critical", autoDismissMs: null };
     case "error":
-    case "stop":
       return { urgency: 70, level: "high", autoDismissMs: null };
+    case "stop":
+      // A finished turn is informational: it auto-dismisses like task_completed.
+      return {
+        urgency: 30,
+        level: "low",
+        autoDismissMs: prefs.toastAutoDismissLow,
+      };
     case "task_completed":
       return {
         urgency: 30,
@@ -120,6 +134,32 @@ function scoreEvent(
         autoDismissMs: prefs.toastAutoDismissInfo,
       };
   }
+}
+
+/**
+ * True when a stop event came from a subagent rather than the boss. The
+ * backend stamps the boss as "main" (or leaves it empty); anything else is an
+ * agent id.
+ */
+export function isSubagentAgentId(agentId: string | null | undefined): boolean {
+  const id = agentId?.trim();
+  return !!id && id !== "main" && id !== "boss";
+}
+
+/**
+ * Short label for a session's stop toast: the Claude Code session name when
+ * set, else the project, else the first 8 characters of the id.
+ */
+export function sessionToastLabel(session: {
+  sessionId: string;
+  sessionName?: string | null;
+  project?: string | null;
+}): string {
+  return (
+    session.sessionName?.trim() ||
+    session.project?.trim() ||
+    session.sessionId.slice(0, 8)
+  );
 }
 
 // ============================================================================
@@ -163,6 +203,15 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
   focusPopup: null,
 
   processEvent: (event) => {
+    const sessionId = event.sessionId ?? null;
+    if (event.type === "stop") {
+      // Subagent turn ends are not the session finishing: never toast them.
+      if (isSubagentAgentId(event.agentId)) return;
+    } else if (sessionId) {
+      // Any other activity means the session is working again.
+      get().markSessionActive(sessionId);
+    }
+
     const { urgency, level, autoDismissMs } = scoreEvent(
       event.type,
       event.level,
@@ -170,14 +219,23 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
     // Skip very low urgency events that aren't in our explicit list
     if (urgency <= 5) return;
 
+    const title =
+      event.type === "stop"
+        ? getTranslation(usePreferencesStore.getState().language)(
+            "attention.toast.stop",
+            { label: event.label?.trim() || "Claude" },
+          )
+        : (event.title ?? event.type.replace(/_/g, " "));
+
     const toast: AttentionToast = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId,
       agentId: event.agentId ?? null,
       agentName: event.agentName ?? null,
       eventType: event.type,
       urgency,
       urgencyLevel: level,
-      title: event.title ?? event.type.replace(/_/g, " "),
+      title,
       description:
         event.taskDescription ?? event.errorType ?? event.message ?? "",
       createdAt: Date.now(),
@@ -186,7 +244,14 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
     };
 
     set((state) => {
-      const queue = [...state.toastQueue, toast];
+      // At most one stop toast per session: the newer stop replaces the older.
+      const kept =
+        event.type === "stop"
+          ? state.toastQueue.filter(
+              (t) => !(t.eventType === "stop" && t.sessionId === sessionId),
+            )
+          : state.toastQueue;
+      const queue = [...kept, toast];
       // Sort by urgency descending
       queue.sort((a, b) => b.urgency - a.urgency);
       // Auto-dismiss oldest low-urgency toasts if over max
@@ -203,6 +268,21 @@ export const useAttentionStore = create<AttentionState>()((set, get) => ({
       return { toastQueue: queue };
     });
   },
+
+  markSessionActive: (sessionId) =>
+    set((state) => {
+      if (
+        !state.toastQueue.some(
+          (t) => t.eventType === "stop" && t.sessionId === sessionId,
+        )
+      )
+        return state; // no change: skip the notification entirely
+      return {
+        toastQueue: state.toastQueue.filter(
+          (t) => !(t.eventType === "stop" && t.sessionId === sessionId),
+        ),
+      };
+    }),
 
   dismissToast: (id) =>
     set((state) => ({

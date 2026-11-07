@@ -255,7 +255,7 @@ const es: Record<TranslationKey, string> = {
   "attention.toast.error": "{agentName} encontró un error",
   "attention.toast.taskCompleted": "{agentName} completó una tarea",
   "attention.toast.agentArrived": "{agentName} se unió a la oficina",
-  "attention.toast.stop": "{agentName} se detuvo",
+  "attention.toast.stop": "{label} · terminó — esperando tu respuesta",
   "attention.toast.backgroundTask": "{agentName}: {taskDescription}",
   "attention.commandBar.placeholder": "Escribe un comando...",
   "attention.commandBar.focusAgent": "Enfocar Agente: {name}",

@@ -17,7 +17,8 @@
 import { WS_BASE } from "@/utils/api";
 import { useCallback, useEffect, useRef } from "react";
 import { useGameStore } from "@/stores/gameStore";
-import { useAttentionStore } from "@/stores/attentionStore";
+import { sessionToastLabel, useAttentionStore } from "@/stores/attentionStore";
+import { useCampusStore } from "@/stores/campusStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
 import { agentMachineService } from "@/machines/agentMachineService";
 import { resetSpawnIndex } from "@/systems/queuePositions";
@@ -145,14 +146,23 @@ export function useWebSocketEvents({
 
               // Attention toasts — wire event processing into attention store.
               // `shouldShowToast` (pure) owns the type + preference gate.
-              if (
-                shouldShowToast(
-                  message.event.type as EventType,
-                  usePreferencesStore.getState(),
-                )
-              ) {
+              const eventSessionId = currentSessionIdRef.current;
+              const eventType = message.event.type as EventType;
+              // Any non-stop activity means the session is working again, so
+              // drop its stop toast even when this event itself raises none.
+              if (eventType !== "stop") {
+                useAttentionStore.getState().markSessionActive(eventSessionId);
+              }
+              if (shouldShowToast(eventType, usePreferencesStore.getState())) {
+                const campusSession = useCampusStore
+                  .getState()
+                  .sessions.find((c) => c.sessionId === eventSessionId);
                 useAttentionStore.getState().processEvent({
-                  type: message.event.type as EventType,
+                  type: eventType,
+                  sessionId: eventSessionId,
+                  label: sessionToastLabel(
+                    campusSession ?? { sessionId: eventSessionId },
+                  ),
                   agentId: message.event.agentId ?? null,
                   agentName: message.event.detail?.agentName ?? null,
                   taskDescription:
