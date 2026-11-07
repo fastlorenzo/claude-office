@@ -86,7 +86,7 @@ class Settings(BaseSettings):
 
     # claude-cli backend
     SUMMARY_CLI_PATH: str = "claude"
-    SUMMARY_CLI_TIMEOUT: float = 15.0
+    SUMMARY_CLI_TIMEOUT: float = 30.0
 
     # OpenAI-compatible backend (OpenAI, OpenRouter, Ollama, LM Studio, vLLM, …)
     SUMMARY_OPENAI_BASE_URL: str = ""  # e.g. https://api.openai.com/v1

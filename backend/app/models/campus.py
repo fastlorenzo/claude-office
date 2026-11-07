@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
+from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
-from app.models.agents import Agent, AgentState, Boss, OfficeState
+from app.models.agents import Agent, AgentState, Boss, BossState, OfficeState
 from app.models.common import TodoItem, TodoStatus
 from app.models.overview import OverviewBucket
 
@@ -25,6 +27,7 @@ __all__ = [
     "CampusActivity",
     "CampusSession",
     "CampusState",
+    "SessionPhase",
     "build_campus",
     "build_campus_session",
 ]
@@ -51,6 +54,17 @@ class CampusActivity(BaseModel):
     summary: str
 
 
+class SessionPhase(BaseModel):
+    """Deterministic "where is the session at" (see ``core.session_phase``)."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    kind: PhaseKind
+    label: str
+    detail: str | None = None
+    since: str | None = None  # ISO timestamp the kind last changed
+
+
 class CampusSession(BaseModel):
     """Slim per-session state for the 3D office."""
 
@@ -69,6 +83,10 @@ class CampusSession(BaseModel):
     session_name: str | None = None
     focus: str | None = None
     work_items: list[str] = Field(default_factory=lambda: cast(list[str], []))
+    summary: str | None = None
+    refs: list[str] = Field(default_factory=lambda: cast(list[str], []))
+    project: str | None = None
+    phase: SessionPhase | None = None
     git_branch: str | None = None
     ended: bool = False
     last_updated: datetime
@@ -144,6 +162,36 @@ def compute_work_items(todos: list[TodoItem], agents: list[Agent]) -> list[str]:
     return items
 
 
+def compute_phase(
+    sm: StateMachine, agents: list[Agent], now: datetime | None = None
+) -> SessionPhase:
+    """Classify the live phase; ``since`` only moves when the kind changes."""
+    from app.core.state_machine import OfficePhase
+
+    result = classify_phase(
+        PhaseInputs(
+            ended=sm.phase == OfficePhase.ENDED,
+            waiting_permission=sm.boss_state == BossState.WAITING_PERMISSION,
+            compacting=sm.compacting,
+            turn_active=sm.turn_active,
+            has_prompted=sm.last_user_prompt is not None,
+            tool_running=sm.tool_running,
+            tool_name=sm.last_tool_name,
+            tool_input=sm.last_tool_input,
+            active_subagents=sum(1 for a in agents if a.state not in _INACTIVE_AGENT_STATES),
+        )
+    )
+    if sm.phase_kind != result.kind or sm.phase_since is None:
+        sm.phase_kind = result.kind
+        sm.phase_since = now or datetime.now(UTC)
+    return SessionPhase(
+        kind=result.kind,
+        label=result.label,
+        detail=result.detail,
+        since=sm.phase_since.isoformat(),
+    )
+
+
 def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     """Build the slim campus view of one session from its StateMachine."""
     from app.core.room_orchestrator import overview_bucket
@@ -153,6 +201,11 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     recent = list(gs.history)[-RECENT_ACTIVITY_LIMIT:]
     from app.services.git_branch import get_branch
     from app.services.git_service import git_service
+
+    root = git_service.get_session_root(session_id)
+    branch = get_branch(root)
+    session_name = _one_line(sm.custom_title, SESSION_NAME_MAX_CHARS)
+    objective = _one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS)
 
     return CampusSession(
         session_id=session_id,
@@ -170,11 +223,25 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
             )
             for h in recent
         ],
-        objective=_one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS),
-        session_name=_one_line(sm.custom_title, SESSION_NAME_MAX_CHARS),
+        objective=objective,
+        session_name=session_name,
+        summary=resolve_summary(
+            ai_summary=sm.summary_ai,
+            ai_title=sm.ai_title,
+            objective=sm.objective_ai or sm.objective,
+            branch=branch,
+        ),
+        refs=extract_refs(
+            session_name=sm.custom_title,
+            branch=branch,
+            objective=sm.effective_objective,
+            prompts=sm.first_prompts,
+        ),
+        project=project_name_for_root(root),
+        phase=compute_phase(sm, gs.agents),
         focus=compute_focus(sm, gs.todos),
         work_items=compute_work_items(gs.todos, gs.agents),
-        git_branch=get_branch(git_service.get_session_root(session_id)),
+        git_branch=branch,
         ended=sm.phase == OfficePhase.ENDED,
         last_updated=gs.last_updated,
     )

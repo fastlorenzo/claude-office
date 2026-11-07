@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from app.core.path_utils import compress_path, compress_paths_in_text, truncate_long_words
 from app.core.quotes import get_random_job_completion_quote
+from app.core.session_phase import slim_tool_input
 from app.core.summary_service import get_summary_service, is_trivial_prompt, objective_fallback
 from app.core.token_tracker import TokenTracker
 from app.core.whiteboard_tracker import WhiteboardTracker
@@ -192,6 +193,7 @@ def parse_todos_from_event(event: AnyEvent) -> list[TodoItem]:
 
 
 OBJECTIVE_PROMPT_HISTORY = 6
+FIRST_PROMPTS_KEPT = 3
 
 
 def describe_tool_activity(event: ToolEvent) -> str:
@@ -246,6 +248,7 @@ def _handle_session_start(sm: "StateMachine", event: AnyEvent) -> None:
 def _handle_context_compaction(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle CONTEXT_COMPACTION: reset tool counter and record compaction."""
     sm.tool_uses_since_compaction = 0
+    sm.compacting = True
     sm.whiteboard.record_compaction()
     sm.whiteboard.add_news_item(
         "coffee",
@@ -257,6 +260,12 @@ def _handle_pre_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle PRE_TOOL_USE: update boss/agent state and process TodoWrite events."""
     assert isinstance(event, ToolEvent)
     tool_name = event.data.tool_name
+    sm.compacting = False
+
+    if tool_name and (event.data.agent_id or "main") == "main":
+        sm.last_tool_name = tool_name
+        sm.last_tool_input = slim_tool_input(event.data.tool_input)
+        sm.tool_running = True
 
     if tool_name:
         sm.latest_activity = describe_tool_activity(event) or sm.latest_activity
@@ -303,8 +312,12 @@ def _handle_user_prompt_submit(sm: "StateMachine", event: AnyEvent) -> None:
     prompt_text = event.data.prompt
     sm.print_report = False
     sm.turn_active = True
+    sm.compacting = False
+    sm.tool_running = False
     sm.last_user_prompt = prompt_text
     if prompt_text and not is_trivial_prompt(prompt_text):
+        if len(sm.first_prompts) < FIRST_PROMPTS_KEPT:
+            sm.first_prompts.append(prompt_text[:600])
         sm.objective_before_prompt = sm.effective_objective
         sm.objective_ai = None
         sm.objective_prompts.append(prompt_text[:1500])
@@ -333,6 +346,8 @@ def _handle_permission_request(sm: "StateMachine", event: AnyEvent) -> None:
     )
 
     if agent_id == "main":
+        sm.last_tool_name = event.data.tool_name or sm.last_tool_name
+        sm.last_tool_input = slim_tool_input(event.data.tool_input) or sm.last_tool_input
         sm.boss_state = BossState.WAITING_PERMISSION
         sm.boss_bubble = waiting_bubble
     else:
@@ -347,6 +362,7 @@ def _handle_post_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     agent_id = event.data.agent_id or "main"
     if agent_id == "main":
         sm.boss_state = BossState.IDLE
+        sm.tool_running = False
     elif agent_id in sm.agents and sm.agents[agent_id].state == AgentState.WAITING_PERMISSION:
         sm.agents[agent_id].state = AgentState.WORKING
 
@@ -442,6 +458,8 @@ def _handle_stop(sm: "StateMachine", event: AnyEvent) -> None:
     sm.phase = OfficePhase.COMPLETING
     sm.boss_state = BossState.COMPLETING
     sm.turn_active = False
+    sm.tool_running = False
+    sm.compacting = False
 
     speech_text = (
         event.data.speech_content.boss_phone
@@ -464,6 +482,7 @@ def _handle_session_end(sm: "StateMachine", event: AnyEvent) -> None:
     sm.boss_state = BossState.IDLE
     sm.boss_current_task = None
     sm.turn_active = False
+    sm.tool_running = False
 
 
 def _handle_background_task_notification(sm: "StateMachine", event: AnyEvent) -> None:
@@ -637,6 +656,20 @@ class StateMachine:
     title_offset_path: str | None = None
     # One-line description of the latest tool call ("Running make checkall").
     latest_activity: str | None = None
+    # Live tool tracking for the campus phase (main agent only): the current /
+    # last tool, a slimmed copy of its input, and whether a call is in flight.
+    last_tool_name: str | None = None
+    last_tool_input: dict[str, Any] | None = None
+    tool_running: bool = False
+    compacting: bool = False
+    # First substantive prompts (kept for ticket refs + AI summary) and the
+    # AI "what is being built" summary, keyed by the objective it was made for.
+    first_prompts: list[str] = field(default_factory=_empty_str_list)
+    summary_ai: str | None = None
+    summary_ai_key: str | None = None
+    # Campus phase bookkeeping: last classified kind and when it began.
+    phase_kind: str | None = None
+    phase_since: datetime | None = None
     background_tasks: list[BackgroundTask] = field(default_factory=_empty_background_tasks)
     conversation: list[ConversationEntry] = field(default_factory=_empty_conversation)
 

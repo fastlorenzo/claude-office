@@ -109,12 +109,29 @@ async def _refine_objective(
     except Exception:
         logger.debug("Objective refinement failed", exc_info=True)
         return
-    if not refined or token != sm.objective_prompt_count or refined == sm.objective_ai:
-        return  # stale (a newer prompt arrived) or nothing changed
-    if refined == objective_fallback(previous, prompts) and refined != previous:
-        return  # heuristic answer (AI off/failed): let aiTitle/heuristic stand
-    sm.objective_ai = refined
-    await broadcast_state(session_id, sm)
+    if not refined or token != sm.objective_prompt_count:
+        return  # stale (a newer prompt arrived)
+    if refined != sm.objective_ai:
+        if refined == objective_fallback(previous, prompts) and refined != previous:
+            return  # heuristic answer (AI off/failed): let aiTitle/heuristic stand
+        sm.objective_ai = refined
+        await broadcast_state(session_id, sm)
+    await _refresh_summary(sm, session_id, token, refined)
+
+
+async def _refresh_summary(sm: StateMachine, session_id: str, token: int, key: str) -> None:
+    """Regenerate the AI session summary only when the objective changed."""
+    if sm.summary_ai_key == key:
+        return
+    sm.summary_ai_key = key  # also set on failure: at most one attempt per objective
+    try:
+        summary = await get_summary_service().summarize_session(sm.first_prompts, key)
+    except Exception:
+        logger.debug("Session summary failed", exc_info=True)
+        return
+    if summary and token == sm.objective_prompt_count and summary != sm.summary_ai:
+        sm.summary_ai = summary
+        await broadcast_state(session_id, sm)
 
 
 async def handle_stop(

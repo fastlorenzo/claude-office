@@ -165,6 +165,27 @@ export type Objective = string | null;
 export type Sessionname = string | null;
 export type Focus = string | null;
 export type Workitems = string[];
+export type Summary4 = string | null;
+export type Refs = string[];
+export type Project = string | null;
+export type Kind =
+  | "needs_approval"
+  | "waiting_user"
+  | "planning"
+  | "researching"
+  | "exploring"
+  | "coding"
+  | "testing"
+  | "building"
+  | "running"
+  | "git"
+  | "delegating"
+  | "compacting"
+  | "idle"
+  | "ended";
+export type Label = string;
+export type Detail = string | null;
+export type Since = string | null;
 export type Gitbranch = string | null;
 export type Ended = boolean;
 export type Lastupdated = string;
@@ -258,7 +279,7 @@ export type NotificationType = string | null;
 export type Message3 = string | null;
 export type ErrorType = string | null;
 export type Reason = string | null;
-export type Summary4 = string | null;
+export type Summary5 = string | null;
 export type Prompt = string | null;
 export type TranscriptPath2 = string | null;
 export type AgentTranscriptPath2 = string | null;
@@ -286,7 +307,7 @@ export type AgentId3 = string | null;
 export type NativeAgentId3 = string | null;
 export type TranscriptPath3 = string | null;
 export type AgentTranscriptPath3 = string | null;
-export type Summary5 = string | null;
+export type Summary6 = string | null;
 export type Message4 = string | null;
 export type TeamName3 = string | null;
 export type TeammateName3 = string | null;
@@ -305,7 +326,7 @@ export type Lastupdated2 = string;
 export type Id2 = string;
 export type Type1 = string;
 export type Agentid3 = string;
-export type Summary6 = string;
+export type Summary7 = string;
 export type Timestamp4 = string;
 export type History = HistoryEntry[];
 export type Todos1 = TodoItem[];
@@ -366,7 +387,7 @@ export type AgentId4 = string | null;
 export type NativeAgentId4 = string | null;
 export type TranscriptPath4 = string | null;
 export type AgentTranscriptPath4 = string | null;
-export type Summary7 = string | null;
+export type Summary8 = string | null;
 export type Message5 = string | null;
 export type TeamName4 = string | null;
 export type TeammateName4 = string | null;
@@ -403,7 +424,7 @@ export type AgentId5 = string | null;
 export type NativeAgentId5 = string | null;
 export type TranscriptPath5 = string | null;
 export type AgentTranscriptPath5 = string | null;
-export type Summary8 = string | null;
+export type Summary9 = string | null;
 export type Message6 = string | null;
 export type TeamName5 = string | null;
 export type TeammateName5 = string | null;
@@ -429,7 +450,7 @@ export type AgentId6 = string | null;
 export type NativeAgentId6 = string | null;
 export type TranscriptPath6 = string | null;
 export type AgentTranscriptPath6 = string | null;
-export type Summary9 = string | null;
+export type Summary10 = string | null;
 export type Message7 = string | null;
 export type TeamName6 = string | null;
 export type TeammateName6 = string | null;
@@ -449,7 +470,7 @@ export type AgentId7 = string | null;
 export type NativeAgentId7 = string | null;
 export type TranscriptPath7 = string | null;
 export type AgentTranscriptPath7 = string | null;
-export type Summary10 = string | null;
+export type Summary11 = string | null;
 export type Message8 = string | null;
 export type TeamName7 = string | null;
 export type TeammateName7 = string | null;
@@ -470,7 +491,7 @@ export type AgentId8 = string | null;
 export type NativeAgentId8 = string | null;
 export type TranscriptPath8 = string | null;
 export type AgentTranscriptPath8 = string | null;
-export type Summary11 = string | null;
+export type Summary12 = string | null;
 export type Message9 = string | null;
 export type TeamName8 = string | null;
 export type TeammateName8 = string | null;
@@ -693,6 +714,10 @@ export interface CampusSession {
   sessionName?: Sessionname;
   focus?: Focus;
   workItems?: Workitems;
+  summary?: Summary4;
+  refs?: Refs;
+  project?: Project;
+  phase?: SessionPhase | null;
   gitBranch?: Gitbranch;
   ended?: Ended;
   lastUpdated: Lastupdated;
@@ -729,6 +754,19 @@ export interface TodoItem {
   blocked_by?: BlockedBy;
   owner?: Owner;
   metadata?: Metadata;
+  [k: string]: unknown;
+}
+/**
+ * Deterministic "where is the session at" (see ``core.session_phase``).
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "SessionPhase".
+ */
+export interface SessionPhase {
+  kind: Kind;
+  label: Label;
+  detail?: Detail;
+  since?: Since;
   [k: string]: unknown;
 }
 /**
@@ -834,7 +872,7 @@ export interface EventData {
   message?: Message3;
   error_type?: ErrorType;
   reason?: Reason;
-  summary?: Summary4;
+  summary?: Summary5;
   prompt?: Prompt;
   bubble_content?: BubbleContent | null;
   speech_content?: SpeechContent | null;
@@ -876,7 +914,7 @@ export interface EventDataBase {
   native_agent_id?: NativeAgentId3;
   transcript_path?: TranscriptPath3;
   agent_transcript_path?: AgentTranscriptPath3;
-  summary?: Summary5;
+  summary?: Summary6;
   message?: Message4;
   team_name?: TeamName3;
   teammate_name?: TeammateName3;
@@ -932,12 +970,12 @@ export interface HistoryEntry {
   id: Id2;
   type: Type1;
   agentId: Agentid3;
-  summary: Summary6;
+  summary: Summary7;
   timestamp: Timestamp4;
-  detail: Detail;
+  detail: Detail1;
   [k: string]: unknown;
 }
-export interface Detail {
+export interface Detail1 {
   [k: string]: unknown;
 }
 /**
@@ -1029,7 +1067,7 @@ export interface LifecycleEventData {
   native_agent_id?: NativeAgentId4;
   transcript_path?: TranscriptPath4;
   agent_transcript_path?: AgentTranscriptPath4;
-  summary?: Summary7;
+  summary?: Summary8;
   message?: Message5;
   team_name?: TeamName4;
   teammate_name?: TeammateName4;
@@ -1089,7 +1127,7 @@ export interface PromptEventData {
   native_agent_id?: NativeAgentId5;
   transcript_path?: TranscriptPath5;
   agent_transcript_path?: AgentTranscriptPath5;
-  summary?: Summary8;
+  summary?: Summary9;
   message?: Message6;
   team_name?: TeamName5;
   teammate_name?: TeammateName5;
@@ -1133,7 +1171,7 @@ export interface SessionEventData {
   native_agent_id?: NativeAgentId6;
   transcript_path?: TranscriptPath6;
   agent_transcript_path?: AgentTranscriptPath6;
-  summary?: Summary9;
+  summary?: Summary10;
   message?: Message7;
   team_name?: TeamName6;
   teammate_name?: TeammateName6;
@@ -1162,7 +1200,7 @@ export interface TaskEventData {
   native_agent_id?: NativeAgentId7;
   transcript_path?: TranscriptPath7;
   agent_transcript_path?: AgentTranscriptPath7;
-  summary?: Summary10;
+  summary?: Summary11;
   message?: Message8;
   team_name?: TeamName7;
   teammate_name?: TeammateName7;
@@ -1192,7 +1230,7 @@ export interface ToolEventData {
   native_agent_id?: NativeAgentId8;
   transcript_path?: TranscriptPath8;
   agent_transcript_path?: AgentTranscriptPath8;
-  summary?: Summary11;
+  summary?: Summary12;
   message?: Message9;
   team_name?: TeamName8;
   teammate_name?: TeammateName8;

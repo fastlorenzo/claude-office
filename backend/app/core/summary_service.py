@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import os
 import re
 import shutil
+import tempfile
 from typing import Any
 
 import httpx
@@ -340,6 +342,35 @@ class SummaryService:
         line = " ".join(result.strip().splitlines()[:1]).strip().strip("\"'`").rstrip(".")
         line = _clean_ai_headline(line)
         return _truncate_words(line, OBJECTIVE_MAX_CHARS) if line else fallback
+
+    async def summarize_session(
+        self, first_prompts: list[str], objective: str | None
+    ) -> str | None:
+        """Plain-language "what is being built" line (<= 70 chars) for a session.
+
+        Returns None when AI is disabled/failed or the answer is not usable;
+        callers fall back to ``session_summary.resolve_summary``.
+        """
+        from app.core.session_summary import SESSION_SUMMARY_MAX_CHARS, clean_summary
+
+        substantive = [p for p in first_prompts if not is_trivial_prompt(p)]
+        if not self.enabled or not (substantive or objective):
+            return None
+        prompts_text = "\n---\n".join(_sanitize_untrusted(p[:500]) for p in substantive[:3])
+        obj = _sanitize_untrusted(objective or "none")
+        result = await self._call_with_retry(
+            "Describe what this coding session is building so that someone with no context "
+            "understands it at a glance. Name the feature or fix, not the process. "
+            f"Max {SESSION_SUMMARY_MAX_CHARS} characters, imperative mood (e.g. 'Add SSO login "
+            "to the admin dashboard'), no ticket ids, no file paths, no URLs, no quotes, no "
+            "trailing period. Reply with that one line only.\n"
+            f"First prompts: {_UNTRUSTED_START}{prompts_text or 'none'}{_UNTRUSTED_END}\n"
+            f"Current objective: {_UNTRUSTED_START}{obj}{_UNTRUSTED_END}"
+        )
+        if not result:
+            return None
+        line = " ".join(result.strip().splitlines()[:1])
+        return clean_summary(_clean_ai_headline(line))
 
     async def generate_agent_name(
         self,
@@ -721,10 +752,17 @@ class SummaryService:
         exception propagates to ``_call_with_retry`` for retry / fallback.
         """
         settings = get_settings()
-        argv = [
-            self._cli_path,
-            "-p",
-            "--bare",
+        argv = [self._cli_path, "-p"]
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            # ``--bare`` skips hooks/LSP/plugins but ALSO skips OAuth/keychain
+            # auth (API key only): with a subscription login it fails with
+            # "Not logged in" and exit code 1.
+            argv.append("--bare")
+        else:
+            # Subscription login: keep auth, but switch hooks off so the call
+            # does not feed events back into this very app.
+            argv += ["--settings", '{"disableAllHooks":true}', "--disable-slash-commands"]
+        argv += [
             "--no-session-persistence",
             "--model",
             self.model,
@@ -732,17 +770,27 @@ class SummaryService:
             _SYSTEM_PROMPT,
             "--output-format",
             "text",
+            prompt,
         ]
-        argv.append(prompt)
+        # Scrub variables inherited from a parent Claude Code session so the
+        # child behaves like a fresh top-level invocation.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not (k == "CLAUDECODE" or k.startswith("CLAUDE_CODE_"))
+        }
 
         async with self._semaphore:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=tempfile.gettempdir(),
             )
             try:
-                stdout, _stderr = await asyncio.wait_for(
+                stdout, stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=settings.SUMMARY_CLI_TIMEOUT
                 )
             except TimeoutError:
@@ -751,7 +799,8 @@ class SummaryService:
                 raise
 
         if proc.returncode != 0:
-            raise RuntimeError(f"claude CLI exited with code {proc.returncode}")
+            err = (stderr or stdout or b"").decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"claude CLI exited with code {proc.returncode}: {err[:300]}")
 
         text = stdout.decode("utf-8", errors="replace").strip() if stdout else ""
         return text or None
