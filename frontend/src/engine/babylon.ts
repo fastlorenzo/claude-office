@@ -210,3 +210,9 @@ export { RectAreaLight } from "@babylonjs/core/Lights/rectAreaLight";
 
 // Added by the workpieces agent (additive)
 export { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
+
+// ---------------------------------------------------------------------------
+// Added by the factory pools agent (additive)
+// ---------------------------------------------------------------------------
+export { CreateBoxVertexData } from "@babylonjs/core/Meshes/Builders/boxBuilder";
+export { CreateCylinderVertexData } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
