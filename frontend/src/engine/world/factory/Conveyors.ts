@@ -46,7 +46,7 @@ export interface ConveyorStats {
 }
 
 /** Ribs per texture tile (one tile ≈ one 1 m slice). */
-const RIBS = 28;
+const RIBS = 16;
 
 class BoxPool {
   private mats = new Float32Array(0);
@@ -116,9 +116,10 @@ export class Conveyors {
     this.textures.push(albedo, normal);
     this.rubber.albedoTexture = albedo;
     this.rubber.bumpTexture = normal;
+    normal.level = 0.55; // fine ribs alias into moiré under raking sun at full strength
     this.rubber.albedoColor = Color3.White();
     this.rubber.metallic = 0;
-    this.rubber.roughness = 0.58;
+    this.rubber.roughness = 0.66;
     this.rubber.environmentIntensity = 0.8;
     beltMesh.material = this.rubber;
     this.belt = new BoxPool(beltMesh, false);
@@ -270,7 +271,7 @@ function rubberTextures(scene: Scene): { albedo: Texture; normal: Texture } {
       alb[k + 2] = Math.max(0, Math.min(255, base + 2));
       alb[k + 3] = 255;
       // Normal: slope along v only (ribs run across the belt).
-      const sy = edge ? 0 : -dh * 0.004;
+      const sy = edge ? 0 : -dh * 0.003;
       const len = Math.hypot(sy, 1);
       nrm[k] = 128;
       nrm[k + 1] = Math.round(128 + (sy / len) * 127);
