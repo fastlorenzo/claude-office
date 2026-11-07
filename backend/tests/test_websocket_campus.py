@@ -151,6 +151,8 @@ class TestBroadcast:
             "phase",
             "gitBranch",
             "ended",
+            "alive",
+            "lastEventAt",
             "lastUpdated",
         }
         for banned in ("history", "conversation", "whiteboardData"):

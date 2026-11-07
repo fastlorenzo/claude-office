@@ -53,8 +53,10 @@ from app.core.handlers import (
 from app.core.jsonl_parser import get_last_assistant_response
 from app.core.product_mapper import get_product_mapper
 from app.core.room_orchestrator import RoomOrchestrator
+from app.core.session_liveness import load_registry, session_alive
 from app.core.session_titles import refresh_session_titles
-from app.core.state_machine import StateMachine
+from app.core.state_machine import OfficePhase, StateMachine
+from app.core.summary_backfill import SummaryBackfill
 from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
 from app.core.transcript_poller import init_transcript_poller
@@ -210,6 +212,7 @@ class EventProcessor:
         # Campus restore of DB-active sessions: sessions we already tried to
         # restore (restore at most once per process), scan throttle, and a lock
         # so concurrent connects/flushes never replay the same session twice.
+        self._summary_backfill = SummaryBackfill()
         self._campus_restore_attempted: set[str] = set()
         self._campus_restore_lock = asyncio.Lock()
         self._campus_last_restore_scan: float | None = None
@@ -619,6 +622,8 @@ class EventProcessor:
             # Refresh idle-eviction watermark (ARC-015) under the same lock so
             # ``evict_idle_sessions`` sees a consistent timestamp for this slot.
             sm.last_event_at = datetime.now(UTC)
+            sm.dead_since = None  # activity revives a session the sweep gave up on
+            sm.campus_hidden = False
             # Exactly-once guard, atomic with the lookup above: if the restore
             # already replayed this event's row, the live path must not apply
             # it a second time. Otherwise claim it now so a later restore of
@@ -817,8 +822,80 @@ class EventProcessor:
         from app.models.campus import build_campus
 
         await self.restore_active_sessions_for_campus(force=True)
+        await self.sweep_campus_liveness(broadcast=False)
         async with self._sessions_lock:
             return build_campus(self.sessions)
+
+    async def sweep_campus_liveness(self, broadcast: bool = True) -> bool:
+        """Refresh ``alive`` for every session; end, then hide, dead ones.
+
+        A session whose process is gone is marked ended (and ``completed`` in the
+        DB so it is not restored again), and dropped from the campus after
+        ``CAMPUS_DEAD_GRACE_SECONDS``. Also schedules AI summary backfill for
+        sessions without one. Broadcasts when anything visible changed.
+
+        Returns:
+            True when the campus view changed.
+        """
+        settings = get_settings()
+        registry = load_registry(settings.CLAUDE_SESSIONS_DIR)
+        now = datetime.now(UTC)
+        changed = False
+        newly_dead: list[str] = []
+        async with self._sessions_lock:
+            for sid, sm in self.sessions.items():
+                if sm.campus_hidden:
+                    continue
+                alive = session_alive(sid, registry, sm.last_event_at, now)
+                if alive is False and sm.alive is not True and sm.dead_since is None:
+                    # Never seen alive by this process (restored ghost): no "ended"
+                    # state to play, drop it right away.
+                    sm.campus_hidden = True
+                    sm.alive = False
+                    sm.dead_since = now
+                    newly_dead.append(sid)
+                    changed = True
+                    continue
+                if alive != sm.alive:
+                    sm.alive = alive
+                    changed = True
+                if alive is False:
+                    if sm.dead_since is None:
+                        sm.dead_since = now
+                        if sm.phase != OfficePhase.ENDED:
+                            sm.phase = OfficePhase.ENDED
+                            sm.turn_active = False
+                            sm.tool_running = False
+                        newly_dead.append(sid)
+                        changed = True
+                    elif (
+                        now - sm.dead_since
+                    ).total_seconds() >= settings.CAMPUS_DEAD_GRACE_SECONDS:
+                        sm.campus_hidden = True
+                        changed = True
+                elif sm.dead_since is not None:
+                    sm.dead_since = None
+                    changed = True
+            candidates = [sm for sm in self.sessions.values() if not sm.campus_hidden]
+        for sid in newly_dead:
+            await self._mark_session_completed(sid)
+        for sm in candidates:
+            self._summary_backfill.schedule(sm, self._schedule_campus_broadcast)
+        if changed and broadcast:
+            await broadcast_campus_state(self.sessions, self._sessions_lock)
+        return changed
+
+    @staticmethod
+    async def _mark_session_completed(session_id: str) -> None:
+        """Flip a dead session's DB row to ``completed`` (never raises)."""
+        try:
+            async with AsyncSessionLocal() as db:
+                rec = await db.get(SessionRecord, session_id)
+                if rec is not None and rec.status == "active":
+                    rec.status = "completed"
+                    await db.commit()
+        except Exception:
+            logger.debug("Failed to mark dead session completed", exc_info=True)
 
     async def restore_active_sessions_for_campus(self, force: bool = False) -> int:
         """Restore DB-active sessions missing from memory so the campus shows them.
@@ -889,6 +966,7 @@ class EventProcessor:
         Without this the flush task is left pending at loop close and asyncio
         logs "Task was destroyed but it is pending!".
         """
+        await self._summary_backfill.shutdown()
         for task in (self._overview_flush_task, self._campus_flush_task):
             if task is not None and not task.done():
                 task.cancel()
@@ -1171,6 +1249,9 @@ class EventProcessor:
             if len(sm.history) > MAX_HISTORY_ENTRIES:
                 sm.history = sm.history[-MAX_HISTORY_ENTRIES:]
 
+            # Staleness/liveness need the real last activity, not the restore time.
+            last_ts = events[-1].timestamp
+            sm.last_event_at = last_ts if last_ts.tzinfo else last_ts.replace(tzinfo=UTC)
             sm.todos = await load_tasks(session_id)
             logger.debug(f"Restored {len(sm.todos)} tasks for session {session_id}")
 

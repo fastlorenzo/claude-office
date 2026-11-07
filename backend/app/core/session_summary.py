@@ -15,6 +15,7 @@ __all__ = [
     "SESSION_SUMMARY_MAX_CHARS",
     "clean_summary",
     "extract_refs",
+    "meaningful_words",
     "humanize_branch",
     "project_name_for_root",
     "resolve_summary",
@@ -116,9 +117,29 @@ def _fit(text: str, limit: int = SESSION_SUMMARY_MAX_CHARS) -> str:
     return cut.rstrip(" ,;:-.") + "…"
 
 
+# Connectors / verbs that carry no meaning once ticket ids are gone ("CONT-1 and CONT-2").
+_STOP_WORDS = frozenset(
+    {
+        "and", "or", "the", "to", "for", "with", "fix", "fixes", "fixed", "wip", "of", "in",
+        "on", "at", "by", "from", "into", "a", "an", "pr", "prs", "ticket", "tickets",
+        "issue", "issues", "task", "tasks", "work", "working", "implement", "do", "please",
+        "per", "via", "vs", "also", "plus",
+    }
+)  # fmt: skip
+
+
+def meaningful_words(text: str) -> list[str]:
+    """Words of >= 3 letters that are not connectors/stop words."""
+    return [
+        w for w in re.findall(r"[^\W\d_]+", text) if len(w) >= 3 and w.lower() not in _STOP_WORDS
+    ]
+
+
 def _meaningful(text: str) -> bool:
     words = re.findall(r"[A-Za-z0-9]+", text)
     if len(words) < 2 or sum(len(w) for w in words) < 8:
+        return False
+    if len(meaningful_words(text)) < 2:
         return False
     if text.rstrip().endswith("?"):
         return False

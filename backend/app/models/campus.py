@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from app.config import get_settings
+from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
 from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
@@ -89,6 +91,9 @@ class CampusSession(BaseModel):
     phase: SessionPhase | None = None
     git_branch: str | None = None
     ended: bool = False
+    # Process liveness: True/False from Claude Code's pid registry, None = unknown.
+    alive: bool | None = None
+    last_event_at: datetime | None = None
     last_updated: datetime
 
 
@@ -207,9 +212,17 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     session_name = _one_line(sm.custom_title, SESSION_NAME_MAX_CHARS)
     objective = _one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS)
 
+    settings = get_settings()
+    activity = last_activity(sm.last_event_at, sm.title_offset_path)
+    bucket = overview_bucket(sm)
+    if sm.alive is not True and is_stale(activity, settings.CAMPUS_STALE_SECONDS):
+        bucket = "done"  # possibly alive but silent: show idle, not "working"
+
     return CampusSession(
         session_id=session_id,
-        bucket=overview_bucket(sm),
+        bucket=bucket,
+        alive=sm.alive,
+        last_event_at=sm.last_event_at,
         boss=gs.boss,
         agents=gs.agents,
         office=gs.office,
@@ -249,7 +262,10 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
 
 def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
     """Build the campus feed for every session, sorted by session id."""
-    items = sorted(sessions.items(), key=lambda kv: kv[0])
+    items = sorted(
+        ((sid, sm) for sid, sm in sessions.items() if not sm.campus_hidden),
+        key=lambda kv: kv[0],
+    )
     return CampusState(
         sessions=[build_campus_session(sid, sm) for sid, sm in items],
         last_updated=datetime.now(UTC),

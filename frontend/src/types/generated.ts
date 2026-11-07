@@ -188,6 +188,8 @@ export type Detail = string | null;
 export type Since = string | null;
 export type Gitbranch = string | null;
 export type Ended = boolean;
+export type Alive = boolean | null;
+export type Lasteventat = string | null;
 export type Lastupdated = string;
 export type Sessions = CampusSession[];
 export type Lastupdated1 = string;
@@ -720,6 +722,8 @@ export interface CampusSession {
   phase?: SessionPhase | null;
   gitBranch?: Gitbranch;
   ended?: Ended;
+  alive?: Alive;
+  lastEventAt?: Lasteventat;
   lastUpdated: Lastupdated;
   [k: string]: unknown;
 }

@@ -128,3 +128,13 @@ def sample_jsonl_file(temp_dir: Path, sample_jsonl_content: str) -> Path:
     jsonl_path = temp_dir / "test_transcript.jsonl"
     jsonl_path.write_text(sample_jsonl_content, encoding="utf-8")
     return jsonl_path
+
+
+@pytest.fixture(autouse=True)
+def _no_real_claude_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Never consult the developer's real ~/.claude/sessions for liveness in tests."""
+    from app.config import get_settings
+    from app.core import session_liveness
+
+    monkeypatch.setattr(get_settings(), "CLAUDE_SESSIONS_DIR", str(tmp_path / "no-registry"))
+    session_liveness._cache.clear()  # pyright: ignore[reportPrivateUsage]

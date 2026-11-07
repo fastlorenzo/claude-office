@@ -667,6 +667,13 @@ class StateMachine:
     first_prompts: list[str] = field(default_factory=_empty_str_list)
     summary_ai: str | None = None
     summary_ai_key: str | None = None
+    # Liveness (see ``core.session_liveness``): None = unknown; dead_since is set
+    # when the owning process vanished; campus_hidden drops it from /ws/campus.
+    alive: bool | None = None
+    dead_since: datetime | None = None
+    campus_hidden: bool = False
+    # Objective for which a campus summary backfill was already attempted.
+    summary_backfill_key: str | None = None
     # Campus phase bookkeeping: last classified kind and when it began.
     phase_kind: str | None = None
     phase_since: datetime | None = None

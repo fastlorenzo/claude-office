@@ -164,3 +164,14 @@ def test_campus_payload_has_identity_fields(
     assert wire["phase"]["kind"] == "planning"
     assert set(wire["phase"]) == {"kind", "label", "detail", "since"}
     assert wire["objective"] == "are we done?"  # untouched fallback
+
+
+@pytest.mark.parametrize("text", ["CONT-587 and CONT-635", "#12 + #13", "fix CONT-1", "and"])
+def test_ref_only_objective_is_not_a_summary(text: str) -> None:
+    assert ss.clean_summary(text) is None
+    assert (
+        ss.resolve_summary(
+            ai_summary=None, ai_title=None, objective=text, branch="feat/cont-1-sso-login"
+        )
+        == "SSO login"
+    )

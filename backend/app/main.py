@@ -88,8 +88,17 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         )
     )
 
+    liveness = asyncio.create_task(
+        _campus_liveness_loop(
+            get_event_processor(), interval=settings.CAMPUS_LIVENESS_INTERVAL_SECONDS
+        )
+    )
+
     yield
 
+    liveness.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await liveness
     # Cancel any pending debounced overview broadcast so shutdown is clean.
     await get_event_processor().shutdown()
     idle_evictor.cancel()
@@ -97,6 +106,18 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         await idle_evictor
     await git_service.stop()
     await get_engine().dispose()
+
+
+async def _campus_liveness_loop(processor: EventProcessor, interval: float) -> None:
+    """Periodically drop closed sessions from the campus and backfill summaries."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await processor.sweep_campus_liveness()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Campus liveness sweep failed")
 
 
 async def _reap_stale_sessions() -> None:

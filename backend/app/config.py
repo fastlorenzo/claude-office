@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     CAMPUS_RESTORE_WINDOW_SECONDS: int = 86400  # 24h
     # Minimum spacing between DB scans for restorable campus sessions.
     CAMPUS_RESTORE_REFRESH_SECONDS: int = 60
+    # No hook event and no transcript write for this long => session is "stale"
+    # (shown idle when liveness is unknown).
+    CAMPUS_STALE_SECONDS: int = 1200  # 20 min
+    # A session whose process is gone is marked ended, then dropped from the
+    # campus after this grace so the room can play its "ended" state.
+    CAMPUS_DEAD_GRACE_SECONDS: int = 60
+    # Spacing of the periodic liveness sweep.
+    CAMPUS_LIVENESS_INTERVAL_SECONDS: int = 30
+    # Claude Code's per-process registry (pid/sessionId files).
+    CLAUDE_SESSIONS_DIR: str = "~/.claude/sessions"
     # Max sessions restored per scan, newest first (bounds replay cost).
     CAMPUS_RESTORE_MAX_PER_SCAN: int = 16
 
@@ -82,6 +92,7 @@ class Settings(BaseSettings):
     # ``disabled`` uses local fallback text only. The previous OAuth/SDK path
     # was removed because Anthropic no longer permits OAuth for this API.
     SUMMARY_BACKEND: str = "claude-cli"  # claude-cli | openai | disabled
+    SUMMARY_BACKFILL_PER_MINUTE: int = 6  # global cap for campus summary backfill
     SUMMARY_CONCURRENCY: int = 4  # shared cap on in-flight summary calls
 
     # claude-cli backend

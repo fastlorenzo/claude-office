@@ -73,10 +73,16 @@ export interface CampusSession {
   project?: string | null;
   /** Where the session is at right now (deterministic, from the live tool stream). */
   phase?: SessionPhase | null;
+  alive?: boolean | null;
+  lastEventAt?: string | null;
   /** Claude Code session name (/rename → transcript `custom-title`), when set. */
   sessionName?: string | null;
   /** Git branch of the session's working dir when known, e.g. "feat/3d-office". */
   gitBranch?: string | null;
+  /** Live Claude Code telemetry from the status line JSON (null until the statusline tee reports). */
+  telemetry?: SessionTelemetry | null;
+  /** Per-session activity counters for sparklines (ring buffer, oldest first). */
+  activity?: SessionActivityStats | null;
   ended: boolean;
   lastUpdated: string; // ISO
 }
@@ -108,8 +114,72 @@ export interface SessionPhase {
   since?: string | null;
 }
 
+/**
+ * What Claude Code's status line JSON exposes per session (forwarded by the
+ * hooks package's statusline tee). All optional: older Claude Code versions
+ * omit some blocks.
+ */
+export interface SessionTelemetry {
+  model?: string | null; // display name, e.g. "Opus 5.5"
+  effort?: string | null; // "low" | "medium" | "high" | ...
+  contextUsedPct?: number | null; // 0-100
+  contextTokens?: number | null; // total input tokens in the window
+  contextWindow?: number | null; // window size, e.g. 1_000_000
+  costUsd?: number | null; // session total
+  linesAdded?: number | null;
+  linesRemoved?: number | null;
+  durationMs?: number | null; // session wall time
+  cacheWarm?: boolean | null;
+  cacheExpiresAt?: string | null; // ISO
+  repo?: string | null; // "owner/name"
+  outputStyle?: string | null;
+  updatedAt: string; // ISO, when the status line last reported
+}
+
+/** Account-wide rate-limit window (from the status line `rate_limits`). */
+export interface RateLimitWindow {
+  usedPct: number; // 0-100
+  resetsAt?: string | null; // ISO
+  /** Projected use at reset if the current burn continues (0-100+), computed by the backend. */
+  projectedPct?: number | null;
+}
+
+export interface SessionActivityStats {
+  /** Events per minute for the last 30 minutes, oldest first (30 buckets). */
+  eventsPerMin: number[];
+  /** Tool-call counts in this session by coarse kind (same kinds as SessionPhaseKind where they apply). */
+  toolMix: Partial<Record<SessionPhaseKind, number>>;
+  toolCalls: number;
+  subagentsSpawned: number;
+  /** Test runs seen (Bash classified as testing) and how many exited non-zero, if known. */
+  testRuns?: number;
+  testFailures?: number;
+  errors?: number; // tool errors (PostToolUseFailure)
+}
+
+/** Building-wide stats for the control room. */
+export interface CampusStats {
+  fiveHour?: RateLimitWindow | null;
+  sevenDay?: RateLimitWindow | null;
+  /** Sum of session costs seen today (local day) and over the restore window. */
+  costTodayUsd?: number | null;
+  /** Cost per hour over the last 60 min (burn rate). */
+  burnUsdPerHour?: number | null;
+  sessionsByStatus: Partial<Record<RoomStatus, number>>;
+  activeSubagents: number;
+  /** Building-wide events per minute, last 60 min, oldest first. */
+  eventsPerMin: number[];
+  /** Cost per 5-minute bucket, last 3 h, oldest first. */
+  costSeries?: number[];
+  linesAddedToday?: number | null;
+  linesRemovedToday?: number | null;
+  updatedAt: string;
+}
+
 export interface CampusState {
   sessions: CampusSession[];
+  /** Building-wide stats; absent on older backends. */
+  stats?: CampusStats | null;
   lastUpdated: string;
 }
 
