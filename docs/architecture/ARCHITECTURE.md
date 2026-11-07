@@ -847,6 +847,10 @@ graph TD
 
 The `/ws/overview` endpoint is declared before `/ws/{session_id}` so "overview" is not captured as a session id. On connect the client receives an initial `state_update` snapshot. New connections are refused (close code 4013) once the 16-client cap is reached; disallowed origins close with 4003.
 
+### `/ws/campus`
+
+A second cross-session feed used by the 3D office. It streams one `CampusSession` per live session (boss, agents, office, todos, bucket, `ended`, and the last 8 history entries as `recentActivity` with summaries truncated to 140 chars). History, conversation, and whiteboard data are deliberately excluded. Built by `build_campus()` in `backend/app/models/campus.py`, broadcast by `broadcast_campus_state` after a 100 ms debounce (`_schedule_campus_broadcast`; also scheduled on session removal and task/beads polling), and skipped entirely when nobody is watching. Declared before `/ws/{session_id}`; capped at 8 clients (close 4013), origin check closes with 4003, and a snapshot is sent on connect.
+
 ## Configuration Reference
 
 All configuration is managed via environment variables or a `.env` file in the `backend/` directory.

@@ -28,6 +28,7 @@ class ConnectionManager:
         self.active_connections: dict[str, list[WebSocket]] = {}
         self.room_connections: dict[str, list[WebSocket]] = {}
         self.overview_connections: list[WebSocket] = []
+        self.campus_connections: list[WebSocket] = []
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -216,6 +217,45 @@ class ConnectionManager:
             async with self._lock:
                 self.overview_connections[:] = [
                     conn for conn in self.overview_connections if id(conn) not in failed_ids
+                ]
+
+    # ------------------------------------------------------------------
+    # Campus-level WebSocket support (3D office — every session, slim)
+    # ------------------------------------------------------------------
+
+    async def connect_campus(self, websocket: WebSocket, *, max_connections: int) -> bool:
+        """Accept a WebSocket and register it for the campus feed.
+
+        Returns False (without accepting) when the cap is reached; the check
+        and append are atomic under the manager lock.
+        """
+        async with self._lock:
+            if len(self.campus_connections) >= max_connections:
+                return False
+            await websocket.accept()
+            self.campus_connections.append(websocket)
+            return True
+
+    async def disconnect_campus(self, websocket: WebSocket) -> None:
+        """Remove a WebSocket connection from the campus feed."""
+        async with self._lock:
+            if websocket in self.campus_connections:
+                self.campus_connections.remove(websocket)
+
+    async def broadcast_campus(self, message: dict[str, Any]) -> None:
+        """Send a message to all WebSocket clients on the campus feed."""
+        async with self._lock:
+            connections = self.campus_connections.copy()
+
+        if not connections:
+            return
+
+        failed = await self._broadcast_to_connections(message, connections, label="campus")
+        if failed:
+            failed_ids = {id(conn) for conn in failed}
+            async with self._lock:
+                self.campus_connections[:] = [
+                    conn for conn in self.campus_connections if id(conn) not in failed_ids
                 ]
 
 

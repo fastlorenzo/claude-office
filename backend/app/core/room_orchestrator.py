@@ -310,6 +310,10 @@ class RoomOrchestrator:
 # ----------------------------------------------------------------------
 
 
+# Public alias so other modules (e.g. the campus feed) can reuse the bucket logic.
+overview_bucket = _overview_bucket
+
+
 def build_overview(sessions: dict[str, StateMachine]) -> OverviewState:
     """Build a compact cross-session overview for the Command Center.
 

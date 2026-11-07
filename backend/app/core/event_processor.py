@@ -23,6 +23,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.config import get_settings
 from app.core.beads_poller import get_beads_poller, has_beads, init_beads_poller
 from app.core.broadcast_service import (
+    broadcast_campus_state,
     broadcast_error,
     broadcast_event,
     broadcast_overview_state,
@@ -57,6 +58,7 @@ from app.core.transcript_poller import init_transcript_poller
 from app.db.database import AsyncSessionLocal
 from app.db.models import EventRecord, SessionRecord
 from app.models.agents import AgentState
+from app.models.campus import CampusState
 from app.models.common import TodoItem
 from app.models.events import (
     AgentEvent,
@@ -199,6 +201,9 @@ class EventProcessor:
         # per event (O(N x events/sec)). See ``_schedule_overview_broadcast``.
         self._overview_flush_task: asyncio.Task[None] | None = None
         self._overview_flush_interval = 0.05  # 50 ms debounce window
+        # Same coalescing for the 3D-office /ws/campus feed (heavier payload).
+        self._campus_flush_task: asyncio.Task[None] | None = None
+        self._campus_flush_interval = 0.1  # 100 ms debounce window
         # Single-flight restore claims, keyed by session id (values are plain
         # completion futures; waiters only need to know the restore finished).
         # The first pipeline call to see an uncached session plants a future
@@ -281,6 +286,7 @@ class EventProcessor:
 
         await save_tasks(session_id, todos)
         await broadcast_state(session_id, sm)
+        self._schedule_campus_broadcast()
 
     async def _handle_beads_update(self, session_id: str, todos: list[TodoItem]) -> None:
         """Handle beads issue updates: update SM and broadcast."""
@@ -298,6 +304,7 @@ class EventProcessor:
 
         await save_tasks(session_id, todos)
         await broadcast_state(session_id, sm)
+        self._schedule_campus_broadcast()
 
     async def _handle_polled_event(self, event: AnyEvent) -> None:
         """Handle events extracted from polled subagent transcripts."""
@@ -329,6 +336,7 @@ class EventProcessor:
                         del self.orchestrators[sm.room_id]
             self.sessions.pop(session_id, None)
         self._recovery_checked.discard(session_id)
+        self._schedule_campus_broadcast()
 
     async def clear_all_sessions(self) -> None:
         """Clear all in-memory session state."""
@@ -337,6 +345,7 @@ class EventProcessor:
         # A wiped DB no longer knows any session_start, so previously checked
         # sessions must be re-evaluated for recovery on their next event.
         self._recovery_checked.clear()
+        self._schedule_campus_broadcast()
 
     async def evict_idle_sessions(self, max_idle_seconds: float) -> int:
         """Drop in-memory StateMachines idle longer than ``max_idle_seconds``.
@@ -736,6 +745,7 @@ class EventProcessor:
         # event. No-op when no one is watching /ws/overview.
         # ------------------------------------------------------------------
         self._schedule_overview_broadcast()
+        self._schedule_campus_broadcast()
 
     # ------------------------------------------------------------------
     # Command Center overview (debounced cross-session broadcast)
@@ -766,17 +776,42 @@ class EventProcessor:
         except Exception as e:
             logger.exception(f"Error broadcasting overview state: {e}")
 
+    def _schedule_campus_broadcast(self) -> None:
+        """Coalesce campus broadcasts into one deferred flush per ~100 ms."""
+        if not get_manager().campus_connections:
+            return
+        if self._campus_flush_task is not None and not self._campus_flush_task.done():
+            return
+        self._campus_flush_task = asyncio.create_task(self._flush_campus_broadcast())
+
+    async def _flush_campus_broadcast(self) -> None:
+        """Wait out the debounce window, then broadcast a single campus state."""
+        try:
+            await asyncio.sleep(self._campus_flush_interval)
+            await broadcast_campus_state(self.sessions, self._sessions_lock)
+        except asyncio.CancelledError:  # pragma: no cover - shutdown path
+            raise
+        except Exception as e:
+            logger.exception(f"Error broadcasting campus state: {e}")
+
+    async def build_campus_snapshot(self) -> CampusState:
+        """Build the campus state under ``_sessions_lock`` (``/ws/campus`` connect)."""
+        from app.models.campus import build_campus
+
+        async with self._sessions_lock:
+            return build_campus(self.sessions)
+
     async def shutdown(self) -> None:
         """Cancel a pending debounced overview broadcast on app shutdown.
 
         Without this the flush task is left pending at loop close and asyncio
         logs "Task was destroyed but it is pending!".
         """
-        task = self._overview_flush_task
-        if task is not None and not task.done():
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        for task in (self._overview_flush_task, self._campus_flush_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     async def build_overview_snapshot(self) -> OverviewState:
         """Build a cross-session overview under ``_sessions_lock``.

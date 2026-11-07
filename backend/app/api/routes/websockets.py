@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 # amplifies the per-event overview rebuild cost, so refuse new ones past this.
 _MAX_OVERVIEW_CONNECTIONS = 16
 
+# Upper bound on concurrent /ws/campus (3D office) watchers; each one receives
+# the slim state of every session on every (debounced) change.
+_MAX_CAMPUS_CONNECTIONS = 8
+
 router = APIRouter()
 
 
@@ -73,6 +77,44 @@ async def websocket_overview(websocket: WebSocket) -> None:
         logger.warning("Overview WebSocket error", exc_info=True)
     finally:
         await get_manager().disconnect_overview(websocket)
+
+
+@router.websocket("/ws/campus")
+async def websocket_campus(websocket: WebSocket) -> None:
+    """Campus WebSocket: slim state of every live session (3D office).
+
+    Declared BEFORE ``/ws/{session_id}`` for the same reason as ``/ws/overview``.
+    """
+    from app.api.websocket import validate_websocket_origin
+
+    if not validate_websocket_origin(websocket):
+        await websocket.close(code=4003, reason="Origin not allowed")
+        return
+
+    accepted = await get_manager().connect_campus(
+        websocket, max_connections=_MAX_CAMPUS_CONNECTIONS
+    )
+    if not accepted:
+        await websocket.close(code=4013, reason="Too many campus connections")
+        return
+    try:
+        campus = await get_event_processor().build_campus_snapshot()
+        await websocket.send_json(
+            {
+                "type": "state_update",
+                "timestamp": campus.last_updated.isoformat(),
+                "state": campus.model_dump(mode="json", by_alias=True),
+            }
+        )
+        # Keep alive -- discard incoming messages
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.warning("Campus WebSocket error", exc_info=True)
+    finally:
+        await get_manager().disconnect_campus(websocket)
 
 
 @router.websocket("/ws/{session_id}")

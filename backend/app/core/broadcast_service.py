@@ -24,6 +24,7 @@ __all__ = [
     "broadcast_error",
     "broadcast_room_state",
     "broadcast_overview_state",
+    "broadcast_campus_state",
 ]
 
 
@@ -134,5 +135,33 @@ async def broadcast_overview_state(
             "type": "state_update",
             "timestamp": overview.last_updated.isoformat(),
             "state": overview.model_dump(mode="json", by_alias=True),
+        }
+    )
+
+
+async def broadcast_campus_state(
+    sessions: dict[str, StateMachine],
+    sessions_lock: asyncio.Lock | None = None,
+) -> None:
+    """Broadcast the slim all-sessions state to all ``/ws/campus`` clients.
+
+    Skips building the payload when nobody is watching. The build runs under
+    *sessions_lock* (when supplied) so the registry can't be resized
+    mid-iteration; callers must NOT already hold the lock.
+    """
+    if not get_manager().campus_connections:
+        return
+    from app.models.campus import build_campus
+
+    if sessions_lock is not None:
+        async with sessions_lock:
+            campus = build_campus(sessions)
+    else:
+        campus = build_campus(sessions)
+    await get_manager().broadcast_campus(
+        {
+            "type": "state_update",
+            "timestamp": campus.last_updated.isoformat(),
+            "state": campus.model_dump(mode="json", by_alias=True),
         }
     )

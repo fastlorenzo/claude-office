@@ -50,6 +50,10 @@ export type {
   // Overview (Command Center)
   OverviewEntry,
   OverviewState,
+  // Campus (3D office)
+  CampusActivity,
+  CampusSession,
+  CampusState,
 } from "./generated";
 
 // Re-export Commit with the legacy GitCommit alias for backward compatibility

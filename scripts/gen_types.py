@@ -42,6 +42,11 @@ from app.models.git import (  # noqa: E402  # type: ignore[import]
     Commit,
     GitStatus,
 )
+from app.models.campus import (  # noqa: E402  # type: ignore[import]
+    CampusActivity,
+    CampusSession,
+    CampusState,
+)
 from app.models.overview import OverviewEntry, OverviewState  # noqa: E402  # type: ignore[import]
 from app.models.sessions import (  # noqa: E402  # type: ignore[import]
     AgentLifespan,
@@ -95,6 +100,9 @@ MODELS = [
     GitStatus,
     OverviewEntry,
     OverviewState,
+    CampusActivity,
+    CampusSession,
+    CampusState,
 ]
 
 # Generate combined JSON schema with camelCase field names (by_alias=True)
