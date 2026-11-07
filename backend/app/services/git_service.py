@@ -324,6 +324,11 @@ class GitService:
                 self._last_status.clear()
         logger.info(f"GitService configured: session={session_id}, project_root={project_root}")
 
+    def get_session_root(self, session_id: str) -> str | None:
+        """Return the validated project root configured for *session_id*, if any."""
+        with self._lock:
+            return self._sessions.get(session_id)
+
     def remove_session(self, session_id: str) -> None:
         """Remove a session when its WebSocket disconnects."""
         with self._lock:

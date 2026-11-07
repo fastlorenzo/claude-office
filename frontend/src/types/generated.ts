@@ -161,6 +161,11 @@ export type Metadata = {
 } | null;
 export type Todos = TodoItem[];
 export type Recentactivity = CampusActivity[];
+export type Objective = string | null;
+export type Sessionname = string | null;
+export type Focus = string | null;
+export type Workitems = string[];
+export type Gitbranch = string | null;
 export type Ended = boolean;
 export type Lastupdated = string;
 export type Sessions = CampusSession[];
@@ -684,6 +689,11 @@ export interface CampusSession {
   office: OfficeState;
   todos?: Todos;
   recentActivity?: Recentactivity;
+  objective?: Objective;
+  sessionName?: Sessionname;
+  focus?: Focus;
+  workItems?: Workitems;
+  gitBranch?: Gitbranch;
   ended?: Ended;
   lastUpdated: Lastupdated;
   [k: string]: unknown;

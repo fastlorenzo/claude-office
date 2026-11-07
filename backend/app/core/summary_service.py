@@ -38,6 +38,161 @@ def _sanitize_untrusted(text: str) -> str:
     return text.replace(_UNTRUSTED_START, "").replace(_UNTRUSTED_END, "")
 
 
+# ---------------------------------------------------------------------------
+# Objective extraction (non-AI) helpers
+# ---------------------------------------------------------------------------
+
+OBJECTIVE_MAX_CHARS = 90
+
+# Words that, on their own, make a prompt trivial ("yes", "ok go ahead", ...).
+_TRIVIAL_WORDS: frozenset[str] = frozenset(
+    {
+        "yes", "yep", "yeah", "y", "no", "nope", "n", "ok", "okay", "k", "go", "continue",
+        "proceed", "sure", "please", "thanks", "thank", "you", "thx", "ty", "do", "it",
+        "that", "this", "ahead", "on", "next", "done", "stop", "retry", "again", "lgtm",
+        "good", "great", "nice", "cool", "perfect", "looks", "fine", "right", "correct",
+        "resume", "keep", "going", "and", "commit", "push",
+    }
+)  # fmt: skip
+
+# Politeness / framing prefixes removed before the headline is cased.
+_LEAD_IN = re.compile(
+    r"^(?:(?:hey|hi|hello|ok|okay|so|well|alright|now|then)\b[ ,]*)*"
+    r"(?:(?:claude|please)\b[ ,]*)*"
+    r"(?:(?:can|could|would|will) you(?: please)?|i(?: would|'d) like(?: you)? to|"
+    r"i (?:want|need) you to|i want to|i need to|i'd like to|let'?s|help me(?: to)?|"
+    r"we (?:need|have|want) to|you should|go ahead and)\b[ ,:]*",
+    re.IGNORECASE,
+)
+_PLEASE = re.compile(r"\b(?:please|pls)\b[ ,]*", re.IGNORECASE)
+_URL = re.compile(r"(?:https?|ftp|file)://\S+|\bwww\.\S+", re.IGNORECASE)
+# Any whitespace-delimited token that contains a slash is treated as a path
+# ("backend/app/main.py", "~/x", "./y", "/etc/hosts", "@src/foo").
+_PATHISH = re.compile(r"(?<!\S)[@(\[\"'`]*[^\s/]*/[^\s]*", re.UNICODE)
+_CODE_FENCE = re.compile(r"```.*?(?:```|$)", re.DOTALL)
+_DANGLING = frozenset(
+    {
+        "in", "on", "at", "to", "for", "of", "from", "the", "a", "an", "and", "or", "with",
+        "into", "by", "under", "over", "about", "via", "using", "as", "that", "which", "so",
+        "but", "then", "is", "are", "be",
+    }
+)  # fmt: skip
+_FOLLOW_UP_START = frozenset(
+    {
+        "also", "and", "then", "but", "plus", "additionally", "why", "how", "what", "where",
+        "when", "is", "are", "does", "do", "did", "can", "could", "should", "it", "that",
+        "this", "those", "these", "they", "there", "same", "again", "ok", "okay", "yes", "no",
+        "actually", "wait", "hmm", "sorry", "thanks", "nice", "great", "good", "now",
+    }
+)  # fmt: skip
+_STOPWORDS = _DANGLING | _TRIVIAL_WORDS | frozenset(
+    {"i", "we", "me", "my", "our", "your", "it", "its", "if", "not", "all", "any", "some",
+     "new", "add", "make", "fix", "update", "get", "set", "use", "like", "just", "also"}
+)  # fmt: skip
+_WORD = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _clean_ai_headline(line: str) -> str:
+    """Drop URLs/paths an AI headline might still contain."""
+    return " ".join(_PATHISH.sub(" ", _URL.sub(" ", line)).split())
+
+
+def is_trivial_prompt(prompt: str | None) -> bool:
+    """True for prompts that carry no goal: "yes", "continue", "/clear", one word."""
+    if not prompt:
+        return True
+    text = prompt.strip()
+    if not text or text.startswith("/"):
+        return True
+    if "<task-notification>" in text:
+        return True
+    words = _WORD.findall(text)
+    if len(words) < 2:
+        return True
+    return all(w.lower() in _TRIVIAL_WORDS for w in words)
+
+
+def _truncate_words(text: str, limit: int) -> str:
+    """Truncate *text* to *limit* chars at a word boundary, adding an ellipsis."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    if text[limit - 1] != " " and " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip(" ,;:-\u2013\u2014.") + "\u2026"
+
+
+def _clean_sentence(sentence: str) -> str:
+    """Strip URLs, paths, politeness and dangling connectors from one sentence."""
+    s = _URL.sub(" ", sentence)
+    s = _PATHISH.sub(" ", s)
+    s = s.replace("`", " ")
+    s = " ".join(s.split())
+    s = _LEAD_IN.sub("", s)
+    s = _PLEASE.sub("", s)
+    s = s.strip(" \t,;:-\u2013\u2014.!?\"'()[]")
+    words = s.split()
+    while words and words[-1].lower().strip(",;:") in _DANGLING:
+        words.pop()
+    while words and words[0].lower() in {"to", "and", "then", "also"}:
+        words.pop(0)
+    s = " ".join(words)
+    return s[:1].upper() + s[1:] if s else s
+
+
+def objective_headline(prompt: str, max_len: int = OBJECTIVE_MAX_CHARS) -> str:
+    """Headline from the first meaningful sentence of *prompt* (no AI)."""
+    text = _CODE_FENCE.sub(" ", prompt)
+    for chunk in re.split(r"\n+", text):
+        for sentence in re.split(r"(?<=[.!?])\s+", chunk.strip()):
+            cleaned = _clean_sentence(sentence)
+            if len(cleaned.split()) >= 2:
+                return _truncate_words(cleaned, max_len)
+    return ""
+
+
+def _content_words(text: str) -> set[str]:
+    return {w.lower() for w in _WORD.findall(text) if len(w) > 2 and w.lower() not in _STOPWORDS}
+
+
+def is_new_goal(previous: str, prompt: str) -> bool:
+    """Heuristic: does *prompt* start a clearly new top-level goal?
+
+    A follow-up is short, opens with a follow-up marker ("also", "why", ...), or
+    shares vocabulary with the current objective. Anything else that is a
+    substantive instruction counts as new.
+    """
+    words = _WORD.findall(prompt)
+    if len(words) < 5:
+        return False
+    if words[0].lower() in _FOLLOW_UP_START:
+        return False
+    prev_words = _content_words(previous)
+    new_words = _content_words(_PATHISH.sub(" ", _URL.sub(" ", prompt)))
+    if not new_words or not prev_words:
+        return True
+    overlap = len(prev_words & new_words) / min(len(prev_words), len(new_words))
+    return overlap < 0.2
+
+
+def objective_fallback(previous: str | None, recent_prompts: list[str]) -> str | None:
+    """Rolling non-AI objective: keep *previous* unless a new goal appears."""
+    substantive = [p for p in recent_prompts if not is_trivial_prompt(p)]
+    if not substantive:
+        return previous
+    if not previous:
+        for p in substantive:
+            headline = objective_headline(p)
+            if headline:
+                return headline
+        return previous
+    latest = substantive[-1]
+    if is_new_goal(previous, latest):
+        return objective_headline(latest) or previous
+    return previous
+
+
 class SummaryService:
     """Service for generating AI-powered summaries using Claude Haiku."""
 
@@ -152,6 +307,39 @@ class SummaryService:
         if result:
             return " ".join(result.split())
         return fallback
+
+    async def summarize_objective(
+        self, previous_objective: str | None, recent_prompts: list[str]
+    ) -> str:
+        """Maintain the session's rolling objective headline (<= 90 chars).
+
+        Keeps *previous_objective* when the latest prompts continue the same
+        goal and replaces it when the user gives a clearly new top-level
+        instruction. Falls back to :func:`objective_fallback` (pure heuristics)
+        when AI is disabled or the backend fails.
+        """
+        fallback = objective_fallback(previous_objective, recent_prompts) or ""
+        substantive = [p for p in recent_prompts if not is_trivial_prompt(p)]
+        if not self.enabled or not substantive:
+            return fallback
+
+        prompts_text = "\n---\n".join(_sanitize_untrusted(p[:600]) for p in substantive[-3:])
+        prev = _sanitize_untrusted(previous_objective or "none")
+        result = await self._call_with_retry(
+            "A coding session has a current objective headline. Given the user's latest "
+            "prompts, reply with the objective headline for the session: if the prompts "
+            "continue the same goal, repeat the current headline EXACTLY; if the user "
+            "gave a clearly new top-level instruction, write a new headline. "
+            f"Max {OBJECTIVE_MAX_CHARS} characters, imperative mood, no file paths, no URLs, "
+            "no quotes, no trailing period. Reply with the headline only.\n"
+            f"Current headline: {_UNTRUSTED_START}{prev}{_UNTRUSTED_END}\n"
+            f"Latest prompts: {_UNTRUSTED_START}{prompts_text}{_UNTRUSTED_END}"
+        )
+        if not result:
+            return fallback
+        line = " ".join(result.strip().splitlines()[:1]).strip().strip("\"'`").rstrip(".")
+        line = _clean_ai_headline(line)
+        return _truncate_words(line, OBJECTIVE_MAX_CHARS) if line else fallback
 
     async def generate_agent_name(
         self,

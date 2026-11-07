@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from app.core.path_utils import compress_path, compress_paths_in_text, truncate_long_words
 from app.core.quotes import get_random_job_completion_quote
-from app.core.summary_service import get_summary_service
+from app.core.summary_service import get_summary_service, is_trivial_prompt, objective_fallback
 from app.core.token_tracker import TokenTracker
 from app.core.whiteboard_tracker import WhiteboardTracker
 from app.models.agents import (
@@ -191,6 +191,49 @@ def parse_todos_from_event(event: AnyEvent) -> list[TodoItem]:
 # ---------------------------------------------------------------------------
 
 
+OBJECTIVE_PROMPT_HISTORY = 6
+
+
+def describe_tool_activity(event: ToolEvent) -> str:
+    """One-line, human description of a tool call, e.g. "Editing backend/app/main.py"."""
+    tool = event.data.tool_name or ""
+    tool_input = event.data.tool_input or {}
+
+    def _path() -> str:
+        raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+        if not isinstance(raw, str) or not raw:
+            return ""
+        parts = [p for p in raw.replace("\\", "/").split("/") if p]
+        return "/".join(parts[-3:])
+
+    verbs = {
+        "Edit": "Editing",
+        "MultiEdit": "Editing",
+        "NotebookEdit": "Editing",
+        "Write": "Writing",
+        "Read": "Reading",
+    }
+    if tool in verbs:
+        path = _path()
+        return f"{verbs[tool]} {path}" if path else f"{verbs[tool]} files"
+    if tool == "Bash":
+        cmd = tool_input.get("command", "")
+        if isinstance(cmd, str) and cmd.strip():
+            first = compress_paths_in_text(cmd.strip().splitlines()[0])
+            return f"Running {first}"
+        return "Running a command"
+    if tool in ("Grep", "Glob"):
+        pattern = tool_input.get("pattern", "")
+        return f"Searching for {pattern}" if isinstance(pattern, str) and pattern else "Searching"
+    if tool in ("Task", "Agent"):
+        return "Delegating to a subagent"
+    if tool == "TodoWrite":
+        return "Updating the plan"
+    if tool in ("WebFetch", "WebSearch"):
+        return "Researching the web"
+    return tool
+
+
 def _handle_session_start(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle SESSION_START: initialize office state for a new session."""
     sm.phase = OfficePhase.STARTING
@@ -214,6 +257,9 @@ def _handle_pre_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle PRE_TOOL_USE: update boss/agent state and process TodoWrite events."""
     assert isinstance(event, ToolEvent)
     tool_name = event.data.tool_name
+
+    if tool_name:
+        sm.latest_activity = describe_tool_activity(event) or sm.latest_activity
 
     if tool_name == "TodoWrite":
         parsed = parse_todos_from_event(event)
@@ -258,6 +304,13 @@ def _handle_user_prompt_submit(sm: "StateMachine", event: AnyEvent) -> None:
     sm.print_report = False
     sm.turn_active = True
     sm.last_user_prompt = prompt_text
+    if prompt_text and not is_trivial_prompt(prompt_text):
+        sm.objective_before_prompt = sm.effective_objective
+        sm.objective_ai = None
+        sm.objective_prompts.append(prompt_text[:1500])
+        del sm.objective_prompts[:-OBJECTIVE_PROMPT_HISTORY]
+        sm.objective_prompt_count += 1
+        sm.objective = objective_fallback(sm.objective, [prompt_text]) or sm.objective
     if prompt_text:
         sm.boss_bubble = BubbleContent(
             type=BubbleType.SPEECH,
@@ -567,6 +620,23 @@ class StateMachine:
     # terminal into the "done" zone and back every tool cycle.
     turn_active: bool = False
     last_user_prompt: str | None = None
+    # Rolling session objective (headline of the overall goal). Rebuilt by the
+    # synchronous prompt handler (non-AI fallback) so a DB restore/replay
+    # reconstructs it; the live path may refine it with the summary service.
+    objective: str | None = None
+    objective_before_prompt: str | None = None  # objective prior to the latest prompt
+    objective_prompts: list[str] = field(default_factory=_empty_str_list)
+    objective_prompt_count: int = 0  # substantive prompts seen (debounce token)
+    # AI-written rolling objective (live path only; never reconstructed on restore).
+    objective_ai: str | None = None
+    # Claude Code transcript titles: the user's /rename and Claude's own title
+    # (last occurrence wins), tailed incrementally by ``core.session_titles``.
+    custom_title: str | None = None
+    ai_title: str | None = None
+    title_offset: int = 0
+    title_offset_path: str | None = None
+    # One-line description of the latest tool call ("Running make checkall").
+    latest_activity: str | None = None
     background_tasks: list[BackgroundTask] = field(default_factory=_empty_background_tasks)
     conversation: list[ConversationEntry] = field(default_factory=_empty_conversation)
 
@@ -603,6 +673,11 @@ class StateMachine:
     # ---------------------------------------------------------------------------
     # Core methods
     # ---------------------------------------------------------------------------
+
+    @property
+    def effective_objective(self) -> str | None:
+        """AI summary, else Claude Code's ``aiTitle``, else the heuristic headline."""
+        return self.objective_ai or self.ai_title or self.objective
 
     def append_capped(
         self,

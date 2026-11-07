@@ -141,6 +141,11 @@ class TestBroadcast:
             "office",
             "todos",
             "recentActivity",
+            "objective",
+            "sessionName",
+            "focus",
+            "workItems",
+            "gitBranch",
             "ended",
             "lastUpdated",
         }

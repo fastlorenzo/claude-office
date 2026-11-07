@@ -53,6 +53,7 @@ class SessionSummary(TypedDict):
     id: str
     label: str | None
     displayName: str | None
+    sessionName: str | None
     projectName: str | None
     projectRoot: str | None
     createdAt: str
@@ -78,6 +79,21 @@ class ReplayEntry(TypedDict):
 
     event: ReplayEvent
     state: dict[str, Any]
+
+
+def _display_name(rec: SessionRecord, session_name: str | None) -> str:
+    """Best human label: user rename, Claude Code title, derived name, folder, short id."""
+    if rec.label and rec.label.strip():
+        return rec.label.strip()
+    if session_name:
+        return session_name
+    if rec.display_name and rec.display_name.strip():
+        return rec.display_name.strip()
+    if rec.project_root:
+        base = os.path.basename(rec.project_root.rstrip("/\\"))
+        if base:
+            return base
+    return rec.id[:8]
 
 
 @router.get("")
@@ -146,6 +162,7 @@ async def list_sessions(
     start_result = await db.execute(sessions_with_start_stmt)
     sessions_with_start: set[str] = {row[0] for row in start_result.all()}
 
+    live_sessions = dict(get_event_processor().sessions)
     sessions: list[SessionSummary] = []
     for row in rows:
         rec = row[0]
@@ -167,11 +184,14 @@ async def list_sessions(
             else rec.updated_at.replace(tzinfo=UTC)
         )
 
+        live = live_sessions.get(rec.id)
+        session_name = live.custom_title if live is not None else None
         sessions.append(
             {
                 "id": rec.id,
                 "label": rec.label,
-                "displayName": rec.display_name,
+                "displayName": _display_name(rec, session_name),
+                "sessionName": session_name,
                 "projectName": rec.project_name,
                 "projectRoot": rec.project_root,
                 "createdAt": created_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),

@@ -833,6 +833,16 @@ The `/ws/overview` endpoint is declared before `/ws/{session_id}` so "overview" 
 
 A second cross-session feed used by the 3D office. It streams one `CampusSession` per live session (boss, agents, office, todos, bucket, `ended`, and the last 8 history entries as `recentActivity` with summaries truncated to 140 chars). History, conversation, and whiteboard data are deliberately excluded. Built by `build_campus()` in `backend/app/models/campus.py`, broadcast by `broadcast_campus_state` after a 100 ms debounce (`_schedule_campus_broadcast`; also scheduled on session removal and task/beads polling), and skipped entirely when nobody is watching. Declared before `/ws/{session_id}`; capped at 8 clients (close 4013), origin check closes with 4003, and a snapshot is sent on connect.
 
+Each `CampusSession` also carries an at-a-glance summary (all optional/nullable in the TS contract):
+
+- `objective` (<= 90 chars): rolling session goal. Precedence: AI summary (`summarize_objective`, run off the hot path once per substantive prompt; stale results dropped), else Claude Code's own `aiTitle` from the transcript, else a heuristic headline (first meaningful sentence of the first substantive prompt, politeness/paths/URLs stripped, word-boundary truncation; trivial prompts such as "yes", "ok", single words and slash-commands are skipped; a follow-up keeps it, a clearly new top-level instruction replaces it). The heuristic is computed in the synchronous state-machine prompt handler, so a DB restore rebuilds it with zero AI calls.
+- `sessionName`: the user's `/rename` (`customTitle`). `aiTitle`/`customTitle` are tailed incrementally from the transcript JSONL (`core/session_titles.py`, byte offset per session, last occurrence wins, first read of a large file only reads the tail) whenever an event carries `transcript_path`, live and on restore.
+- `focus` (<= 90 chars): boss current task, else the in-progress todo, else the latest tool activity ("Running make checkall", "Editing backend/app/main.py").
+- `workItems` (<= 4, each <= 70 chars): in-progress todos, then active subagent tasks as `"<name>: <task>"`, de-duplicated case-insensitively.
+- `gitBranch`: read from `.git/HEAD` of the session's project root (`services/git_branch.py`, worktree-aware, cached 30 s, never shells out); null if unknown or detached.
+
+`GET /api/v1/sessions` additionally returns `sessionName` (live sessions only) and a `displayName` that prefers the user label, then `sessionName`, then the stored display name, then the project folder basename, then the short id.
+
 ## Configuration Reference
 
 All configuration is managed via environment variables or a `.env` file in the `backend/` directory.

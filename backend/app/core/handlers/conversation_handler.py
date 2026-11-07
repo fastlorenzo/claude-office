@@ -14,7 +14,7 @@ from app.core.broadcast_service import broadcast_state
 from app.core.jsonl_parser import get_last_assistant_response
 from app.core.path_utils import is_safe_transcript_path
 from app.core.state_machine import StateMachine
-from app.core.summary_service import get_summary_service
+from app.core.summary_service import get_summary_service, objective_fallback
 from app.models.common import BubbleContent, BubbleType
 from app.models.events import LifecycleEvent, PromptEvent
 from app.models.sessions import ConversationEntry
@@ -66,7 +66,55 @@ async def handle_user_prompt_submit(
         }
         sm.append_capped(conv_entry)
 
+    _schedule_objective_refinement(sm, event.session_id)
+
     await broadcast_state(event.session_id, sm)
+
+
+# Strong references so fire-and-forget refinement tasks are not garbage collected.
+_objective_tasks: set["asyncio.Task[None]"] = set()
+
+
+def _schedule_objective_refinement(sm: StateMachine, session_id: str) -> None:
+    """Refine the rolling objective with the summary service, off the hot path.
+
+    The synchronous state-machine handler already set a fallback objective, so
+    this only matters when an AI backend is enabled. It runs at most once per
+    substantive prompt (``objective_prompt_count`` is the debounce token): a
+    newer prompt cancels the in-flight refinement of an older one, and a stale
+    result is dropped. Restores never come through here, so replaying history
+    costs no AI calls.
+    """
+    if not get_summary_service().enabled or not sm.objective_prompts:
+        return
+    token = sm.objective_prompt_count
+    previous = sm.objective_before_prompt
+    prompts = list(sm.objective_prompts)
+    task = asyncio.get_running_loop().create_task(
+        _refine_objective(sm, session_id, token, previous, prompts)
+    )
+    _objective_tasks.add(task)
+    task.add_done_callback(_objective_tasks.discard)
+
+
+async def _refine_objective(
+    sm: StateMachine,
+    session_id: str,
+    token: int,
+    previous: str | None,
+    prompts: list[str],
+) -> None:
+    try:
+        refined = await get_summary_service().summarize_objective(previous, prompts)
+    except Exception:
+        logger.debug("Objective refinement failed", exc_info=True)
+        return
+    if not refined or token != sm.objective_prompt_count or refined == sm.objective_ai:
+        return  # stale (a newer prompt arrived) or nothing changed
+    if refined == objective_fallback(previous, prompts) and refined != previous:
+        return  # heuristic answer (AI off/failed): let aiTitle/heuristic stand
+    sm.objective_ai = refined
+    await broadcast_state(session_id, sm)
 
 
 async def handle_stop(

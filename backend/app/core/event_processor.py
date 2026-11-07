@@ -53,6 +53,7 @@ from app.core.handlers import (
 from app.core.jsonl_parser import get_last_assistant_response
 from app.core.product_mapper import get_product_mapper
 from app.core.room_orchestrator import RoomOrchestrator
+from app.core.session_titles import refresh_session_titles
 from app.core.state_machine import StateMachine
 from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
@@ -634,6 +635,7 @@ class EventProcessor:
 
         if applied:
             sm.transition(event)
+            await self._refresh_titles(sm, event.data.transcript_path)
 
         # Apply resolved floor/room to in-memory state machine.
         if resolved_floor_id:
@@ -998,6 +1000,14 @@ class EventProcessor:
         fut.set_result(None)
         return restored
 
+    @staticmethod
+    async def _refresh_titles(sm: StateMachine, transcript_path: str | None) -> None:
+        """Tail the transcript for Claude Code's session titles (never raises)."""
+        try:
+            await refresh_session_titles(sm, transcript_path)
+        except Exception:
+            logger.debug("Session title refresh failed", exc_info=True)
+
     async def _build_restored_state_machine(
         self, session_id: str, exclude_row_id: int | None = None
     ) -> StateMachine | None:
@@ -1060,6 +1070,7 @@ class EventProcessor:
                         )
                         continue
                     sm.transition(evt)
+                    await self._refresh_titles(sm, evt.data.transcript_path)
 
                     agent_id = evt.data.agent_id or "main"
                     # Same id scheme as the live path, so a re-render after a
