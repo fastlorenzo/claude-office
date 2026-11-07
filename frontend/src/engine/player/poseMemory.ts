@@ -106,3 +106,31 @@ export function savePose(
     /* storage unavailable: ignore */
   }
 }
+
+/** Feet below this are out of the world (factory floor is at -6). */
+export const FALL_Y = -10;
+/** Never persist a pose below this (e.g. mid-fall). */
+export const SAVE_MIN_Y = -7;
+/** Airborne over the "outside" zone for this long counts as falling. */
+export const FALL_OUTSIDE_S = 1.5;
+
+/** Only grounded poses above the void are worth remembering. */
+export function canSavePose(s: { grounded: boolean; y: number }): boolean {
+  return s.grounded && Number.isFinite(s.y) && s.y >= SAVE_MIN_Y;
+}
+
+/** True when the player has fallen out of the world. */
+export function isFallen(s: { y: number; airborneOutsideS: number }): boolean {
+  return (
+    !Number.isFinite(s.y) || s.y < FALL_Y || s.airborneOutsideS > FALL_OUTSIDE_S
+  );
+}
+
+export function clearPose(): void {
+  try {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(POSE_KEY);
+  } catch {
+    /* ignore */
+  }
+}

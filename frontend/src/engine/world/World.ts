@@ -353,6 +353,14 @@ class World implements IWorld {
       if (this.disposed) return;
 
       this.building = new Building({
+      if (!this.debug.camera && !this.debug.preserveDrawingBuffer)
+        this.player.restoreOr(
+          {
+            feet: new Vector3(spawn.x, spawn.y + 0.05, spawn.z),
+            yaw: this.layout.lobby.spawnYaw,
+          },
+          (p) => zoneAt3(this.factoryLayout, this.layout, p).kind !== "outside",
+        );
         scene: this.scene,
         materials: this.materials,
         assets: this.assets,
@@ -424,6 +432,8 @@ class World implements IWorld {
   ): () => void {
     return this.events.on(event, cb);
   }
+      // Colliders (building, factory, entrance) exist: let the player fall/walk.
+      this.player.markReady();
 
   // -------------------------------------------------------------------------
   // Sync

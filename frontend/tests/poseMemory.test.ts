@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  canSavePose,
+  FALL_Y,
+  isFallen,
   isFresh,
   parsePose,
   POSE_MAX_AGE_MS,
@@ -42,5 +45,22 @@ describe("poseMemory", () => {
     expect(restoreSuppressed("?shot=1")).toBe(true);
     expect(restoreSuppressed("?cam=1,2,3")).toBe(true);
     expect(restoreSuppressed("?foo=1")).toBe(false);
+  });
+});
+
+describe("save guard and fall net", () => {
+  it("saves only grounded poses above -7", () => {
+    expect(canSavePose({ grounded: true, y: 0.05 })).toBe(true);
+    expect(canSavePose({ grounded: true, y: -6 })).toBe(true);
+    expect(canSavePose({ grounded: false, y: 0 })).toBe(false);
+    expect(canSavePose({ grounded: true, y: -7.5 })).toBe(false);
+    expect(canSavePose({ grounded: true, y: NaN })).toBe(false);
+  });
+  it("detects falling below the world or airborne outside too long", () => {
+    expect(isFallen({ y: -6, airborneOutsideS: 0 })).toBe(false);
+    expect(isFallen({ y: FALL_Y - 0.1, airborneOutsideS: 0 })).toBe(true);
+    expect(isFallen({ y: 0, airborneOutsideS: 1.4 })).toBe(false);
+    expect(isFallen({ y: 0, airborneOutsideS: 1.6 })).toBe(true);
+    expect(isFallen({ y: NaN, airborneOutsideS: 0 })).toBe(true);
   });
 });

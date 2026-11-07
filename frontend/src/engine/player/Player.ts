@@ -19,6 +19,9 @@ import {
 import type { CameraMode } from "@/engine/contracts";
 import type { InputController } from "@/engine/input/Input";
 import {
+  canSavePose,
+  clearPose,
+  isFallen,
   loadPose,
   POSE_RETRY_MS,
   POSE_SAVE_INTERVAL_MS,
@@ -65,6 +68,10 @@ export class Player {
   frozen = false;
   /** Horizontal speed this frame (m/s). */
   speed = 0;
+  /** No simulation until the world's colliders exist (see `markReady`). */
+  private waiting = true;
+  private spawnPose: { feet: Vector3; yaw: number } | null = null;
+  private airborneOutside = 0;
 
   private cc: PhysicsCharacterController | null = null;
   private body: Mesh | null = null;
@@ -176,13 +183,27 @@ export class Player {
     zoneOk: (p: { x: number; y: number; z: number }) => boolean,
   ): void {
     this.teleport(spawn.feet, spawn.yaw);
+    this.spawnPose = { feet: spawn.feet.clone(), yaw: spawn.yaw };
+    this.zoneOk = zoneOk;
     const saved = loadPose();
     if (!saved || this.frozen) return;
-    this.zoneOk = zoneOk;
     if (this.applySaved(saved)) return;
     this.pending = saved;
     this.pendingUntil = performance.now() + POSE_RETRY_MS;
     this.pendingOrigin.copyFrom(this.feet);
+  }
+
+  /**
+   * The world's colliders are built: start simulating. A pending saved pose
+   * gets a fresh retry window now (the build may have taken longer than it).
+   */
+  markReady(): void {
+    this.waiting = false;
+    if (this.pending) {
+      this.pendingUntil = performance.now() + POSE_RETRY_MS;
+      this.pendingOrigin.copyFrom(this.feet);
+      if (this.applySaved(this.pending)) this.pending = null;
+    }
   }
 
   private applySaved(s: SavedPose): boolean {
@@ -225,7 +246,8 @@ export class Player {
   }
 
   private savePoseNow(): void {
-    if (this.pending || this.frozen) return;
+    if (this.pending || this.frozen || this.waiting) return;
+    if (!canSavePose({ grounded: this.grounded, y: this.feet.y })) return;
     savePose({
       x: this.feet.x,
       y: this.feet.y,
@@ -278,7 +300,7 @@ export class Player {
         Math.min(PLAYER.pitchLimit, this.pitch + look.dy),
       );
     }
-    if (!this.frozen) {
+    if (!this.frozen && !this.waiting) {
       const move = input ? input.moveAxis() : { x: 0, y: 0 };
       const sprint = input?.sprint ?? false;
       const jump = input?.consumeJump() ?? false;
@@ -291,11 +313,12 @@ export class Player {
       if (this.cc) this.stepPhysics(dt, desired, jump);
       else this.stepFallback(dt, desired, jump);
       this.speed = Math.hypot(this.vel.x, this.vel.z);
+      this.checkFall(dt);
     } else {
       this.speed = 0;
     }
-    this.stepPending();
-    if (!this.frozen && this.speed > 0.05) {
+    if (!this.waiting) this.stepPending();
+    if (!this.frozen && !this.waiting && this.speed > 0.05) {
       const now = performance.now();
       if (now - this.lastSave >= POSE_SAVE_INTERVAL_MS) {
         this.lastSave = now;
@@ -309,6 +332,26 @@ export class Player {
       if (this.mode === "tp") this.avatar.update(dt);
     }
     this.placeCamera(dt);
+  }
+
+  /** Safety net: below the world, or airborne over "outside" too long. */
+  private checkFall(dt: number): void {
+    const outside =
+      !this.grounded &&
+      !!this.zoneOk &&
+      !this.zoneOk({
+        x: this.feet.x,
+        y: this.feet.y + PLAYER.eyeHeight,
+        z: this.feet.z,
+      });
+    this.airborneOutside = outside ? this.airborneOutside + dt : 0;
+    if (!isFallen({ y: this.feet.y, airborneOutsideS: this.airborneOutside }))
+      return;
+    this.airborneOutside = 0;
+    this.pending = null;
+    clearPose();
+    const sp = this.spawnPose;
+    this.teleport(sp ? sp.feet : new Vector3(0, 0.2, -8), sp?.yaw ?? 0);
   }
 
   private stepPhysics(dt: number, desired: Vector3, jump: boolean): void {
@@ -351,8 +394,6 @@ export class Player {
     this.feet.set(p.x, p.y - PLAYER.capsuleHeight / 2, p.z);
     this.vel.copyFrom(out);
     this.grounded = supported;
-    // Safety net: fell out of the world.
-    if (this.feet.y < -20) this.teleport(new Vector3(0, 0.2, -8), 0);
   }
 
   private stepFallback(dt: number, desired: Vector3, jump: boolean): void {
@@ -383,7 +424,6 @@ export class Player {
       body.position.y - PLAYER.capsuleHeight / 2,
       body.position.z,
     );
-    if (this.feet.y < -20) this.teleport(new Vector3(0, 0.2, -8), 0);
   }
 
   private placeCamera(dt: number): void {
