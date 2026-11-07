@@ -118,3 +118,6 @@ docs/superpowers
 frontend/public/assets/*
 !frontend/public/assets/NOTICE.md
 frontend/public/havok/
+
+# Runtime telemetry state (backend)
+backend/telemetry_state.json

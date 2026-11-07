@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { CampusSession } from "@/engine/contracts";
+import type { CampusSession, CampusStats } from "@/engine/contracts";
 
 // ============================================================================
 // TYPES
@@ -15,7 +15,11 @@ interface CampusStoreState {
   /** Wall-clock ms of the last meaningful update (null if none yet). */
   lastUpdated: number | null;
 
+  /** Building-wide control-room stats (null until the backend sends them). */
+  stats: CampusStats | null;
+
   setSessions: (sessions: CampusSession[]) => void;
+  setStats: (stats: CampusStats | null) => void;
   setConnected: (connected: boolean) => void;
   clear: () => void;
 }
@@ -43,7 +47,12 @@ export const useCampusStore = create<CampusStoreState>()((set) => ({
   sessions: [],
   connected: false,
   lastUpdated: null,
+  stats: null,
 
+  setStats: (stats) =>
+    set((state) =>
+      JSON.stringify(state.stats) === JSON.stringify(stats) ? state : { stats },
+    ),
   setSessions: (sessions) =>
     set((state) =>
       sessionsEqual(state.sessions, sessions)
@@ -51,10 +60,12 @@ export const useCampusStore = create<CampusStoreState>()((set) => ({
         : { sessions, lastUpdated: Date.now() },
     ),
   setConnected: (connected) => set({ connected }),
-  clear: () => set({ sessions: [], lastUpdated: null, connected: false }),
+  clear: () => set({ sessions: [], stats: null, lastUpdated: null, connected: false }),
 }));
 
 export const selectCampusSessions = (s: CampusStoreState): CampusSession[] =>
   s.sessions;
 export const selectCampusConnected = (s: CampusStoreState): boolean =>
   s.connected;
+export const selectCampusStats = (s: CampusStoreState): CampusStats | null =>
+  s.stats;

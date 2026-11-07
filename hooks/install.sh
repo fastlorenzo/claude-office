@@ -18,6 +18,7 @@ DEFAULT_PREFIXES="-Users-$USER-Repos-,-Users-$USER-"
 # Parse arguments
 STRIP_PREFIXES=""
 FORCE=0
+STATUSLINE=0
 while [[ $# -gt 0 ]]; do
     case $1 in
         --strip-prefixes)
@@ -28,12 +29,18 @@ while [[ $# -gt 0 ]]; do
             FORCE=1
             shift
             ;;
+        --statusline)
+            STATUSLINE=1
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--strip-prefixes 'prefix1,prefix2'] [--force]"
+            echo "Usage: $0 [--strip-prefixes 'prefix1,prefix2'] [--force] [--statusline]"
             echo "  --strip-prefixes  Comma-separated path prefixes to strip from project names"
             echo "  --force           Reset managed keys (prefixes/debug) to defaults, discarding user edits;"
             echo "                    the API key and any user-added keys are still preserved."
+            echo "  --statusline      Also wrap statusLine.command so status line telemetry (model, cost,"
+            echo "                    rate limits) reaches the office; uninstall.sh restores the original"
             exit 1
             ;;
     esac
@@ -132,6 +139,11 @@ echo "Configuring Claude settings..."
 # Use the python script to manage settings safely
 # Pass the hook command name (not full path) for cross-platform compatibility
 uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" install --hook-cmd "$HOOK_CMD"
+
+if [ "$STATUSLINE" = "1" ]; then
+    echo "Wrapping statusLine.command with the telemetry tee..."
+    uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" wrap-statusline --hook-cmd "$HOOK_CMD"
+fi
 
 echo ""
 echo "Done! Please restart Claude Code to apply changes."

@@ -59,6 +59,7 @@ from app.core.state_machine import OfficePhase, StateMachine
 from app.core.summary_backfill import SummaryBackfill
 from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
+from app.core.telemetry import get_telemetry_store
 from app.core.transcript_poller import init_transcript_poller
 from app.db.database import AsyncSessionLocal
 from app.db.models import EventRecord, SessionRecord
@@ -213,6 +214,7 @@ class EventProcessor:
         # restore (restore at most once per process), scan throttle, and a lock
         # so concurrent connects/flushes never replay the same session twice.
         self._summary_backfill = SummaryBackfill()
+        self._telemetry_last_broadcast = float("-inf")
         self._campus_restore_attempted: set[str] = set()
         self._campus_restore_lock = asyncio.Lock()
         self._campus_last_restore_scan: float | None = None
@@ -639,6 +641,7 @@ class EventProcessor:
             )
 
         if applied:
+            get_telemetry_store().record_event(event.session_id, event)
             sm.transition(event)
             await self._refresh_titles(sm, event.data.transcript_path)
 
@@ -806,6 +809,15 @@ class EventProcessor:
             return
         self._campus_flush_task = asyncio.create_task(self._flush_campus_broadcast())
 
+    def schedule_telemetry_broadcast(self) -> None:
+        """Debounced campus broadcast for a telemetry report, at most once per interval."""
+        interval = get_settings().TELEMETRY_BROADCAST_MIN_INTERVAL
+        now = time.monotonic()
+        if now - self._telemetry_last_broadcast < interval:
+            return
+        self._telemetry_last_broadcast = now
+        self._schedule_campus_broadcast()
+
     async def _flush_campus_broadcast(self) -> None:
         """Wait out the debounce window, then broadcast a single campus state."""
         try:
@@ -881,6 +893,7 @@ class EventProcessor:
             await self._mark_session_completed(sid)
         for sm in candidates:
             self._summary_backfill.schedule(sm, self._schedule_campus_broadcast)
+        get_telemetry_store().save()
         if changed and broadcast:
             await broadcast_campus_state(self.sessions, self._sessions_lock)
         return changed

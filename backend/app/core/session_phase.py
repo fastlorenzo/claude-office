@@ -16,6 +16,7 @@ __all__ = [
     "PhaseKind",
     "PhaseResult",
     "classify_bash",
+    "classify_tool",
     "classify_phase",
     "slim_tool_input",
 ]
@@ -240,3 +241,10 @@ def classify_phase(inp: PhaseInputs) -> PhaseResult:
     if inp.has_prompted:
         return PhaseResult("waiting_user", "Waiting for your reply")
     return PhaseResult("idle", "Idle")
+
+
+def classify_tool(
+    tool: str | None, tool_input: dict[str, Any] | None, subagents: int = 0
+) -> PhaseResult:
+    """Public classifier for a single tool call (used for activity stats)."""
+    return _classify_tool(tool, tool_input, subagents)

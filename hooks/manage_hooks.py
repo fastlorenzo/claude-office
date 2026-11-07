@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any
@@ -218,6 +219,89 @@ def uninstall_hooks(_hook_cmd: str, dry_run: bool = False) -> None:
         print("No hooks found to remove.")
 
 
+STATUSLINE_MARKER = "claude-office-hook statusline --"
+_STATUSLINE_BACKUP_NAME = "claude-office-statusline-original.json"
+
+
+def _statusline_backup_path() -> Path:
+    return get_settings_path().parent / _STATUSLINE_BACKUP_NAME
+
+
+def is_wrapped(command: object) -> bool:
+    return isinstance(command, str) and STATUSLINE_MARKER in command
+
+
+def wrap_command(hook_cmd: str, original: str) -> str:
+    return f"{hook_cmd} statusline -- sh -c {shlex.quote(original)}"
+
+
+def _unwrap_command(command: str) -> str | None:
+    """Recover the original command from a wrapped one (backup-less fallback)."""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return None
+    for i in range(len(parts) - 3):
+        if parts[i : i + 2] == ["statusline", "--"] and parts[i + 2 : i + 4] == ["sh", "-c"]:
+            return parts[i + 4] if i + 4 < len(parts) else None
+    return None
+
+
+def wrap_statusline(hook_cmd: str, dry_run: bool = False) -> bool:
+    """Wrap ``statusLine.command`` in the tee. Idempotent; returns True if changed."""
+    settings_path = get_settings_path()
+    settings = load_settings(settings_path)
+    sl = settings.get("statusLine")
+    if not isinstance(sl, dict) or not isinstance(sl.get("command"), str):
+        print("  [Skip] statusLine: no command configured.")
+        return False
+    if is_wrapped(sl["command"]):
+        print("  [Skip] statusLine: already wrapped.")
+        return False
+    if not dry_run:
+        backup = _statusline_backup_path()
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        backup.write_text(json.dumps(sl, indent=2) + "\n", encoding="utf-8")
+    new_sl: dict[str, Any] = dict(sl)
+    new_sl["command"] = wrap_command(hook_cmd, sl["command"])
+    settings["statusLine"] = new_sl
+    print(f"  [Wrap] statusLine: {new_sl['command']}")
+    if not dry_run:
+        save_settings(settings_path, settings)
+    return True
+
+
+def unwrap_statusline(dry_run: bool = False) -> bool:
+    """Restore the original ``statusLine`` exactly. Returns True if changed."""
+    settings_path = get_settings_path()
+    settings = load_settings(settings_path)
+    sl = settings.get("statusLine")
+    if not isinstance(sl, dict) or not is_wrapped(sl.get("command")):
+        print("  [Skip] statusLine: not wrapped.")
+        return False
+    backup = _statusline_backup_path()
+    restored: dict[str, Any] | None = None
+    if backup.exists():
+        try:
+            loaded = json.loads(backup.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("command"), str):
+                restored = loaded
+        except (OSError, ValueError):
+            restored = None
+    if restored is None:
+        original = _unwrap_command(sl["command"])
+        if original is None:
+            print("  [Warn] statusLine: cannot recover the original command; left as is.")
+            return False
+        restored = {**sl, "command": original}
+    settings["statusLine"] = restored
+    print(f"  [Unwrap] statusLine: {restored['command']}")
+    if not dry_run:
+        save_settings(settings_path, settings)
+        backup.unlink(missing_ok=True)
+    return True
+
+
 def convert_camel_to_snake(name: str) -> str:
     import re
 
@@ -227,7 +311,11 @@ def convert_camel_to_snake(name: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Manage Claude Office hooks.")
-    parser.add_argument("action", choices=["install", "uninstall"], help="Action to perform")
+    parser.add_argument(
+        "action",
+        choices=["install", "uninstall", "wrap-statusline", "unwrap-statusline"],
+        help="Action to perform",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Don't save changes")
     parser.add_argument("--hook-cmd", help="Path to claude-office-hook command", required=True)
 
@@ -237,6 +325,10 @@ def main():
         install_hooks(args.hook_cmd, args.dry_run)
     elif args.action == "uninstall":
         uninstall_hooks(args.hook_cmd, args.dry_run)
+    elif args.action == "wrap-statusline":
+        wrap_statusline(args.hook_cmd, args.dry_run)
+    elif args.action == "unwrap-statusline":
+        unwrap_statusline(args.dry_run)
 
 
 if __name__ == "__main__":

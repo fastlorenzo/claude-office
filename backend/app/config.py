@@ -34,6 +34,11 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8000",
     ]
 
+    # Persisted telemetry rollups (today's cost, series, rate-limit samples).
+    TELEMETRY_STATE_PATH: str = str(_BACKEND_DIR / "telemetry_state.json")
+    # Min spacing of telemetry-triggered campus broadcasts.
+    TELEMETRY_BROADCAST_MIN_INTERVAL: float = 1.0
+
     DATABASE_URL: str = f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH}"
     GIT_POLL_INTERVAL: int = 5
 

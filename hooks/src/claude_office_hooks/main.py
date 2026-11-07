@@ -100,8 +100,55 @@ try:
             # Record the failure but never disrupt the user (always swallow).
             log_error(exc, "send_event failed")
 
+    def _statusline_main(argv: list[str]) -> int:
+        """``statusline -- <cmd...>``: tee status line JSON to the backend, run cmd."""
+        from claude_office_hooks.statusline import (
+            POST_TIMEOUT,
+            read_stdin,
+            run_statusline,
+            telemetry_url,
+        )
+
+        command = argv[1:] if argv and argv[0] == "--" else argv
+        url = telemetry_url(API_URL)
+
+        def post(data: bytes) -> None:
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            api_key = get_api_key()
+            if api_key:
+                headers["X-API-Key"] = api_key
+            req = urllib.request.Request(url, data=data, headers=headers)
+            if url.lower().startswith("https"):
+                urllib.request.urlopen(req, timeout=POST_TIMEOUT).close()
+                return
+            opener = urllib.request.OpenerDirector()
+            for handler in (
+                urllib.request.ProxyHandler(),
+                urllib.request.HTTPHandler(),
+                urllib.request.HTTPDefaultErrorHandler(),
+                urllib.request.HTTPErrorProcessor(),
+            ):
+                opener.add_handler(handler)
+            opener.open(req, timeout=POST_TIMEOUT).close()
+
+        def write(out: bytes) -> None:
+            real = sys.__stdout__
+            if real is not None:
+                real.buffer.write(out)
+                real.buffer.flush()
+
+        return run_statusline(command, read_stdin(), post, write)
+
     def main() -> None:
         """Parse arguments, read stdin, map the event, and POST to backend."""
+        if len(sys.argv) > 1 and sys.argv[1] == "statusline":
+            try:
+                code = _statusline_main(sys.argv[2:])
+            except Exception as exc:
+                log_error(exc, "statusline failed")
+                code = 0
+            sys.exit(code)
+
         # Handle --version before argparse (which requires event_type positional arg)
         if "--version" in sys.argv or "-V" in sys.argv:
             real_stdout = sys.__stdout__

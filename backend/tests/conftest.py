@@ -138,3 +138,13 @@ def _no_real_claude_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
 
     monkeypatch.setattr(get_settings(), "CLAUDE_SESSIONS_DIR", str(tmp_path / "no-registry"))
     session_liveness._cache.clear()  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_telemetry_store(tmp_path: Path) -> Iterator[None]:
+    """Fresh in-memory telemetry store (no state file) per test."""
+    from app.core.telemetry import TelemetryStore, reset_telemetry_store
+
+    reset_telemetry_store(TelemetryStore(None))
+    yield
+    reset_telemetry_store(None)

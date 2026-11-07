@@ -189,9 +189,40 @@ export type Since = string | null;
 export type Gitbranch = string | null;
 export type Ended = boolean;
 export type Alive = boolean | null;
+export type Model = string | null;
+export type Effort = string | null;
+export type Contextusedpct = number | null;
+export type Contexttokens = number | null;
+export type Contextwindow = number | null;
+export type Costusd = number | null;
+export type Linesadded = number | null;
+export type Linesremoved = number | null;
+export type Durationms = number | null;
+export type Cachewarm = boolean | null;
+export type Cacheexpiresat = string | null;
+export type Repo = string | null;
+export type Outputstyle = string | null;
+export type Updatedat = string;
+export type Eventspermin = number[];
+export type Toolcalls = number;
+export type Subagentsspawned = number;
+export type Testruns = number;
+export type Testfailures = number;
+export type Errors = number;
 export type Lasteventat = string | null;
 export type Lastupdated = string;
 export type Sessions = CampusSession[];
+export type Usedpct = number;
+export type Resetsat = string | null;
+export type Projectedpct = number | null;
+export type Costtodayusd = number | null;
+export type Burnusdperhour = number | null;
+export type Activesubagents = number;
+export type Eventspermin1 = number[];
+export type Costseries = number[];
+export type Linesaddedtoday = number | null;
+export type Linesremovedtoday = number | null;
+export type Updatedat1 = string;
 export type Lastupdated1 = string;
 export type Path = string;
 /**
@@ -723,6 +754,8 @@ export interface CampusSession {
   gitBranch?: Gitbranch;
   ended?: Ended;
   alive?: Alive;
+  telemetry?: SessionTelemetry | null;
+  activity?: SessionActivityStats | null;
   lastEventAt?: Lasteventat;
   lastUpdated: Lastupdated;
   [k: string]: unknown;
@@ -774,6 +807,44 @@ export interface SessionPhase {
   [k: string]: unknown;
 }
 /**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "SessionTelemetry".
+ */
+export interface SessionTelemetry {
+  model?: Model;
+  effort?: Effort;
+  contextUsedPct?: Contextusedpct;
+  contextTokens?: Contexttokens;
+  contextWindow?: Contextwindow;
+  costUsd?: Costusd;
+  linesAdded?: Linesadded;
+  linesRemoved?: Linesremoved;
+  durationMs?: Durationms;
+  cacheWarm?: Cachewarm;
+  cacheExpiresAt?: Cacheexpiresat;
+  repo?: Repo;
+  outputStyle?: Outputstyle;
+  updatedAt: Updatedat;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "SessionActivityStats".
+ */
+export interface SessionActivityStats {
+  eventsPerMin?: Eventspermin;
+  toolMix?: Toolmix;
+  toolCalls?: Toolcalls;
+  subagentsSpawned?: Subagentsspawned;
+  testRuns?: Testruns;
+  testFailures?: Testfailures;
+  errors?: Errors;
+  [k: string]: unknown;
+}
+export interface Toolmix {
+  [k: string]: number;
+}
+/**
  * The full campus feed broadcast over ``/ws/campus``.
  *
  * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
@@ -781,8 +852,40 @@ export interface SessionPhase {
  */
 export interface CampusState {
   sessions?: Sessions;
+  stats?: CampusStats | null;
   lastUpdated: Lastupdated1;
   [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "CampusStats".
+ */
+export interface CampusStats {
+  fiveHour?: RateLimitWindow | null;
+  sevenDay?: RateLimitWindow | null;
+  costTodayUsd?: Costtodayusd;
+  burnUsdPerHour?: Burnusdperhour;
+  sessionsByStatus?: Sessionsbystatus;
+  activeSubagents?: Activesubagents;
+  eventsPerMin?: Eventspermin1;
+  costSeries?: Costseries;
+  linesAddedToday?: Linesaddedtoday;
+  linesRemovedToday?: Linesremovedtoday;
+  updatedAt: Updatedat1;
+  [k: string]: unknown;
+}
+/**
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "RateLimitWindow".
+ */
+export interface RateLimitWindow {
+  usedPct: Usedpct;
+  resetsAt?: Resetsat;
+  projectedPct?: Projectedpct;
+  [k: string]: unknown;
+}
+export interface Sessionsbystatus {
+  [k: string]: number;
 }
 /**
  * A file with changes in the working tree or index.

@@ -18,9 +18,11 @@ from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
 from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
+from app.core.telemetry import get_telemetry_store
 from app.models.agents import Agent, AgentState, Boss, BossState, OfficeState
 from app.models.common import TodoItem, TodoStatus
 from app.models.overview import OverviewBucket
+from app.models.telemetry import CampusStats, SessionActivityStats, SessionTelemetry
 
 if TYPE_CHECKING:
     from app.core.state_machine import StateMachine
@@ -93,6 +95,8 @@ class CampusSession(BaseModel):
     ended: bool = False
     # Process liveness: True/False from Claude Code's pid registry, None = unknown.
     alive: bool | None = None
+    telemetry: SessionTelemetry | None = None
+    activity: SessionActivityStats | None = None
     last_event_at: datetime | None = None
     last_updated: datetime
 
@@ -103,6 +107,7 @@ class CampusState(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     sessions: list[CampusSession] = Field(default_factory=lambda: cast(list[CampusSession], []))
+    stats: CampusStats | None = None
     last_updated: datetime
 
 
@@ -213,6 +218,7 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     objective = _one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS)
 
     settings = get_settings()
+    store = get_telemetry_store()
     activity = last_activity(sm.last_event_at, sm.title_offset_path)
     bucket = overview_bucket(sm)
     if sm.alive is not True and is_stale(activity, settings.CAMPUS_STALE_SECONDS):
@@ -222,6 +228,8 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
         session_id=session_id,
         bucket=bucket,
         alive=sm.alive,
+        telemetry=store.session_telemetry(session_id),
+        activity=store.session_activity(session_id),
         last_event_at=sm.last_event_at,
         boss=gs.boss,
         agents=gs.agents,
@@ -266,7 +274,17 @@ def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
         ((sid, sm) for sid, sm in sessions.items() if not sm.campus_hidden),
         key=lambda kv: kv[0],
     )
+    built = [build_campus_session(sid, sm) for sid, sm in items]
+    by_status: dict[str, int] = {}
+    subagents = 0
+    for cs in built:
+        key = "ended" if cs.ended else cs.bucket
+        by_status[key] = by_status.get(key, 0) + 1
+        if not cs.ended:
+            subagents += sum(1 for a in cs.agents if a.state not in _INACTIVE_AGENT_STATES)
+    now = datetime.now(UTC)
     return CampusState(
-        sessions=[build_campus_session(sid, sm) for sid, sm in items],
-        last_updated=datetime.now(UTC),
+        sessions=built,
+        stats=get_telemetry_store().stats(by_status, subagents),
+        last_updated=now,
     )

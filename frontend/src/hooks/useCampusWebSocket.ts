@@ -3,7 +3,7 @@
 import { WS_BASE } from "@/utils/api";
 import { useCallback, useEffect, useRef } from "react";
 import { useCampusStore } from "@/stores/campusStore";
-import type { CampusSession } from "@/engine/contracts";
+import type { CampusSession, CampusStats } from "@/engine/contracts";
 
 /**
  * Connects to the global `/ws/campus` feed that carries one boss snapshot per
@@ -31,6 +31,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
   }, [enabled]);
 
   const setSessions = useCampusStore((s) => s.setSessions);
+  const setStats = useCampusStore((s) => s.setStats);
   const setConnected = useCampusStore((s) => s.setConnected);
 
   const connect = useCallback(() => {
@@ -63,13 +64,14 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
       try {
         const msg = JSON.parse(event.data) as {
           type?: string;
-          state?: { sessions?: CampusSession[] };
+          state?: { sessions?: CampusSession[]; stats?: CampusStats | null };
         };
         if (msg.type === "state_update") {
           // Validate the shape before applying so a malformed payload can't
           // throw at render time.
           if (Array.isArray(msg.state?.sessions)) {
             setSessions(msg.state.sessions);
+            setStats(msg.state.stats ?? null);
           } else {
             console.warn("[campus WS] ignoring malformed state_update frame");
           }
@@ -102,7 +104,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
         }, delay);
       }
     };
-  }, [setConnected, setSessions]);
+  }, [setConnected, setSessions, setStats]);
 
   // Expose the latest connect to the reconnect timer.
   useEffect(() => {

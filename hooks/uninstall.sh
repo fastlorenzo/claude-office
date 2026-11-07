@@ -8,6 +8,9 @@ HOOK_CMD="claude-office-hook"
 
 echo "Uninstalling hooks..."
 
+# Restore the original statusLine command first (no-op when not wrapped).
+uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" unwrap-statusline --hook-cmd "$HOOK_CMD"
+
 # Use the python script to remove settings
 uv run -p 3.14 "$HOOKS_DIR/manage_hooks.py" uninstall --hook-cmd "$HOOK_CMD"
 

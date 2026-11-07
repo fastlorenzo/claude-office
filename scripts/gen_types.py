@@ -26,6 +26,12 @@ from app.models.campus import (  # noqa: E402  # type: ignore[import]
     CampusState,
     SessionPhase,
 )
+from app.models.telemetry import (  # noqa: E402  # type: ignore[import]
+    CampusStats,
+    RateLimitWindow,
+    SessionActivityStats,
+    SessionTelemetry,
+)
 from app.models.common import (  # noqa: E402  # type: ignore[import]
     BubbleContent,
     SpeechContent,
@@ -105,6 +111,10 @@ MODELS = [
     CampusSession,
     CampusState,
     SessionPhase,
+    CampusStats,
+    RateLimitWindow,
+    SessionActivityStats,
+    SessionTelemetry,
 ]
 
 # Generate combined JSON schema with camelCase field names (by_alias=True)
