@@ -17,19 +17,24 @@
  *   - control       : sealed (its own walls); while the feed cameras run,
  *                     rooms stay enabled for the RTTs at impostor detail
  *   - outside       : view cone + distance only
+ *   - factory floor : (eye y < FACTORY_EYE_Y) the rooms sit on columns above:
+ *                     `impostor` when their underside or glass front is in
+ *                     the cone, else `hidden`; never `full`
  *
  * `VisibilityController` applies the result at ~5 Hz (rooms, screens, actors)
  * with a short grace period before hiding, so quick turns never pop.
  */
 
 import type { TransformNode, Vector3 } from "@/engine/babylon";
-import type { Zone } from "@/engine/contracts";
+import type { Zone3 } from "@/engine/layout/factoryLayout";
 import type { ActorHub } from "@/engine/characters/ActorHub";
 import type { RoomDetail, ScreenHub } from "@/engine/screens/ScreenHub";
 
 export type { RoomDetail };
 
 export const IMPOSTOR_M = 30;
+/** Eye below this y is in a factory zone (matches factoryLayout FACTORY_Y). */
+export const FACTORY_EYE_Y = -1.5;
 /**
  * Pods (sessions) of a visible project room farther than this from the eye
  * drop to impostor detail (no skinned characters / live screens): one room
@@ -57,7 +62,7 @@ export interface VisInput {
   yaw: number;
   /** Horizontal half field of view (rad), including a safety margin. */
   halfFov: number;
-  zone: Zone;
+  zone: Zone3;
   rooms: readonly VisRoom[];
   hallLength: number;
   hallHalfWidth: number;
@@ -84,6 +89,20 @@ export function footprintDistance(
 
 const SAMPLES = 9;
 
+/** Does any point of the room's underside (its footprint) fall in the cone? */
+function undersideVisible(inp: VisInput, r: VisRoom): boolean {
+  const U = 5;
+  for (let i = 0; i < U; i++)
+    for (let j = 0; j < U; j++) {
+      const dx = r.minX + ((r.maxX - r.minX) * i) / (U - 1) - inp.eye.x;
+      const dz = r.minZ + ((r.maxZ - r.minZ) * j) / (U - 1) - inp.eye.z;
+      if (Math.hypot(dx, dz) > MAX_VIEW_M) continue;
+      if (Math.abs(wrapAngle(Math.atan2(dx, dz) - inp.yaw)) <= inp.halfFov)
+        return true;
+    }
+  return false;
+}
+
 /** Does any point of the room's glass front fall in the cone (and portal)? */
 function frontVisible(
   inp: VisInput,
@@ -109,6 +128,17 @@ export function computeVisibility(inp: VisInput): Map<string, RoomDetail> {
   const { eye, zone } = inp;
   const own = zone.kind === "room" ? (zone.projectId ?? zone.sessionId) : null;
   const ownRoom = own ? inp.rooms.find((r) => r.id === own) : undefined;
+
+  if (eye.y < FACTORY_EYE_Y) {
+    for (const r of inp.rooms) {
+      const seen =
+        footprintDistance(eye, r) < ALWAYS_M ||
+        undersideVisible(inp, r) ||
+        frontVisible(inp, r, null);
+      out.set(r.id, seen ? "impostor" : "hidden");
+    }
+    return out;
+  }
 
   for (const r of inp.rooms) {
     const near = footprintDistance(eye, r);

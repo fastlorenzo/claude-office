@@ -1,14 +1,25 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import { STATUS_COLORS } from "@/engine/contracts";
+import {
+  allStairs,
+  buildFactoryLayout,
+  type FactoryLayout,
+} from "@/engine/layout/factoryLayout";
 import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
 import { getWorld } from "../worldRef";
 import { clip, sessionHeadline } from "./sessionGlance";
+
+type Level = "office" | "factory";
+const FACTORY_ZONES = new Set(["factory", "cell", "dock", "stair"]);
+
+/** Fast-travel targets on the factory floor (World.teleport handles these). */
+export type FactoryTeleport = { factoryCell: string } | { factoryDock: true };
 
 /**
  * Top-down SVG of the building. World +Z points up the screen (lobby at the
@@ -20,6 +31,16 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
   const pose = useWorldUiStore((s) => s.pose);
   const campus = useCampusStore((s) => s.sessions);
   const close = useWorldUiStore((s) => s.close);
+
+  const [pick, setPick] = useState<Level | null>(null);
+  const factory = useMemo<FactoryLayout | null>(
+    () => (layout ? buildFactoryLayout(layout) : null),
+    [layout],
+  );
+  // Auto: follow the player's level until a toggle is chosen.
+  const auto: Level =
+    pose && FACTORY_ZONES.has(pose.zone.kind) ? "factory" : "office";
+  const level: Level = pick ?? auto;
 
   const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
   const objectives = useMemo(
@@ -56,9 +77,185 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
     getWorld()?.teleport(to);
     close("minimap");
   };
+  const travelFactory = (to: FactoryTeleport): void => {
+    // Same teleport entry point as the office targets (World widens its union).
+    (
+      getWorld() as unknown as { teleport(t: FactoryTeleport): void } | null
+    )?.teleport(to);
+    close("minimap");
+  };
+
+  const toggle = (
+    <div
+      className="absolute left-3 top-3 z-10 flex gap-1 text-xs"
+      role="group"
+      aria-label={t("hud.minimap.level")}
+    >
+      {(["office", "factory"] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          aria-pressed={level === l}
+          onClick={() => setPick(l)}
+          className={`rounded px-2 py-1 ${
+            level === l
+              ? "bg-slate-600 text-white"
+              : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+          }`}
+        >
+          {t(l === "office" ? "hud.minimap.office" : "hud.minimap.factory")}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (level === "factory" && factory) {
+    const fb = factory.bounds;
+    const fx0 = fb.min.x - pad;
+    const fw = fb.max.x - fb.min.x + pad * 2;
+    const fzTop = fb.max.z + pad;
+    const fh = fb.max.z - fb.min.z + pad * 2;
+    const rect = (r: { x0: number; x1: number; z0: number; z1: number }) => ({
+      x: r.x0,
+      y: -r.z1,
+      width: r.x1 - r.x0,
+      height: r.z1 - r.z0,
+    });
+    const ml = factory.mainLine;
+    return (
+      <div className="relative flex h-full min-h-[240px] items-center justify-center p-3">
+        {toggle}
+        <svg
+          viewBox={`${fx0} ${-fzTop} ${fw} ${fh}`}
+          className="h-full max-h-full w-full max-w-full"
+          role="img"
+          aria-label={t("hud.minimap.factory")}
+        >
+          {factory.cells.map((c) => {
+            const name =
+              layout.projects.find((p) => p.projectId === c.projectId)?.name ??
+              c.projectId;
+            return (
+              <g
+                key={c.projectId}
+                className="cursor-pointer"
+                onClick={() => travelFactory({ factoryCell: c.projectId })}
+                role="button"
+                aria-label={`${t("hud.minimap.cell")}: ${name}`}
+              >
+                <title>{name}</title>
+                <rect
+                  {...rect(c.rect)}
+                  fill="#3b82f61a"
+                  stroke="#60a5fa"
+                  strokeWidth={0.14}
+                  rx={0.3}
+                />
+                {c.lanes.map((ln) => (
+                  <line
+                    key={ln.index}
+                    x1={ln.intakeX}
+                    x2={ln.gateX}
+                    y1={-ln.z}
+                    y2={-ln.z}
+                    stroke="#94a3b8"
+                    strokeWidth={0.2}
+                    strokeLinecap="round"
+                  />
+                ))}
+                <line
+                  x1={c.trunk.x}
+                  x2={c.trunk.x}
+                  y1={-c.trunk.z0}
+                  y2={-c.trunk.z1}
+                  stroke="#64748b"
+                  strokeWidth={0.3}
+                />
+                <text
+                  x={(c.rect.x0 + c.rect.x1) / 2}
+                  y={-c.z0 - 0.7}
+                  fill="#e2e8f0"
+                  fontSize={0.9}
+                  fontWeight={700}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {clip(name, 14)}
+                </text>
+              </g>
+            );
+          })}
+          <line
+            x1={ml.x}
+            x2={ml.x}
+            y1={-ml.z0}
+            y2={-ml.z1}
+            stroke="#f59e0b"
+            strokeWidth={0.5}
+            strokeLinecap="round"
+          >
+            <title>{t("hud.minimap.mainLine")}</title>
+          </line>
+          {allStairs(factory).map((st) => (
+            <rect
+              key={st.id}
+              {...rect(st.rect)}
+              fill="#a5b4fc55"
+              stroke="#818cf8"
+              strokeWidth={0.08}
+            >
+              <title>{t("hud.minimap.stairs")}</title>
+            </rect>
+          ))}
+          <g
+            className="cursor-pointer"
+            onClick={() => travelFactory({ factoryDock: true })}
+            role="button"
+            aria-label={t("hud.minimap.dock")}
+          >
+            <rect
+              {...rect(factory.dock)}
+              fill="#D977571f"
+              stroke="#D97757"
+              strokeWidth={0.14}
+              rx={0.4}
+            />
+            <text
+              x={(factory.dock.x0 + factory.dock.x1) / 2}
+              y={-(factory.dock.z0 + factory.dock.z1) / 2}
+              fill="#f0a58b"
+              fontSize={0.9}
+              fontWeight={600}
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {t("hud.minimap.dock")}
+            </text>
+          </g>
+          {pose ? (
+            <g
+              transform={`translate(${pose.x} ${-pose.z}) rotate(${
+                (pose.yaw * 180) / Math.PI
+              })`}
+              pointerEvents="none"
+            >
+              <path
+                d="M0 -0.95 L0.65 0.7 L0 0.3 L-0.65 0.7 Z"
+                fill="#D97757"
+                stroke="#fff"
+                strokeWidth={0.12}
+                strokeLinejoin="round"
+              />
+            </g>
+          ) : null}
+        </svg>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full min-h-[240px] items-center justify-center p-3">
+    <div className="relative flex h-full min-h-[240px] items-center justify-center p-3">
+      {factory ? toggle : null}
       <svg
         viewBox={`${x0} ${-zTop} ${w} ${h}`}
         className="h-full max-h-full w-full max-w-full"

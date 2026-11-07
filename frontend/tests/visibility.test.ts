@@ -113,6 +113,35 @@ describe("computeVisibility", () => {
   });
 });
 
+describe("factory floor rule", () => {
+  const floorEye: [number, number, number] = [0, -4.3, layout.hall.length / 2];
+
+  it("from the floor rooms are at most impostor, never full", () => {
+    for (const yaw of [0, 90, 180, 270]) {
+      const m = vis(floorEye, yaw, { kind: "factory" });
+      for (const d of m.values()) expect(d).not.toBe("full");
+    }
+  });
+
+  it("rooms above the cone are hidden, rooms in it impostor", () => {
+    const z = layout.hall.length / 2;
+    const ahead = layout.projects.filter((r) => r.bounds.min.z > z + 10);
+    const m = vis([0, -4.3, z], 0, { kind: "factory" });
+    expect(ahead.every((r) => m.get(r.projectId) === "impostor")).toBe(true);
+    // stand at the far end looking at the dock: everything behind is hidden
+    const e = layout.hall.length - 1;
+    const m2 = vis([0, -4.3, e], 0, { kind: "factory" });
+    const behind = layout.projects.filter((r) => r.bounds.max.z < e - 10);
+    expect(behind.length).toBeGreaterThan(0);
+    expect(behind.every((r) => m2.get(r.projectId) === "hidden")).toBe(true);
+  });
+
+  it("office zones keep their behaviour", () => {
+    const m = vis([own0.origin.x, 1.7, own0.origin.z], 90, roomZone(own0));
+    expect(shown(m)).toEqual([own0.projectId]);
+  });
+});
+
 describe("pod detail", () => {
   it("drops far pods of a visible room to impostor", () => {
     expect(podDetail("full", 2)).toBe("full");
