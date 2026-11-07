@@ -18,6 +18,7 @@ from app.core.ci_poller import get_ci_poller
 from app.core.projects import ProjectRef, get_project_ref, resolve_project
 from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
+from app.core.session_root import find_session_root
 from app.core.session_summary import extract_refs, project_name_for_root, resolve_summary
 from app.core.summary_service import OBJECTIVE_MAX_CHARS
 from app.core.telemetry import get_telemetry_store
@@ -220,6 +221,10 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     from app.services.git_service import git_service
 
     root = git_service.get_session_root(session_id)
+    if root is None:
+        root = find_session_root(session_id, sm.title_offset_path)
+        if root:
+            git_service.configure(session_id=session_id, project_root=root)
     branch = get_branch(root)
     proj = resolve_project(root)
     session_name = _one_line(sm.custom_title, SESSION_NAME_MAX_CHARS)

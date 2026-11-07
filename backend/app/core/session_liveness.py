@@ -46,6 +46,7 @@ class RegistryEntry:
     pid: int
     session_id: str
     proc_start: str | None
+    cwd: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,15 @@ def load_registry(directory: str | Path, now: float | None = None) -> SessionReg
         sid = data.get("sessionId")
         ps = data.get("procStart")
         if isinstance(pid, int) and isinstance(sid, str) and sid:
-            entries.append(RegistryEntry(pid, sid, str(ps) if ps is not None else None))
+            cwd = data.get("cwd")
+            entries.append(
+                RegistryEntry(
+                    pid,
+                    sid,
+                    str(ps) if ps is not None else None,
+                    cwd if isinstance(cwd, str) and cwd else None,
+                )
+            )
     reg = SessionRegistry(tuple(entries)) if entries else None
     _cache[key] = (ts, reg)
     return reg
