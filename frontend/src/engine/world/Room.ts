@@ -1,17 +1,16 @@
 /**
- * A session room: glass-fronted office off the hall.
+ * A session POD inside its project team room (Room = one session).
  *
- * Static shell (built in the room's local frame, merged per material):
- * warm plank floor, plaster ceiling with recessed light panels, a full-height
- * glazed front with aluminium mullions, a frosted privacy band and a door
- * gap, a graphite pier carrying the digital door sign, an LED panel over the
- * door (project + status in words), a per-room accent wall,
- * skirting. Furniture comes from the AssetLibrary (thin instances), screens
- * and characters from the actors agent's classes. Live state (label, status,
- * monitor lines, todos, boss, agents) is cached so the room can be rebuilt.
+ * Static furniture is the shared thin-instanced pod prefab (ProjectShell
+ * "pod": bench of 8 desks + chairs, the lead's desk, nameplate post,
+ * whiteboard stand, zone rug); colliders + desk plants are per pod. Live:
+ * the lead's and subagents' monitors, the mobile whiteboard (todos), the pod
+ * nameplate monitor (session name, summary, phase) and the characters. Live
+ * state (label, status, monitor lines, todos, boss, agents) is cached so the
+ * pod can be rebuilt.
  *
- * Room local frame (contracts): X across the hall (door wall at -X), Z along
- * the hall, origin at the room centre on the floor.
+ * Pod frame (contracts): origin on the room's circulation spine at the pod
+ * centre, +Z into the room, X along the hall.
  */
 import {
   Mesh,
@@ -19,45 +18,29 @@ import {
   TransformNode,
   Vector3,
   type AbstractMesh,
-  type DynamicTexture,
 } from "@/engine/babylon";
-import type {
-  CampusSession,
-  InteractionTarget,
-  RoomLayout,
-  RoomStatus,
-  Vec3,
-} from "@/engine/contracts";
-import { LAYOUT } from "@/engine/contracts";
+import type { CampusSession, RoomLayout, RoomStatus } from "@/engine/contracts";
 import type { Agent, TodoItem } from "@/types";
 import type { Boss1 as Boss } from "@/types/generated";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import { CharacterActor } from "@/engine/characters/CharacterActor";
 import type { Lod } from "@/engine/characters/types";
-import { FixturePoint, type Lighting } from "@/engine/fx/Lighting";
+import type { Lighting } from "@/engine/fx/Lighting";
 import type { PostFx } from "@/engine/fx/PostFx";
 import type { Materials } from "@/engine/materials/Materials";
-import { framedSink, type Colliders } from "@/engine/physics/Colliders";
+import type { Colliders } from "@/engine/physics/Colliders";
 import { AgentMonitor, BossMonitor } from "@/engine/screens/Monitor";
+import { DoorSign } from "@/engine/screens/DoorSign";
 import type { LabelLayer } from "@/engine/screens/LabelLayer";
 import { WhiteboardScreen } from "@/engine/screens/Whiteboard";
 import { agentScreenText } from "@/engine/logic/monitorText";
 import {
-  DOOR_BAND,
-  DOOR_BAND_FACE,
-  DOOR_H,
-  FONT_STACK,
-  makeTexture,
-  partitionColliders,
-  texturedPlane,
-} from "@/engine/world/architecture";
-import { RoomShellModule, ROOM_PIER } from "@/engine/world/RoomShell";
-import {
-  ledContent,
-  roomSignData,
-  type RoomSignData,
-} from "@/engine/world/RoomSign";
-import { LedPanel } from "@/engine/world/LedPanel";
+  formatElapsed,
+  sessionPhase,
+  sessionSummary,
+} from "@/engine/logic/sessionInfo";
+import { toWorld } from "@/engine/layout/buildingLayout";
+import { frameMatrix, ShellModule } from "@/engine/world/ProjectShell";
 
 export interface RoomContext {
   scene: Scene;
@@ -68,18 +51,6 @@ export interface RoomContext {
   fx: PostFx | null;
   labels: LabelLayer;
 }
-
-/** Muted felt colours (one per room, cycling): sage, clay, slate, sand, … */
-const ACCENTS = [
-  "#7F927F",
-  "#A87E66",
-  "#6C7C90",
-  "#B3A07E",
-  "#8C7D72",
-  "#5F7470",
-  "#9A7A7A",
-  "#6F8A8E",
-];
 
 const BOSS_COLOR = "#D97757";
 const NEAR = 12;
@@ -95,10 +66,7 @@ export class Room {
   private selected = false;
   private readonly group: string;
   private readonly statics: Mesh[] = [];
-  private led: LedPanel | null = null;
-  private doorTarget: InteractionTarget | null = null;
-  private plaque: Mesh | null = null;
-  private plaqueTex: DynamicTexture | null = null;
+  private sign: DoorSign | null = null;
   private releaseShell: (() => void) | null = null;
   private campus: CampusSession | null = null;
   private bossMonitor: BossMonitor | null = null;
@@ -135,132 +103,48 @@ export class Room {
     return this.layout;
   }
 
-  /** Local → world point. */
-  private w(lx: number, y: number, lz: number): Vec3 {
-    const c = Math.cos(this.layout.yaw);
-    const s = Math.sin(this.layout.yaw);
-    const o = this.layout.origin;
-    return { x: o.x + lx * c + lz * s, y: o.y + y, z: o.z - lx * s + lz * c };
-  }
-
   private build(): void {
-    const { scene, materials, assets, colliders } = this.ctx;
+    const { scene, materials, assets, colliders, lighting } = this.ctx;
     const L = this.layout;
-    const hx = L.size.d / 2;
-    const hz = L.size.w / 2;
-    const H = L.size.h;
-    const doorHalf = LAYOUT.DOOR_W / 2;
-    const cols = framedSink(
-      colliders,
-      new Vector3(L.origin.x, L.origin.y, L.origin.z),
-      L.yaw,
-    );
-    // Static architecture: one shared thin-instanced module for all rooms.
-    const shell = RoomShellModule.get(scene, materials, this.ctx.lighting, L);
-    const accent = ACCENTS[L.slot.index % ACCENTS.length];
-    this.releaseShell = shell.add(this.root.computeWorldMatrix(true), accent);
-    for (const p of shell.localFixtures) {
-      const wp = this.w(p.x, p.y, p.z);
-      const spec = { ...p.spec };
-      if (spec.size)
-        spec.size = { ...spec.size, yaw: (spec.size.yaw ?? 0) + L.yaw };
-      this.fixtures.push(new FixturePoint(wp.x, wp.y, wp.z, spec));
-    }
+    const f = { ox: L.origin.x, oz: L.origin.z, yaw: L.yaw };
+    // Static furniture: one shared thin-instanced prefab for all pods.
+    const shell = ShellModule.get(scene, materials, lighting, "pod");
+    this.releaseShell = shell.add(frameMatrix(f));
     this.statics.push(...shell.parts);
-    const { z0: pierZ0, z1: pierZ1 } = ROOM_PIER;
-    const pz = (pierZ0 + pierZ1) / 2;
-    // Colliders (per room): floor, glazed front, pier.
-    cols.addBox(
-      this.group,
-      new Vector3(0, -0.1, 0),
-      new Vector3(hx * 2, 0.2, hz * 2),
-    );
-    partitionColliders(
-      cols,
-      this.group,
-      "z",
-      -hx,
-      -hz,
-      hz,
-      H,
-      {
-        a0: -doorHalf,
-        a1: doorHalf,
-        h: DOOR_H,
-      },
-      [{ a0: pierZ0, a1: pierZ1 }],
-    );
-    cols.addBox(
-      this.group,
-      new Vector3(-hx, H / 2, pz),
-      new Vector3(0.18, H, pierZ1 - pierZ0),
-    );
-    const doorTarget: InteractionTarget = {
-      kind: "door",
-      sessionId: this.sessionId,
-      roomLabel: this.label,
-    };
-    this.doorTarget = doorTarget;
-    // Digital LED panel recessed in the door header band (hall side): THE
-    // room sign — project + status in words, summary ticker.
-    this.led = new LedPanel(scene, {
-      name: this.group,
-      parent: this.root,
-      x: -hx - DOOR_BAND_FACE - 0.004,
-      y: DOOR_H + DOOR_BAND / 2,
-      z: 0,
-      yaw: Math.PI / 2,
-      width: LAYOUT.DOOR_W - 0.2,
-      height: DOOR_BAND - 0.07,
-      interact: doorTarget,
-    });
-    this.ctx.fx?.addGlow(this.led.mesh);
-
-    // Discreet room-number plaque at eye height on the pier.
-    this.plaqueTex = makeTexture(
-      scene,
-      `${this.group}:plaque`,
-      256,
-      256,
-      (c, w, h) => drawPlaque(c, w, h, L.slot.index + 1),
-    );
-    const plaque = texturedPlane(
-      scene,
-      `${this.group}:plaque`,
-      this.plaqueTex,
-      0.15,
-      0.15,
-      {
-        lit: true,
-        roughness: 0.4,
-      },
-    );
-    plaque.parent = this.root;
-    plaque.position.set(-hx - 0.105, 1.5, pz);
-    plaque.rotation.y = Math.PI / 2;
-    plaque.isPickable = true;
-    plaque.metadata = { interact: doorTarget };
-    this.plaque = plaque;
-
-    // ---- Furniture: merged into the shell module; colliders + plants per room.
-    for (const c of shell.colliders)
-      cols.addBox(
+    for (const c of shell.colliders) {
+      const w = toWorld(f, c.x, 0, c.z);
+      colliders.addBox(
         this.group,
-        new Vector3(c.x, c.size.y / 2, c.z),
+        new Vector3(w.x, c.size.y / 2, w.z),
         new Vector3(c.size.x * 0.9, c.size.y, c.size.z * 0.9),
-        c.yaw,
+        f.yaw + c.yaw,
       );
-    for (const pl of shell.plants)
+    }
+    for (const pl of shell.plants) {
+      const w = toWorld(f, pl.x, 0, pl.z);
       assets.instantiate(
         pl.role,
-        this.root,
+        null,
         {
-          position: { x: pl.x, y: pl.y ?? 0, z: pl.z },
-          yaw: pl.yaw,
+          position: { x: w.x, y: pl.y ?? 0, z: w.z },
+          yaw: f.yaw + pl.yaw,
           scale: pl.scale,
         },
         { group: this.group, collider: "none" },
       );
+    }
+
+    // Pod nameplate monitor at the head of the bench (session name, summary, phase).
+    this.sign = new DoorSign(scene, {
+      position: L.sign.position,
+      yaw: L.sign.yaw,
+      width: L.sign.width,
+      height: L.sign.height,
+      sessionId: this.sessionId,
+      roomLabel: this.label,
+    });
+    if (this.ctx.fx)
+      for (const g of this.sign.getGlowMeshes()) this.ctx.fx.addGlow(g as Mesh);
 
     // Screens (actors agent)
     const common = { sessionId: this.sessionId, roomLabel: this.label };
@@ -296,20 +180,10 @@ export class Room {
     this.applyStatus();
   }
 
-  /** Campus data for the door sign (summary / refs / phase / project). */
+  /** Campus data for the pod nameplate (name / summary / phase). */
   setCampus(cs: CampusSession): void {
     this.campus = cs;
     this.refreshSigns();
-  }
-
-  private signData(): RoomSignData {
-    return roomSignData(
-      this.campus,
-      this.label,
-      this.layout.slot.index + 1,
-      this.status,
-      this.selected,
-    );
   }
 
   // -------------------------------------------------------------------------
@@ -320,7 +194,6 @@ export class Room {
     if (label === this.label) return;
     this.label = label;
     this.refreshSigns();
-    if (this.doorTarget) this.doorTarget.roomLabel = label;
   }
 
   setStatus(status: RoomStatus): void {
@@ -452,14 +325,26 @@ export class Room {
   }
 
   private applyStatus(): void {
-    this.led?.setPulse(this.status === "needs_you");
     this.refreshSigns();
   }
 
-  /** Door sign + LED panel (each redraws only when its strings change). */
+  /** Pod nameplate (redraws only when its strings change). */
   private refreshSigns(): void {
-    const data = this.signData();
-    this.led?.set(ledContent(data));
+    const cs = this.campus;
+    const phase = cs ? sessionPhase(cs) : null;
+    const elapsed = phase ? formatElapsed(phase.since, Date.now()) : null;
+    const done = cs?.todos.filter((t) => t.status === "completed").length ?? 0;
+    this.sign?.update({
+      label: cs?.sessionName?.trim() || this.label,
+      status: this.status,
+      objective: cs ? sessionSummary(cs) : null,
+      focus: phase
+        ? [phase.label, phase.detail, elapsed].filter(Boolean).join(" · ")
+        : null,
+      todoDone: done,
+      todoTotal: cs?.todos.length ?? 0,
+      gitBranch: cs?.gitBranch ?? null,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -482,7 +367,10 @@ export class Room {
       this.bossMonitor?.setLod(lod);
       for (const m of this.agentMonitors) m.setLod(lod);
       this.whiteboard?.setLod(lod);
-      this.led?.setLod(lod);
+      this.sign?.setLod(lod);
+      // The nameplate reads only up close; hide it beyond (3 draws per pod).
+      for (const m of this.sign?.getMeshes() ?? [])
+        m.setEnabled(lod === "near");
       // Far rooms: hide screens entirely; only near rooms cast character shadows.
       const show = lod !== "far";
       const screens = [
@@ -497,7 +385,6 @@ export class Room {
         else this.ctx.lighting.removeShadowCaster(c);
       }
     }
-    this.led?.update(dt);
     this.boss?.update(dt, lod);
     for (const a of this.agents.values()) a.actor.update(dt, lod);
     for (const a of this.departing) a.update(dt, lod);
@@ -510,8 +397,7 @@ export class Room {
   /** Meshes for this room's control-room feed camera. */
   getRenderList(): AbstractMesh[] {
     const out: AbstractMesh[] = [...this.statics];
-    if (this.led) out.push(this.led.mesh);
-    out.push(...this.ctx.assets.allParts());
+    if (this.sign) out.push(...this.sign.getMeshes());
     if (this.bossMonitor) out.push(this.bossMonitor.screenMesh);
     for (const m of this.agentMonitors) out.push(m.screenMesh);
     if (this.whiteboard) out.push(this.whiteboard.mesh);
@@ -549,28 +435,7 @@ export class Room {
     // Statics are the shared shell module: release this room's instance only.
     this.releaseShell?.();
     this.releaseShell = null;
-    this.led?.dispose();
-    this.plaque?.material?.dispose();
-    this.plaque?.dispose();
-    this.plaqueTex?.dispose();
+    this.sign?.dispose();
     this.root.dispose();
   }
-}
-
-/** Room-number plaque: brushed-dark plate, light numerals. */
-function drawPlaque(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  n: number,
-): void {
-  ctx.fillStyle = "#1A1B1E";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#EDE7DC";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `300 ${Math.round(h * 0.5)}px ${FONT_STACK}`;
-  ctx.fillText(String(n).padStart(2, "0"), w / 2, h * 0.53);
-  ctx.fillStyle = "#D97757";
-  ctx.fillRect(w * 0.38, h * 0.84, w * 0.24, h * 0.025);
 }

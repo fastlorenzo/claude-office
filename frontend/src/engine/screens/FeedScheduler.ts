@@ -1,6 +1,6 @@
 /**
  * Security-camera feeds for the control room: one FreeCamera + 320×180
- * RenderTargetTexture per session room, rendered round-robin (one feed per
+ * RenderTargetTexture per project room (sessions alias to it), rendered round-robin (one feed per
  * update) with REFRESHRATE_RENDER_ONCE. While inactive the RTTs are removed
  * from scene.customRenderTargets so they cost nothing; the last frame stays.
  */
@@ -142,8 +142,27 @@ export class FeedScheduler {
     return rtt;
   }
 
-  getTexture(sessionId: string): RenderTargetTexture | null {
-    return this.feeds.get(sessionId)?.rtt ?? null;
+  /**
+   * Feed of a room id — feeds are keyed by PROJECT room; a session id
+   * resolves to its project's feed through `setAliases`.
+   */
+  getTexture(id: string): RenderTargetTexture | null {
+    const f = this.feeds.get(id) ?? this.feeds.get(this.aliases.get(id) ?? "");
+    return f?.rtt ?? null;
+  }
+
+  private aliases = new Map<string, string>();
+
+  /** sessionId → feed (project) id. Notifies `onChanged` when it changes. */
+  setAliases(map: ReadonlyMap<string, string>): void {
+    const key = (m: ReadonlyMap<string, string>) =>
+      [...m]
+        .map(([a, b]) => `${a}>${b}`)
+        .sort()
+        .join("|");
+    if (key(map) === key(this.aliases)) return;
+    this.aliases = new Map(map);
+    this.onChanged.notifyObservers("");
   }
 
   removeFeed(sessionId: string): void {

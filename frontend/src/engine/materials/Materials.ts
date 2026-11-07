@@ -200,10 +200,11 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     detail: 5,
   },
   floorDark: {
-    color: "#2A2C30",
+    // Control room: navy resin.
+    color: "#1C2B4A",
     roughness: 0.3,
     role: "floorMain",
-    tint: [0.11, 0.115, 0.125],
+    tint: [0.07, 0.11, 0.22],
     roughFactor: 0.55,
     bumpLevel: 0.3,
     detail: 6,

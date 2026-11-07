@@ -1,7 +1,11 @@
 "use client";
 
 import { create } from "zustand";
-import type { CampusSession, CampusStats } from "@/engine/contracts";
+import type {
+  CampusProject,
+  CampusSession,
+  CampusStats,
+} from "@/engine/contracts";
 
 // ============================================================================
 // TYPES
@@ -18,6 +22,10 @@ interface CampusStoreState {
   /** Building-wide control-room stats (null until the backend sends them). */
   stats: CampusStats | null;
 
+  /** Projects (team rooms + CI); null on older backends (grouped client-side). */
+  projects: CampusProject[] | null;
+
+  setProjects: (projects: CampusProject[] | null) => void;
   setSessions: (sessions: CampusSession[]) => void;
   setStats: (stats: CampusStats | null) => void;
   setConnected: (connected: boolean) => void;
@@ -48,7 +56,14 @@ export const useCampusStore = create<CampusStoreState>()((set) => ({
   connected: false,
   lastUpdated: null,
   stats: null,
+  projects: null,
 
+  setProjects: (projects) =>
+    set((state) =>
+      JSON.stringify(state.projects) === JSON.stringify(projects)
+        ? state
+        : { projects },
+    ),
   setStats: (stats) =>
     set((state) =>
       JSON.stringify(state.stats) === JSON.stringify(stats) ? state : { stats },
@@ -61,7 +76,13 @@ export const useCampusStore = create<CampusStoreState>()((set) => ({
     ),
   setConnected: (connected) => set({ connected }),
   clear: () =>
-    set({ sessions: [], stats: null, lastUpdated: null, connected: false }),
+    set({
+      sessions: [],
+      stats: null,
+      projects: null,
+      lastUpdated: null,
+      connected: false,
+    }),
 }));
 
 export const selectCampusSessions = (s: CampusStoreState): CampusSession[] =>

@@ -25,6 +25,7 @@ import {
   type InteractionActionId,
   type IWorld,
   type PlayerPose,
+  type ProjectSlot,
   type QualitySetting,
   type RoomSlot,
   type SyncInput,
@@ -49,10 +50,13 @@ import { PostFx } from "@/engine/fx/PostFx";
 import { InputController, type InputEvent } from "@/engine/input/Input";
 import { Interaction } from "@/engine/interaction/Interaction";
 import {
+  allocatePods,
   allocateSlots,
   generateLayout,
+  projectOfSession,
   roomAt,
 } from "@/engine/layout/buildingLayout";
+import { groupSessions, type ProjectGroup } from "@/engine/logic/projectGroups";
 import {
   applyToModel,
   createWorldModel,
@@ -75,11 +79,13 @@ import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
 import { ControlRoom } from "@/engine/world/ControlRoom";
+import { ProjectRoom } from "@/engine/world/ProjectRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
 import {
   halfFovFor,
   VisibilityController,
-  visRoomsOf,
+  visRoomsOfProjects,
+  type VisRoomHandle,
 } from "@/engine/world/Visibility";
 
 export interface WorldDebugOptions {
@@ -107,16 +113,26 @@ const SHADOW_ROLES: ReadonlySet<PropRole> = new Set<PropRole>([
 ]);
 const STATS_MS = 1000;
 
-function sameSlots(
-  a: ReadonlyMap<string, RoomSlot>,
-  b: ReadonlyMap<string, RoomSlot>,
-): boolean {
-  if (a.size !== b.size) return false;
-  for (const [k, v] of a) {
-    const o = b.get(k);
-    if (!o || o.index !== v.index) return false;
-  }
-  return true;
+/** Change key of everything the layout geometry depends on. */
+function layoutKey(
+  slots: ReadonlyMap<string, ProjectSlot>,
+  groups: readonly ProjectGroup[],
+  pods: ReadonlyMap<string, number>,
+): string {
+  const sl = [...slots].map(
+    ([id, s]) => `${id}:${s.index}:${s.side}:${s.bay}:${s.span}`,
+  );
+  const gs = groups.map(
+    (g) =>
+      `${g.id}=${g.name}[${g.sessionIds.map((x) => `${x}@${pods.get(x)}`).join(",")}]`,
+  );
+  return `${sl.sort().join("|")}#${gs.join("|")}`;
+}
+
+/** Project room rebuild key (geometry + which pod bays are occupied). */
+function projectKey(p: BuildingLayout["projects"][number]): string {
+  const s = p.slot;
+  return `${s.index}:${s.side}:${s.bay}:${s.span}:${p.podBays.map((b) => (b.occupied ? 1 : 0)).join("")}`;
 }
 
 function defaultDetail(): DetailSettings {
@@ -150,7 +166,13 @@ class World implements IWorld {
   private feeds: FeedScheduler | null = null;
   private controlRoom: ControlRoom | null = null;
   private readonly rooms = new Map<string, Room>();
-  private slots: Map<string, RoomSlot> = new Map();
+  private readonly projectRooms = new Map<string, ProjectRoom>();
+  private readonly projectKeys = new Map<string, string>();
+  private slots: Map<string, ProjectSlot> = new Map();
+  private pods: Map<string, number> = new Map();
+  private podSlots: Map<string, RoomSlot> = new Map();
+  private groups: ProjectGroup[] = [];
+  private layoutSig = "";
   private layout: BuildingLayout;
   private model = createWorldModel();
   private pending: SyncInput | null = null;
@@ -376,6 +398,8 @@ class World implements IWorld {
     this.input.dispose();
     for (const r of this.rooms.values()) r.dispose();
     this.rooms.clear();
+    for (const r of this.projectRooms.values()) r.dispose();
+    this.projectRooms.clear();
     this.controlRoom?.dispose();
     this.feeds?.dispose();
     this.building?.dispose();
@@ -412,35 +436,102 @@ class World implements IWorld {
       this.pending = input;
       return;
     }
-    const createdAt = new Map(input.sessions.map((s) => [s.id, s.createdAt]));
+    const groups = groupSessions(input.campus, input.sessions, input.projects);
+    this.groups = groups;
     const nextSlots = allocateSlots(
       this.slots,
-      input.campus.map((c) => ({
-        id: c.sessionId,
-        createdAt: createdAt.get(c.sessionId) ?? 0,
+      groups.map((g) => ({
+        id: g.id,
+        createdAt: g.createdAt,
+        sessions: g.sessionIds.length,
       })),
     );
-    if (!sameSlots(nextSlots, this.slots)) {
+    const nextPods = allocatePods(this.pods, groups);
+    const sig = layoutKey(nextSlots, groups, nextPods);
+    if (sig !== this.layoutSig) {
+      this.layoutSig = sig;
       this.slots = nextSlots;
-      const layout = generateLayout(nextSlots);
+      this.pods = nextPods;
+      const layout = generateLayout(nextSlots, groups, nextPods);
       const baysChanged = layout.bays !== this.layout.bays;
       this.layout = layout;
+      this.podSlots = new Map(layout.rooms.map((r) => [r.sessionId, r.slot]));
       this.building?.build(layout);
       if (baysChanged && this.feeds) this.buildControlRoom();
       else this.controlRoom?.setLayout(layout);
+      this.syncProjectRooms();
       this.events.emit("layout", layout);
     }
 
-    const ops = diffCampus(this.model, input, this.slots);
+    const ops = diffCampus(this.model, input, this.podSlots);
     if (ops.length) {
       this.applyOps(ops);
       applyToModel(this.model, ops);
     }
     // Art: door signs read summary / refs / phase straight from the campus
     // session (RoomSign redraws only when its strings change).
+    const byId = new Map(input.campus.map((c) => [c.sessionId, c]));
     for (const cs of input.campus) this.rooms.get(cs.sessionId)?.setCampus(cs);
-    this.building?.setCampus(input.campus); // control-room LED panel counts
+    const labels = new Map(input.sessions.map((s) => [s.id, s.label]));
+    for (const g of groups) {
+      const members = g.sessionIds
+        .map((id) => byId.get(id))
+        .filter((c): c is NonNullable<typeof c> => !!c)
+        .sort(
+          (a, b) =>
+            (this.pods.get(a.sessionId) ?? 0) -
+            (this.pods.get(b.sessionId) ?? 0),
+        );
+      this.projectRooms.get(g.id)?.setSessions(members, labels, g.name);
+    }
+    this.building?.setCampus(input.campus, groups.length); // control-room LED panel counts
     this.pushControlRoom();
+  }
+
+  /** Create / rebuild / drop project rooms to match the layout (+ feeds). */
+  private syncProjectRooms(): void {
+    const want = new Map(this.layout.projects.map((p) => [p.projectId, p]));
+    let changed = false;
+    for (const [id, room] of this.projectRooms) {
+      const p = want.get(id);
+      if (p && this.projectKeys.get(id) === projectKey(p)) continue;
+      room.dispose();
+      this.projectRooms.delete(id);
+      this.projectKeys.delete(id);
+      this.feeds?.removeFeed(id);
+      changed = true;
+    }
+    for (const [id, p] of want) {
+      if (this.projectRooms.has(id)) continue;
+      const room = new ProjectRoom(
+        {
+          scene: this.scene,
+          materials: this.materials,
+          assets: this.assets,
+          colliders: this.colliders,
+          lighting: this.lighting,
+          fx: this.fx,
+        },
+        p,
+      );
+      this.projectRooms.set(id, room);
+      this.projectKeys.set(id, projectKey(p));
+      this.feeds?.addFeed(id, p.feedCamera, () => {
+        const out = room.getRenderList();
+        for (const pod of p.pods)
+          out.push(...(this.rooms.get(pod.sessionId)?.getRenderList() ?? []));
+        return out;
+      });
+      changed = true;
+    }
+    const alias = new Map<string, string>();
+    for (const p of this.layout.projects)
+      for (const pod of p.pods) alias.set(pod.sessionId, p.projectId);
+    this.feeds?.setAliases(alias);
+    if (changed) {
+      this.updateFixtures();
+      this.visibility?.invalidate();
+    }
   }
 
   /** Control-room interior on top of the current shell (rebuilt with it). */
@@ -468,7 +559,7 @@ class World implements IWorld {
     if (!this.controlRoom || !input) return;
     const labels = new Map<string, string>();
     for (const [id, r] of this.rooms) labels.set(id, r.currentLabel);
-    this.controlRoom.setData(input.campus, input.stats, labels);
+    this.controlRoom.setData(input.campus, input.stats, labels, input.projects);
   }
 
   private applyOps(ops: SyncOp[]): void {
@@ -488,9 +579,6 @@ class World implements IWorld {
             this.detail ?? defaultDetail(),
           );
           createdNow.add(op.sessionId);
-          this.feeds?.addFeed(op.sessionId, rl.feedCamera, () =>
-            room.getRenderList(),
-          );
           roomsChanged = true;
           wallDirty = true;
           break;
@@ -500,7 +588,6 @@ class World implements IWorld {
           if (room) {
             room.dispose();
             this.rooms.delete(op.sessionId);
-            this.feeds?.removeFeed(op.sessionId);
             roomsChanged = true;
             wallDirty = true;
           }
@@ -563,6 +650,7 @@ class World implements IWorld {
 
   private updateFixtures(): void {
     const pts = [...(this.building?.fixtures ?? [])];
+    for (const r of this.projectRooms.values()) pts.push(...r.getFixtures());
     for (const r of this.rooms.values()) pts.push(...r.getFixtures());
     this.lighting.setFixtures(pts);
   }
@@ -586,6 +674,7 @@ class World implements IWorld {
     const eye = this.player.camera.globalPosition;
     this.assets.flush();
     for (const r of this.rooms.values()) r.update(dt, eye);
+    for (const r of this.projectRooms.values()) r.update(dt, eye);
     this.building?.update(dt); // LED panel tickers (art)
     if (this.gfx.dynamicLights) this.lighting.update(dt, this.player.position);
     this.interaction?.update(now);
@@ -761,13 +850,13 @@ class World implements IWorld {
     if (!off)
       this.visibility.update(
         now,
-        this.rooms,
+        this.visHandles(),
         {
           eye,
           yaw,
           halfFov: halfFovFor(cam.fov, this.engine.getAspectRatio(cam)),
           zone,
-          rooms: visRoomsOf(this.layout.rooms),
+          rooms: visRoomsOfProjects(this.layout.projects),
           hallLength: this.layout.hall.length,
           hallHalfWidth: this.layout.hall.width / 2,
         },
@@ -796,6 +885,45 @@ class World implements IWorld {
     }
   }
 
+  /** Visibility units: project rooms, their pods follow (screens / actors). */
+  private visCache: Map<string, VisRoomHandle> | null = null;
+  private visCacheKey = "";
+
+  private visHandles(): Map<string, VisRoomHandle> {
+    const key = `${this.layoutSig}|${this.rooms.size}|${this.projectRooms.size}`;
+    if (this.visCache && key === this.visCacheKey) return this.visCache;
+    this.visCacheKey = key;
+    const out = new Map<string, VisRoomHandle>();
+    this.visCache = out;
+    for (const p of this.layout.projects) {
+      const pr = this.projectRooms.get(p.projectId);
+      const pods = p.pods
+        .map((d) => this.rooms.get(d.sessionId))
+        .filter((r): r is Room => !!r);
+      out.set(p.projectId, {
+        root: {
+          setEnabled: (v: boolean) => {
+            pr?.root.setEnabled(v);
+            for (const r of pods) r.root.setEnabled(v);
+          },
+        },
+        members: p.pods.map((d) => d.sessionId),
+        memberBounds: new Map(
+          p.pods.map((d) => [
+            d.sessionId,
+            {
+              minX: d.bounds.min.x,
+              maxX: d.bounds.max.x,
+              minZ: d.bounds.min.z,
+              maxZ: d.bounds.max.z,
+            },
+          ]),
+        ),
+      });
+    }
+    return out;
+  }
+
   setInputEnabled(enabled: boolean): void {
     this.inputEnabled = enabled;
     if (enabled) this.gfx.endInspect();
@@ -803,7 +931,9 @@ class World implements IWorld {
     if (this.interaction) this.interaction.enabled = enabled;
   }
 
-  teleport(to: { sessionId: string } | "lobby" | "control"): void {
+  teleport(
+    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
+  ): void {
     if (!this.player) return;
     this.player.frozen = false;
     if (to === "lobby") {
@@ -819,7 +949,10 @@ class World implements IWorld {
       this.player.teleport(new Vector3(s.x, s.y + 0.05, s.z), 0);
       return;
     }
-    const room = this.layout.rooms.find((r) => r.sessionId === to.sessionId);
+    const room =
+      "projectId" in to
+        ? this.layout.projects.find((p) => p.projectId === to.projectId)
+        : projectOfSession(this.layout, to.sessionId);
     if (!room) return;
     const o = room.doorOutside;
     const d = room.door;

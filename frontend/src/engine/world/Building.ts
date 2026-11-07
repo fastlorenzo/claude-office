@@ -30,7 +30,7 @@ import {
   type BuildingLayout,
   type BrandingOptions,
   type CampusSession,
-  type RoomSlot,
+  type ProjectSlot,
 } from "@/engine/contracts";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import {
@@ -48,9 +48,8 @@ import { BrandSign } from "@/engine/world/BrandSign";
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
 import { roomStatus } from "@/engine/logic/status";
+import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
 import {
-  DOOR_BAND,
-  DOOR_BAND_FACE,
   DOOR_H,
   downlight,
   drawSpark,
@@ -87,6 +86,10 @@ const LOBBY_H = 6.0;
 /** Elevator doors along the sky-lobby west wall (z centres). */
 const ELEVATOR_Z = [-9.55, -7.25, -4.95, -2.65];
 
+/** Control-room door LED line (on the bulkhead over the door). */
+const CONTROL_LED_Y = 2.82;
+const CONTROL_LED_W = 3.0;
+
 /** Our floor number (sky lobby signage / indicators). */
 const FLOOR_NO = 47;
 
@@ -107,7 +110,7 @@ export class Building {
   private controlShell: Mesh[] = [];
   private brand: BrandSign | null = null;
   private brandOpts: BrandingOptions = DEFAULT_BRANDING;
-  private campusCounts = { working: 0, needs: 0, idle: 0 };
+  private campusCounts = { working: 0, needs: 0, idle: 0, projects: 0 };
 
   constructor(private readonly ctx: BuildingContext) {
     ctx.materials.setExteriorReflection(ctx.lighting.exterior);
@@ -131,8 +134,8 @@ export class Building {
   }
 
   /** Live control-room panel summary ("3 WORKING · 1 NEEDS YOU"). */
-  setCampus(sessions: CampusSession[]): void {
-    const c = { working: 0, needs: 0, idle: 0 };
+  setCampus(sessions: CampusSession[], projects = 0): void {
+    const c = { working: 0, needs: 0, idle: 0, projects };
     for (const cs of sessions) {
       const st = roomStatus(cs);
       if (st === "needs_you") c.needs += 1;
@@ -674,13 +677,28 @@ export class Building {
       // One pot per plant: scanned foliage (pot stripped) sits at the rim of
       // a procedural planter (planter 0.46 m, planterTall 0.62 m × scale).
       // Portal pair: clear of the moss plinth (z ≥ -0.66) and portal frame.
+      // Foliage sits IN the planter: base at the soil line × planter scale.
       place("planterTall", sx * (hallHalf + 0.5), -1.12, 0);
-      place("plantTall", sx * (hallHalf + 0.5), -1.12, sx * 1.2, 1.0, 0.58);
+      place(
+        "plantTall",
+        sx * (hallHalf + 0.5),
+        -1.12,
+        sx * 1.2,
+        1.0,
+        PLANTER_SOIL_Y.planterTall,
+      );
       place("planterTall", sx * (halfW - 0.75), z0 + 0.85, 0, 1.15);
-      place("plantTall", sx * (halfW - 0.75), z0 + 0.85, sx * 2.1, 1.25, 0.67);
+      place(
+        "plantTall",
+        sx * (halfW - 0.75),
+        z0 + 0.85,
+        sx * 2.1,
+        1.15,
+        PLANTER_SOIL_Y.planterTall * 1.15,
+      );
       if (sx > 0) {
         place("planter", halfW - 0.55, -6.0, 0);
-        place("plant", halfW - 0.55, -6.0, 0.7, 1.0, 0.42);
+        place("plant", halfW - 0.55, -6.0, 0.7, 1.0, PLANTER_SOIL_Y.planter);
       }
     }
     place("taskChair", rx, rc - 1.25, Math.PI);
@@ -700,7 +718,7 @@ export class Building {
   // -------------------------------------------------------------------------
 
   private buildShell(layout: BuildingLayout): Part {
-    const { scene, materials, colliders, assets } = this.ctx;
+    const { scene, materials, colliders } = this.ctx;
     const g = "shell";
     const part = emptyPart();
     const b = new ArtBatcher(scene, materials, g, 5);
@@ -736,81 +754,72 @@ export class Building {
       0.003,
     );
 
-    // ---- Inter-bay walls (both sides) + piers facing the hall.
-    for (let bay = 1; bay < layout.bays; bay++) {
-      const zc = bay * pitch - LAYOUT.ROOM_GAP / 2;
-      for (const sx of [-1, 1]) {
-        const x0 = sx * (hallHalf - 0.08);
-        const x1 = sx * (outer + T);
-        b.box(
-          "wall",
-          v3((x0 + x1) / 2, H / 2, zc),
-          v3(Math.abs(x1 - x0), H, LAYOUT.ROOM_GAP),
-        );
-        colliders.addBox(
-          g,
-          new Vector3((x0 + x1) / 2, H / 2, zc),
-          new Vector3(Math.abs(x1 - x0), H, LAYOUT.ROOM_GAP),
-        );
-        b.rbox(
-          "wallFeature",
-          v3(sx * (hallHalf - 0.1), H / 2, zc),
-          v3(0.04, H, LAYOUT.ROOM_GAP + 0.06),
-          {
-            r: 0.006,
-          },
-        );
-      }
-      const side = bay % 2 === 0 ? -1 : 1;
-      const px = side * (hallHalf - 0.6);
-      assets.instantiate(
-        "planter",
-        null,
-        { position: { x: px, y: 0, z: zc }, yaw: 0 },
-        { group: g },
-      );
-      assets.instantiate(
-        "plant",
-        null,
-        { position: { x: px, y: 0.42, z: zc }, yaw: bay * 1.7, scale: 0.95 },
-        { group: g },
-      );
-    }
-    // Wall between the last bays and the control room.
+    // Project rooms bring their own end walls (ProjectShell); the shell only
+    // closes the room bands against the control room and the outside.
+    const sides = layout.sides;
+    const CH = layout.controlRoom.size.y;
+    // ---- Hall-side wall of the control room (full footprint width, up to
+    // its clear height): solid outside the hall band, glazed partition +
+    // door + solid bulkhead (LED panel) across the hall.
+    const cw = layout.controlRoom.size.x / 2;
     for (const sx of [-1, 1]) {
       const x0 = sx * (hallHalf - 0.08);
-      const x1 = sx * (outer + T);
+      const x1 = sx * (cw + T);
       b.box(
         "wall",
-        v3((x0 + x1) / 2, H / 2, L + T / 2),
-        v3(Math.abs(x1 - x0), H, T),
+        v3((x0 + x1) / 2, CH / 2, L + T / 2),
+        v3(Math.abs(x1 - x0), CH, T),
       );
       b.box(
         "wallDark",
-        v3((x0 + x1) / 2, H / 2, L + T + 0.01),
-        v3(Math.abs(x1 - x0) - 0.4, H, 0.02),
+        v3((x0 + x1) / 2, CH / 2, L + T + 0.01),
+        v3(Math.abs(x1 - x0) - 0.4, CH, 0.02),
       );
       colliders.addBox(
         g,
-        new Vector3((x0 + x1) / 2, H / 2, L + T / 2),
-        new Vector3(Math.abs(x1 - x0), H, T),
+        new Vector3((x0 + x1) / 2, CH / 2, L + T / 2),
+        new Vector3(Math.abs(x1 - x0), CH, T),
       );
     }
+    // Above the hall ceiling, over the partition (seen from the control room).
+    b.box(
+      "wallDark",
+      v3(0, (H + CH) / 2, L + 0.05),
+      v3(hallHalf * 2, CH - H, T),
+    );
 
-    // ---- Exterior walls along the rooms, one window band per bay.
+    // ---- Exterior walls along the room bands, one curtain-wall bay per bay
+    // (the rooms' overlook glazing). A hall-overlook side is glazed instead.
     for (const sx of [-1, 1]) {
+      const side = sx > 0 ? "east" : "west";
+      if (!sides.includes(side)) continue;
       const wins: Opening[] = [];
       for (let bay = 0; bay < layout.bays; bay++) {
         const z0 = bay * pitch;
-        // Floor-to-ceiling curtain wall (high floor: the city is below).
         wins.push({
-          a0: z0 + 0.15,
-          a1: z0 + LAYOUT.ROOM_W - 0.15,
+          a0: z0 + 0.12,
+          a1: z0 + LAYOUT.ROOM_W - 0.12,
           y0: 0.04,
           y1: H - 0.06,
         });
       }
       const wx = sx * (outer + T / 2);
+      wallWithOpenings(b, colliders, g, "wall", "z", wx, T, 0, L, H, wins);
+      for (const o of wins)
+        part.fixtures.push(
+          ...windowUnit(b, "z", wx, o, {
+            pitch: 1.2,
+            inward: sx > 0 ? -1 : 1,
+            wallT: T,
+          }),
+        );
+    }
+    if (layout.hall.overlook) {
+      const sx = layout.hall.overlook === "east" ? 1 : -1;
+      const wx = sx * (hallHalf + T / 2);
+      const wins: Opening[] = [
+        { a0: 0.15, a1: L - 0.15, y0: 0.04, y1: H - 0.06 },
+      ];
       wallWithOpenings(b, colliders, g, "wall", "z", wx, T, 0, L, H, wins);
       for (const o of wins)
         part.fixtures.push(
@@ -822,7 +831,9 @@ export class Building {
         );
     }
 
-    // ---- Control room partition (smoked glass + door) at the hall end.
+    // ---- Control room partition (smoked glass) + door with a SOLID
+    // bulkhead over it (no glass above the door); the LED line sits on it.
+    const cd = layout.controlRoom.doorWidth / 2;
     glassPartition(
       b,
       colliders,
@@ -832,19 +843,20 @@ export class Building {
       -hallHalf,
       hallHalf,
       H,
-      { a0: -0.9, a1: 0.9, h: DOOR_H },
+      { a0: -cd, a1: cd, h: DOOR_H },
       {
         pitch: 1.2,
         glass: "glassTint",
         frame: "blackMetal",
+        transom: "solid",
+        bulkhead: { mat: "wallFeature", depth: 0.18, a0: -1.75, a1: 1.75 },
       },
     );
-
-    // Shadow gap framing the control-room LED panel in the door header band.
-    b.box(
-      "shadowGap",
-      v3(0, DOOR_H + DOOR_BAND / 2, L + 0.05 - DOOR_BAND_FACE - 0.001),
-      v3(1.64, DOOR_BAND - 0.05, 0.002),
+    b.rbox(
+      "blackMetal",
+      v3(0, CONTROL_LED_Y, L + 0.05 - 0.091),
+      v3(CONTROL_LED_W + 0.06, 0.28, 0.006),
+      { r: 0.004 },
     );
 
     const shellMeshes = b.build({ receiveShadows: true });
@@ -852,6 +864,7 @@ export class Building {
     this.finish(part, shellMeshes);
 
     this.buildControlRoom(layout, part);
+    this.buildControlLed(layout);
 
     for (const m of part.meshes) {
       m.computeWorldMatrix(true);
@@ -876,11 +889,8 @@ export class Building {
       new Vector3(0, -0.1, (L + cz1) / 2),
       new Vector3(cw * 2, 0.2, cz1 - L),
     );
-    cb.box(
-      "ceilingDark",
-      v3(0, cH + 0.05, (L + cz1) / 2),
-      v3(cw * 2, 0.1, cz1 - L),
-    );
+    // Ceiling: the round ops room is double height (ControlRoom builds its
+    // own ceiling, cove and walls at CONTROL_CEIL_H inside this footprint).
     // Shell only: the interior (video wall, console, feeds, baffles, props,
     // zone lights) is engine/world/ControlRoom.ts, built by World on top of
     // `controlShell` (isolateZone runs there, over shell + interior).
@@ -913,18 +923,21 @@ export class Building {
     tagStatic(controlMeshes);
     part.meshes.push(...controlMeshes);
     this.controlShell = controlMeshes;
+  }
 
-    // Control room LED panel over the partition door (hall side): same
-    // family as the room door panels; live summary from setCampus().
+  /** Control-room door LED (hall side): same one-line family as the rooms. */
+  private buildControlLed(layout: BuildingLayout): void {
+    const L = layout.hall.length;
     this.controlLed?.dispose();
-    this.controlLed = new LedPanel(scene, {
+    this.controlLed = new LedPanel(this.ctx.scene, {
       name: "control",
       x: 0,
-      y: DOOR_H + DOOR_BAND / 2,
-      z: L + 0.05 - DOOR_BAND_FACE - 0.004,
+      y: CONTROL_LED_Y,
+      z: L + 0.05 - 0.094,
       yaw: 0,
-      width: 1.6,
-      height: DOOR_BAND - 0.07,
+      width: CONTROL_LED_W,
+      height: 0.22,
+      rows: 1,
     });
     this.ctx.fx?.addGlow(this.controlLed.mesh);
     this.controlLed.set(controlLedContent(this.campusCounts));
@@ -936,8 +949,10 @@ export class Building {
 
   private emptyKey = "";
 
-  setEmptyBays(layout: BuildingLayout, slots: RoomSlot[]): void {
-    const key = slots.map((s) => s.index).join(",") + `|${layout.bays}`;
+  setEmptyBays(layout: BuildingLayout, slots: ProjectSlot[]): void {
+    const key =
+      slots.map((s) => `${s.side}:${s.bay}:${s.span}`).join(",") +
+      `|${layout.bays}`;
     if (key === this.emptyKey) return;
     this.emptyKey = key;
     this.disposePart(this.empty, "empty");
@@ -953,27 +968,31 @@ export class Building {
     for (const s of slots) {
       const sx = s.side === "east" ? 1 : -1;
       const z0 = s.bay * pitch;
-      const zc = z0 + LAYOUT.ROOM_W / 2;
-      b.box(
-        "wall",
-        v3(sx * (hallHalf + 0.06), H / 2, zc),
-        v3(0.16, H, LAYOUT.ROOM_W),
-      );
+      const len = s.span * pitch;
+      const zc = z0 + len / 2;
+      // Plaster front closing the free run (+ end returns to the outer wall).
+      b.box("wall", v3(sx * (hallHalf + 0.06), H / 2, zc), v3(0.16, H, len));
       b.box(
         "skirting",
         v3(sx * (hallHalf - 0.025), 0.035, zc),
-        v3(0.01, 0.07, LAYOUT.ROOM_W),
+        v3(0.01, 0.07, len),
       );
-      // Felt panel cluster framing the plate.
+      colliders.addBox(
+        g,
+        new Vector3(sx * (hallHalf + 0.06), H / 2, zc),
+        new Vector3(0.16, H, len),
+      );
+      // Felt panel cluster framing the "Available" plate (runs ≥ 1 bay).
+      const fw = Math.min(4.1, len - 0.6);
       b.box(
         "shadowGap",
         v3(sx * (hallHalf - 0.024), 1.5, zc),
-        v3(0.008, 2.3, 4.1),
+        v3(0.008, 2.3, fw),
       );
       b.slats(
         felt,
-        zc - 2.0,
-        zc + 2.0,
+        zc - fw / 2 + 0.05,
+        zc + fw / 2 - 0.05,
         0.62,
         0.016,
         (a) => ({
@@ -988,29 +1007,30 @@ export class Building {
         v3(0.03, 1.08, 1.08),
         { r: 0.006 },
       );
-      colliders.addBox(
-        g,
-        new Vector3(sx * (hallHalf + 0.06), H / 2, zc),
-        new Vector3(0.16, H, LAYOUT.ROOM_W),
-      );
       signs.push({
         x: sx * (hallHalf - 0.087),
         z: zc,
         yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2,
       });
-      const px = sx * (hallHalf - 0.6);
-      assets.instantiate(
-        "planterTall",
-        null,
-        { position: { x: px, y: 0, z: zc + 2.6 }, yaw: 0 },
-        { group: g },
-      );
-      assets.instantiate(
-        "plantTall",
-        null,
-        { position: { x: px, y: 0.58, z: zc + 2.6 }, yaw: s.bay, scale: 1.1 },
-        { group: g },
-      );
+      if (len >= 4) {
+        const px = sx * (hallHalf - 0.6);
+        const pz = zc + Math.min(2.6, len / 2 - 0.6);
+        assets.instantiate(
+          "planterTall",
+          null,
+          { position: { x: px, y: 0, z: pz }, yaw: 0 },
+          { group: g },
+        );
+        assets.instantiate(
+          "plantTall",
+          null,
+          {
+            position: { x: px, y: PLANTER_SOIL_Y.planterTall, z: pz },
+            yaw: s.bay,
+          },
+          { group: g },
+        );
+      }
     }
     this.finish(part, b.build());
     if (signs.length) {
@@ -1101,9 +1121,15 @@ function controlLedContent(c: {
   working: number;
   needs: number;
   idle: number;
+  projects: number;
 }): LedContent {
   const sep = { text: " · ", color: "#6E6A64" };
   const counts: { text: string; color: string }[] = [];
+  if (c.projects)
+    counts.push({
+      text: `${c.projects} PROJECT${c.projects === 1 ? "" : "S"}`,
+      color: "#B8B2A8",
+    });
   const add = (n: number, word: string, color: string) => {
     if (!n) return;
     if (counts.length) counts.push(sep);
@@ -1121,7 +1147,7 @@ function controlLedContent(c: {
       { text: "  ·  ", color: "#6E6A64" },
       ...counts,
     ],
-    ticker: [{ text: "Live view of every session", color: "#8A867F" }],
+    ticker: null,
   };
 }
 

@@ -51,11 +51,28 @@ interface RoleConfig {
   /** Non-uniform fit to an exact box (after yaw). Used for the oversized desk. */
   stretch?: { x: number; y: number; z: number };
   /**
-   * Drop primitives whose material name matches (the scanned plants' own
-   * terracotta pots: the foliage sits in our procedural planters instead).
+   * Drop meshes whose NODE name matches (the scanned plants' own pots,
+   * pebbles, dirt: the foliage sits in our procedural planters instead).
+   * Node names, not materials: potted_plant_01's stem shares the pot material.
    */
   strip?: RegExp;
+  /**
+   * Plants: anchor the foliage on the stripped pot's soil line (its top) and
+   * scale so the scanned pot's diameter becomes `potFit` metres — the foliage
+   * then sits IN our planter at PLANTER_SOIL_Y, proportional to it.
+   */
+  potFit?: number;
 }
+
+/** Bounds of the stripped pot (soil anchor for plants). */
+interface PotAnchor {
+  x: number;
+  z: number;
+  top: number;
+  dia: number;
+}
+
+const POT_PARTS = /_(pot|pebbles|dirt|ground)(_primitive\d+)?$/;
 
 /**
  * Tuned against the Poly Haven models (Blender front = -Y → Babylon +Z, so
@@ -66,10 +83,11 @@ const ROLE_CONFIG: Record<ModelRole, RoleConfig> = {
   chair: { yawOffset: 0, fit: { axis: "y", size: 0.98 } },
   sofa: { yawOffset: 0, fit: { axis: "maxXZ", size: 1.9 } },
   shelves: { yawOffset: Math.PI, fit: { axis: "y", size: 1.95 } },
-  // Foliage only (pot stripped): base at y = 0, placed at the planter rim.
-  plant: { yawOffset: 0, fit: { axis: "y", size: 0.85 }, strip: /_pot$/ },
+  // Foliage only (pot stripped): origin = the scan's soil line, placed at
+  // PLANTER_SOIL_Y (5 mm under our planter's soil surface).
+  plant: { yawOffset: 0, strip: POT_PARTS, potFit: 0.48 },
   plantSmall: { yawOffset: 0, fit: { axis: "y", size: 0.3 } },
-  plantTall: { yawOffset: 0, fit: { axis: "y", size: 1.05 }, strip: /_pot$/ },
+  plantTall: { yawOffset: 0, strip: POT_PARTS, potFit: 0.6 },
   coffeeCart: { yawOffset: Math.PI, fit: { axis: "maxXZ", size: 1.5 } },
   laptop: { yawOffset: Math.PI, fit: { axis: "maxXZ", size: 0.34 } },
   securityCamera: { yawOffset: 0 },
@@ -215,6 +233,7 @@ export class AssetLibrary {
 
   private async loadOne(asset: ModelAsset): Promise<void> {
     let parts: Mesh[] | null = null;
+    let anchor: PotAnchor | null = null;
     const url = modelPath(asset.id, this.assetBase);
     const slash = url.lastIndexOf("/");
     try {
@@ -232,7 +251,7 @@ export class AssetLibrary {
           return;
         }
         const strip = ROLE_CONFIG[asset.role].strip;
-        parts = this.flatten(
+        const flat = this.flatten(
           container.meshes,
           container.transformNodes,
           () => {
@@ -240,6 +259,8 @@ export class AssetLibrary {
           },
           strip,
         );
+        parts = flat.parts;
+        anchor = flat.anchor;
         for (const ag of container.animationGroups) ag.dispose();
         for (const m of container.materials) {
           if (m instanceof PBRMaterial) {
@@ -264,6 +285,7 @@ export class AssetLibrary {
       cfg,
       fallback ? 1 : asset.scale,
       fallback,
+      fallback ? null : anchor,
     );
   }
 
@@ -273,8 +295,9 @@ export class AssetLibrary {
     cfg: RoleConfig,
     baseScale: number,
     fallback: boolean,
+    anchor: PotAnchor | null = null,
   ): void {
-    const size = this.normalise(parts, cfg, baseScale);
+    const size = this.normalise(parts, cfg, baseScale, anchor);
     const entry: ModelEntry = {
       role,
       parts,
@@ -327,12 +350,16 @@ export class AssetLibrary {
     nodes: TransformNode[],
     addToScene: () => void,
     strip?: RegExp,
-  ): Mesh[] {
+  ): { parts: Mesh[]; anchor: PotAnchor | null } {
     addToScene();
     const parts: Mesh[] = [];
+    const stripped: Mesh[] = [];
     for (const m of meshes) {
       if (!(m instanceof Mesh) || m.getTotalVertices() === 0) continue;
-      if (strip && m.material && strip.test(m.material.name)) continue;
+      if (strip && (strip.test(m.name) || strip.test(m.parent?.name ?? ""))) {
+        stripped.push(m);
+        continue;
+      }
       const world = m.computeWorldMatrix(true).clone();
       m.makeGeometryUnique();
       m.setParent(null);
@@ -343,9 +370,35 @@ export class AssetLibrary {
       m.bakeTransformIntoVertices(world);
       parts.push(m);
     }
+    // Soil anchor: top + footprint of the stripped pot (world space).
+    let anchor: PotAnchor | null = null;
+    if (stripped.length) {
+      let x0 = Infinity,
+        x1 = -Infinity,
+        z0 = Infinity,
+        z1 = -Infinity,
+        top = -Infinity;
+      for (const m of stripped) {
+        m.refreshBoundingInfo();
+        m.computeWorldMatrix(true);
+        const b = m.getBoundingInfo().boundingBox;
+        x0 = Math.min(x0, b.minimumWorld.x);
+        x1 = Math.max(x1, b.maximumWorld.x);
+        z0 = Math.min(z0, b.minimumWorld.z);
+        z1 = Math.max(z1, b.maximumWorld.z);
+        top = Math.max(top, b.maximumWorld.y);
+      }
+      if (Number.isFinite(top))
+        anchor = {
+          x: (x0 + x1) / 2,
+          z: (z0 + z1) / 2,
+          top: top - 0.012,
+          dia: Math.max(1e-3, Math.max(x1 - x0, z1 - z0)),
+        };
+    }
     for (const m of meshes) if (!parts.includes(m as Mesh)) m.dispose();
     for (const n of nodes) n.dispose();
-    return parts;
+    return { parts, anchor };
   }
 
   /** Centre + floor + yaw + fit, baked into the part vertices. Returns final size. */
@@ -353,8 +406,22 @@ export class AssetLibrary {
     parts: Mesh[],
     cfg: RoleConfig,
     baseScale: number,
+    anchor: PotAnchor | null = null,
   ): Vector3 {
     const { min, max } = boundsOf(parts);
+    if (anchor && cfg.potFit) {
+      // Plants: origin on the scan's soil line, scaled to our planter.
+      const k = cfg.potFit / anchor.dia;
+      const m = Matrix.Translation(-anchor.x, -anchor.top, -anchor.z)
+        .multiply(Matrix.RotationY(cfg.yawOffset))
+        .multiply(Matrix.Scaling(k, k, k));
+      for (const p of parts) p.bakeTransformIntoVertices(m);
+      return new Vector3(
+        (max.x - min.x) * k,
+        (max.y - anchor.top) * k,
+        (max.z - min.z) * k,
+      );
+    }
     const raw = max.subtract(min);
     const rotated = Math.abs(Math.sin(cfg.yawOffset)) > 0.7;
     const size = rotated ? new Vector3(raw.z, raw.y, raw.x) : raw.clone();

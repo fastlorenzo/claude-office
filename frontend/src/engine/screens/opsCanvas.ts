@@ -12,7 +12,8 @@
  * Pure canvas (no Babylon): callers own the DynamicTexture.
  */
 
-import { STATUS_COLORS } from "../contracts";
+import { STATUS_COLORS, type CheckState, type RoomStatus } from "../contracts";
+import type { MapGroup, ProjectMapLayout } from "../logic/projectMap";
 import {
   alertText,
   contextTone,
@@ -42,10 +43,10 @@ import {
 export { phaseColor };
 
 export const OPS_THEME = {
-  bg0: "#070B12",
-  bg1: "#0B111B",
-  card: "#101826",
-  cardHi: "#152033",
+  bg0: "#08101C",
+  bg1: "#0E1A2C",
+  card: "#132036",
+  cardHi: "#18283F",
   line: "rgba(148,163,184,0.18)",
   lineSoft: "rgba(148,163,184,0.08)",
   text: "#EAF0F8",
@@ -745,17 +746,7 @@ export function drawUsagePanel(
   gauge(ctx, W * 0.27, gy, r, us.fiveHour, u, "5-hour");
   gauge(ctx, W * 0.73, gy, r, us.sevenDay, u, "7-day");
   if (!us.fiveHour && !us.sevenDay)
-    text(
-      ctx,
-      "Limits appear once the status line reports",
-      W / 2,
-      gy + r + 4 * u,
-      {
-        size: 4.6 * u,
-        color: C.muted,
-        align: "center",
-      },
-    );
+    statusLineHint(ctx, W / 2, gy + r + 4 * u, W - 12 * u, u);
 
   const ky = gy + r + 10 * u;
   const kw = (W - 12 * u) / 3;
@@ -830,6 +821,37 @@ export function drawUsagePanel(
       align: "right",
     });
   }
+}
+
+/** Shown wherever a status-line value is missing (rate limits are statusline-only). */
+export const STATUSLINE_HINT =
+  "Enable status line feed: hooks/install.sh --statusline";
+
+/** Small amber-outlined hint pill, centred on (cx, cy). */
+export function statusLineHint(
+  ctx: Ctx2D,
+  cx: number,
+  cy: number,
+  maxW: number,
+  u: number,
+) {
+  const size = 4.6 * u;
+  const w = Math.min(maxW, measure(ctx, STATUSLINE_HINT, size, 600) + 12 * u);
+  const h = size * 1.9;
+  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, h / 2);
+  ctx.fillStyle = withAlpha(C.amber, 0.12);
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, 0.3 * u);
+  ctx.strokeStyle = withAlpha(C.amber, 0.55);
+  ctx.stroke();
+  dot(ctx, cx - w / 2 + 4 * u, cy, 1.1 * u, C.amber);
+  text(ctx, STATUSLINE_HINT, cx + 2 * u, cy, {
+    size,
+    weight: 600,
+    color: "#FCD34D",
+    align: "center",
+    max: w - 10 * u,
+  });
 }
 
 // ============================================================================
@@ -1293,4 +1315,628 @@ export function drawSessionCard(
     });
   });
   ctx.restore();
+}
+
+// ============================================================================
+// PROJECT MAP (transit schematic; the moving subagent dots are 3D / SVG)
+// ============================================================================
+
+const CI_COLORS: Record<CheckState, string> = {
+  success: "#22C55E",
+  failure: "#EF4444",
+  running: "#F59E0B",
+  queued: "#94A3B8",
+  cancelled: "#64748B",
+  none: "#64748B",
+};
+
+const CI_LABEL: Record<CheckState, string> = {
+  success: "CI ✓",
+  failure: "CI ✗",
+  running: "CI …",
+  queued: "CI queued",
+  cancelled: "CI cancelled",
+  none: "CI —",
+};
+
+export function ciColor(s: CheckState | null): string {
+  return s ? CI_COLORS[s] : C.muted;
+}
+
+/**
+ * Static part of the project map (lines, stations, session nodes, hub). The
+ * layout must have been computed for this W × H (layoutProjectMap).
+ */
+export function drawProjectMap(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  map: ProjectMapLayout,
+  u: number,
+) {
+  panelBg(ctx, W, H);
+  // Faint engineering grid.
+  ctx.fillStyle = "rgba(56,189,248,0.045)";
+  const g = 10 * u;
+  for (let x = g; x < W; x += g)
+    ctx.fillRect(x, 14 * u, Math.max(1, 0.15 * u), H);
+  for (let y = 14 * u + g; y < H; y += g)
+    ctx.fillRect(0, y, W, Math.max(1, 0.15 * u));
+  const live = map.lines.reduce((s, l) => s + l.live, 0);
+  header(
+    ctx,
+    u,
+    W,
+    "Project map",
+    `${map.lines.length + map.moreLines} projects · ${live} live sessions`,
+    null,
+  );
+  // Legend (right of the header).
+  let lx = W - 6 * u;
+  for (const [label, col] of [
+    ["idle", STATUS_COLORS.done],
+    ["working", STATUS_COLORS.working],
+    ["needs you", STATUS_COLORS.needs_you],
+  ] as const) {
+    const tw = measure(ctx, label, 4.4 * u, 500);
+    lx -= tw;
+    text(ctx, label, lx, 7 * u, { size: 4.4 * u, color: C.sub });
+    lx -= 3 * u;
+    dot(ctx, lx, 7 * u, 1.3 * u, col);
+    lx -= 5 * u;
+  }
+  if (map.lines.length === 0) {
+    text(ctx, "No projects yet", W / 2, H / 2, {
+      size: 7 * u,
+      weight: 600,
+      color: C.muted,
+      align: "center",
+    });
+  }
+  const lw = Math.max(3, 1.5 * u);
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  // Line casings, then lines (metro style: dark casing keeps crossings clean).
+  for (const pass of [0, 1] as const)
+    for (const l of map.lines) {
+      ctx.beginPath();
+      l.points.forEach((p, i) =>
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y),
+      );
+      ctx.strokeStyle =
+        pass === 0 ? C.bg0 : l.live ? l.color : withAlpha(l.color, 0.45);
+      ctx.lineWidth = pass === 0 ? lw * 2 : lw;
+      ctx.stroke();
+    }
+  // Terminal stations + names + CI.
+  for (const l of map.lines) {
+    const p = l.points[0];
+    const r = 2.6 * u;
+    dot(ctx, p.x, p.y, r + 0.8 * u, l.color);
+    dot(ctx, p.x, p.y, r - 0.2 * u, "#F8FAFC");
+    const ny = p.y - 5.2 * u;
+    const nw = text(ctx, l.name, p.x - 1.5 * u, ny, {
+      size: 5.6 * u,
+      weight: 700,
+      color: l.live ? C.text : C.sub,
+      max: W * 0.3,
+    });
+    let cx = p.x - 1.5 * u + nw + 2.5 * u;
+    if (l.ci) {
+      cx +=
+        chip(ctx, CI_LABEL[l.ci], cx, ny, 3.8 * u, CI_COLORS[l.ci]) + 1.5 * u;
+    }
+    if (l.openPrs > 0) chip(ctx, `${l.openPrs} PR`, cx, ny, 3.8 * u, "#A78BFA");
+  }
+  // Session nodes.
+  for (const n of map.nodes) {
+    const col = STATUS_COLORS[n.status];
+    const r = 2.2 * u;
+    if (n.status === "needs_you") {
+      dot(ctx, n.x, n.y, r * 2, withAlpha(col, 0.22));
+    }
+    dot(ctx, n.x, n.y, r + 0.7 * u, "#F8FAFC");
+    dot(ctx, n.x, n.y, r, col);
+    text(ctx, n.label, n.x, n.y + 5.6 * u, {
+      size: 3.9 * u,
+      color: n.status === "needs_you" ? col : C.sub,
+      align: "center",
+      max: 26 * u,
+    });
+  }
+  // Hub.
+  const h = map.hub;
+  dot(ctx, h.x, h.y, h.r * 1.35, withAlpha(C.accent, 0.12));
+  dot(ctx, h.x, h.y, h.r, "#F8FAFC");
+  dot(ctx, h.x, h.y, h.r * 0.78, C.bg1);
+  text(ctx, "OPS", h.x, h.y + 0.3 * u, {
+    size: h.r * 0.6,
+    weight: 700,
+    color: C.accent,
+    align: "center",
+  });
+  text(ctx, "control room", h.x, h.y + h.r * 1.75, {
+    size: 3.8 * u,
+    color: C.muted,
+    align: "center",
+  });
+  const more: string[] = [];
+  if (map.moreLines > 0) more.push(`+${map.moreLines} more projects`);
+  if (map.moreNodes > 0) more.push(`+${map.moreNodes} more sessions`);
+  if (more.length)
+    text(ctx, more.join(" · "), 6 * u, H - 4 * u, {
+      size: 4.2 * u,
+      color: C.muted,
+    });
+}
+
+// ============================================================================
+// PROJECTS · CI
+// ============================================================================
+
+export interface ProjectsPanelRow {
+  group: MapGroup;
+  color: string;
+  statuses: RoomStatus[];
+  pipeline: { workflow: string; state: CheckState } | null;
+  prs: Array<{ number: number; title: string; state: CheckState }>;
+}
+
+export function drawProjectsPanel(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  rows: ProjectsPanelRow[],
+  ciKnown: boolean,
+  u: number,
+) {
+  panelBg(ctx, W, H);
+  const top = header(
+    ctx,
+    u,
+    W,
+    "Projects",
+    ciKnown ? "sessions · pull requests · CI" : "sessions per project",
+    null,
+  );
+  const x0 = 6 * u;
+  const iw = W - 12 * u;
+  let y = top + 4 * u;
+  const rh = Math.min(24 * u, (H - y - 6 * u) / Math.max(4, rows.length));
+  const shown = rows.slice(0, Math.max(1, Math.floor((H - y - 4 * u) / rh)));
+  if (rows.length === 0)
+    text(ctx, "No projects yet", W / 2, H / 2, {
+      size: 7 * u,
+      weight: 600,
+      color: C.muted,
+      align: "center",
+    });
+  for (const r of shown) {
+    roundRect(ctx, x0, y + 0.8 * u, iw, rh - 1.6 * u, 1.6 * u);
+    ctx.fillStyle = C.card;
+    ctx.fill();
+    ctx.fillStyle = r.color;
+    ctx.fillRect(x0, y + 0.8 * u, 1.2 * u, rh - 1.6 * u);
+    const ly = y + rh * 0.34;
+    const nw = text(ctx, r.group.name, x0 + 4 * u, ly, {
+      size: 6 * u,
+      weight: 700,
+      max: iw * 0.42,
+    });
+    if (r.group.repo)
+      text(ctx, r.group.repo, x0 + 6 * u + nw, ly, {
+        size: 4.2 * u,
+        color: C.muted,
+        mono: true,
+        max: iw * 0.5 - nw,
+      });
+    // Session status dots.
+    let dx = x0 + 5 * u;
+    const dy = y + rh * 0.7;
+    for (const st of r.statuses.slice(0, 10)) {
+      dot(ctx, dx, dy, 1.3 * u, STATUS_COLORS[st]);
+      dx += 3.6 * u;
+    }
+    const live = r.statuses.filter((s) => s !== "ended").length;
+    text(
+      ctx,
+      `${live} live${r.statuses.length > live ? ` · ${r.statuses.length - live} ended` : ""}`,
+      dx + 1 * u,
+      dy,
+      { size: 4.4 * u, color: C.sub },
+    );
+    // CI (right).
+    const rx = x0 + iw - 3 * u;
+    if (r.group.ci) {
+      const s = CI_LABEL[r.group.ci];
+      const cw = measure(ctx, s, 4.4 * u, 600, true) + 4 * u;
+      chip(
+        ctx,
+        s,
+        rx - cw,
+        ly,
+        4.4 * u,
+        CI_COLORS[r.group.ci],
+        r.group.ci === "failure",
+      );
+    } else if (ciKnown) {
+      text(ctx, "CI —", rx, ly, {
+        size: 4.4 * u,
+        color: C.muted,
+        align: "right",
+      });
+    }
+    const pr = r.prs[0];
+    const right = pr
+      ? `#${pr.number} ${pr.title}`
+      : r.pipeline
+        ? `${r.pipeline.workflow}`
+        : r.group.openPrs
+          ? `${r.group.openPrs} open PRs`
+          : "";
+    if (right) {
+      const st = pr?.state ?? r.pipeline?.state ?? null;
+      if (st) dot(ctx, x0 + iw * 0.48, dy, 1.1 * u, CI_COLORS[st]);
+      text(ctx, right, x0 + iw * 0.48 + 3 * u, dy, {
+        size: 4.4 * u,
+        color: C.sub,
+        max: iw * 0.5 - 6 * u,
+      });
+    }
+    y += rh;
+  }
+  if (rows.length > shown.length)
+    text(ctx, `+${rows.length - shown.length} more`, x0, H - 3.5 * u, {
+      size: 4.2 * u,
+      color: C.muted,
+    });
+}
+
+// ============================================================================
+// EVENT LOG (lower tier, under the board)
+// ============================================================================
+
+export function drawEventLog(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  m: OpsModel,
+  u: number,
+) {
+  ctx.fillStyle = C.bg0;
+  ctx.fillRect(0, 0, W, H);
+  const lw = chip(ctx, "LIVE", 4 * u, 5.5 * u, 4.6 * u, C.red, true);
+  text(ctx, "Event log", 4 * u + lw + 3 * u, 5.5 * u, {
+    size: 4.6 * u,
+    weight: 700,
+    caps: true,
+    color: C.sub,
+  });
+  const lines = Math.max(1, Math.floor((H - 11 * u) / (7.2 * u)));
+  const items = m.ticker.slice(0, lines);
+  if (!items.length)
+    text(ctx, "Waiting for activity…", 4 * u, 15 * u, {
+      size: 5.2 * u,
+      color: C.muted,
+    });
+  items.forEach((it, i) => {
+    const y = 15 * u + i * 7.2 * u;
+    let x = 4 * u;
+    x +=
+      text(ctx, it.clock, x, y, { size: 4.8 * u, color: C.muted, mono: true }) +
+      2.5 * u;
+    dot(ctx, x + 1 * u, y, 1.1 * u, STATUS_COLORS[it.status]);
+    x += 4 * u;
+    x +=
+      text(ctx, it.project, x, y, {
+        size: 5.2 * u,
+        weight: 700,
+        max: W * 0.22,
+      }) +
+      2 * u;
+    x +=
+      text(ctx, it.actor, x, y, {
+        size: 4.6 * u,
+        color: C.accent,
+        max: W * 0.12,
+      }) +
+      2.5 * u;
+    text(ctx, it.text, x, y, {
+      size: 5.2 * u,
+      color: C.sub,
+      max: W - x - 4 * u,
+    });
+  });
+}
+
+/** Caption + frame under a lower-tier camera feed (the feed mesh covers the image). */
+export function drawFeedCaption(
+  ctx: Ctx2D,
+  x: number,
+  imgY: number,
+  w: number,
+  imgH: number,
+  capH: number,
+  s: { label: string; status: RoomStatus; phase: string | null } | null,
+  cam: number,
+  u: number,
+) {
+  const col = s ? STATUS_COLORS[s.status] : C.muted;
+  // Image well (visible only while the feed mesh has no texture).
+  ctx.fillStyle = "#06080C";
+  ctx.fillRect(x, imgY, w, imgH);
+  if (!s) {
+    text(ctx, "NO SIGNAL", x + w / 2, imgY + imgH / 2, {
+      size: 6 * u,
+      weight: 700,
+      color: "rgba(148,163,184,0.5)",
+      align: "center",
+    });
+  }
+  // Status frame.
+  ctx.lineWidth = Math.max(2, 0.6 * u);
+  ctx.strokeStyle = s
+    ? withAlpha(col, s.status === "needs_you" ? 1 : 0.6)
+    : C.line;
+  ctx.strokeRect(x - 0.4 * u, imgY - 0.4 * u, w + 0.8 * u, imgH + 0.8 * u);
+  const cy = imgY + imgH + capH / 2 + 0.5 * u;
+  text(ctx, `CAM ${String(cam).padStart(2, "0")}`, x, cy, {
+    size: 4 * u,
+    color: C.muted,
+    mono: true,
+  });
+  if (!s) return;
+  const lx = x + 15 * u;
+  dot(ctx, lx, cy, 1.2 * u, col);
+  const nw = text(ctx, s.label, lx + 3 * u, cy, {
+    size: 5.4 * u,
+    weight: 700,
+    max: w * 0.5,
+  });
+  if (s.phase)
+    text(ctx, s.phase, lx + 5 * u + nw, cy, {
+      size: 4.4 * u,
+      color: s.status === "needs_you" ? col : C.sub,
+      max: w - (lx - x) - nw - 8 * u,
+    });
+}
+
+/** LED-tile seams over a whole wall canvas (subtle, every `tile` px). */
+export function drawTileSeams(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  tileW: number,
+  tileH: number,
+  /** Canvas origin's offset into the wall-wide tile grid (px). */
+  offsetX = 0,
+) {
+  ctx.fillStyle = "rgba(0,0,0,0.38)";
+  const first = tileW - (((offsetX % tileW) + tileW) % tileW);
+  for (let x = first; x < W - 1; x += tileW)
+    if (x > 0.5) ctx.fillRect(Math.round(x), 0, 1, H);
+  for (let y = tileH; y < H - 1; y += tileH)
+    ctx.fillRect(0, Math.round(y), W, 1);
+}
+
+// ============================================================================
+// WALL BOARD (big type: reads at 8–12 m; the DOM dashboard keeps the detail)
+// ============================================================================
+
+/**
+ * Sessions board for the video wall: few columns, big rows. `u` = px per cm
+ * of wall. Project 13 cm, phase 9 cm, figures 10 cm.
+ */
+export function drawWallBoard(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  m: OpsModel,
+  u: number,
+) {
+  panelBg(ctx, W, H);
+  const c = m.counts;
+  // Title row.
+  const ty = 9 * u;
+  const tw = text(ctx, "SESSIONS", 7 * u, ty, {
+    size: 8 * u,
+    weight: 700,
+    color: C.sub,
+  });
+  text(
+    ctx,
+    `${c.live} live · ${c.subagents} subagents`,
+    7 * u + tw + 5 * u,
+    ty,
+    {
+      size: 6.5 * u,
+      color: C.muted,
+    },
+  );
+  let cx = W - 7 * u;
+  const chips: Array<[string, number, string]> = [
+    ["IDLE", c.done, STATUS_COLORS.done],
+    ["WORKING", c.working, STATUS_COLORS.working],
+    ["NEEDS YOU", c.needs_you, STATUS_COLORS.needs_you],
+  ];
+  for (const [label, n, col] of chips) {
+    const s = `${n} ${label}`;
+    const w = measure(ctx, s, 6.5 * u, 600, true) + 6.5 * u * 0.9;
+    cx -= w;
+    chip(ctx, s, cx, ty, 6.5 * u, col, label === "NEEDS YOU" && n > 0);
+    cx -= 3 * u;
+  }
+  ctx.fillStyle = C.line;
+  ctx.fillRect(7 * u, 18 * u, W - 14 * u, Math.max(1, 0.3 * u));
+
+  const live = m.rows.filter((r) => r.status !== "ended");
+  const top = 21 * u;
+  const bodyH = H - top - 3 * u;
+  if (live.length === 0) {
+    text(ctx, "No live sessions", W / 2, top + bodyH * 0.42, {
+      size: 13 * u,
+      weight: 700,
+      color: C.sub,
+      align: "center",
+    });
+    text(
+      ctx,
+      "Start Claude Code anywhere and it shows up here",
+      W / 2,
+      top + bodyH * 0.42 + 14 * u,
+      {
+        size: 7 * u,
+        color: C.muted,
+        align: "center",
+      },
+    );
+    return;
+  }
+  const rowH = Math.max(
+    34 * u,
+    Math.min(46 * u, bodyH / Math.max(1, live.length)),
+  );
+  const fit = Math.max(1, Math.floor(bodyH / rowH));
+  const shown = live.slice(0, live.length > fit ? fit - 1 : fit);
+  const x0 = 7 * u;
+  const iw = W - 14 * u;
+  const colPhase = x0 + iw * 0.47;
+  const colCtx = x0 + iw * 0.76;
+  shown.forEach((r, i) => {
+    const y = top + i * rowH;
+    const h = rowH - 2.4 * u;
+    const sc = STATUS_COLORS[r.status];
+    const needs = r.status === "needs_you";
+    roundRect(ctx, x0, y, iw, h, 2.4 * u);
+    ctx.fillStyle = needs ? withAlpha(sc, 0.16) : C.card;
+    ctx.fill();
+    if (needs) {
+      ctx.strokeStyle = withAlpha(sc, 0.7);
+      ctx.lineWidth = Math.max(2, 0.5 * u);
+      ctx.stroke();
+    }
+    roundRect(ctx, x0, y, 2 * u, h, u);
+    ctx.fillStyle = sc;
+    ctx.fill();
+    const l1 = y + h * 0.36;
+    const l2 = y + h * 0.74;
+    text(ctx, r.project, x0 + 6 * u, l1, {
+      size: 12.5 * u,
+      weight: 700,
+      max: colPhase - x0 - 10 * u,
+    });
+    text(ctx, r.summary ?? r.branch ?? "", x0 + 6 * u, l2, {
+      size: 6.8 * u,
+      color: C.sub,
+      max: colPhase - x0 - 10 * u,
+    });
+    // Phase.
+    const pc = phaseColor(r.phaseKind);
+    dot(ctx, colPhase + 2 * u, l1, 2 * u, pc);
+    text(ctx, r.phaseLabel, colPhase + 6 * u, l1, {
+      size: 9.5 * u,
+      weight: 700,
+      color: needs ? sc : C.text,
+      max: colCtx - colPhase - 10 * u,
+    });
+    const det = [
+      r.phaseElapsed ? `for ${r.phaseElapsed}` : null,
+      r.subagents ? `${r.subagents} agents` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    if (det)
+      text(ctx, det, colPhase + 6 * u, l2, {
+        size: 6.8 * u,
+        color: C.sub,
+        max: colCtx - colPhase - 10 * u,
+      });
+    // Context + cost.
+    const tone = TONE_COLORS[contextTone(r.contextPct)];
+    const bw = x0 + iw - colCtx - 6 * u;
+    text(
+      ctx,
+      r.contextPct != null ? `ctx ${fmtPct(r.contextPct)}` : "ctx —",
+      colCtx,
+      l1,
+      {
+        size: 9.5 * u,
+        weight: 700,
+        mono: true,
+        color: r.contextPct != null ? tone : C.muted,
+      },
+    );
+    bar(
+      ctx,
+      colCtx,
+      l2 - 1.6 * u,
+      bw,
+      3.2 * u,
+      (r.contextPct ?? 0) / 100,
+      tone,
+    );
+    if (r.costUsd != null)
+      text(ctx, fmtUsd(r.costUsd), x0 + iw - 5 * u, l1, {
+        size: 8 * u,
+        weight: 600,
+        mono: true,
+        color: C.sub,
+        align: "right",
+      });
+  });
+  const rest = live.length - shown.length;
+  if (rest > 0)
+    text(
+      ctx,
+      `+${rest} more live · press B for the full dashboard`,
+      x0 + 2 * u,
+      top + shown.length * rowH + 6 * u,
+      {
+        size: 7 * u,
+        color: C.muted,
+      },
+    );
+}
+
+/** Big KPI tiles (lower tier filler where there is no room feed). */
+export function drawKpiTiles(
+  ctx: Ctx2D,
+  W: number,
+  H: number,
+  tiles: Array<{ label: string; value: string; color?: string; sub?: string }>,
+  u: number,
+) {
+  if (W < 20 * u || tiles.length === 0) return;
+  const n = Math.max(1, Math.min(tiles.length, Math.floor(W / (34 * u))));
+  const tw = W / n;
+  tiles.slice(0, n).forEach((t, i) => {
+    const x = i * tw + 1.5 * u;
+    const w = tw - 3 * u;
+    roundRect(ctx, x, 2 * u, w, H - 4 * u, 2 * u);
+    ctx.fillStyle = C.card;
+    ctx.fill();
+    text(ctx, t.label, x + w / 2, H * 0.24, {
+      size: 5.2 * u,
+      weight: 700,
+      caps: true,
+      color: C.muted,
+      align: "center",
+      max: w - 4 * u,
+    });
+    text(ctx, t.value, x + w / 2, H * 0.55, {
+      size: 14 * u,
+      weight: 700,
+      mono: true,
+      color: t.color ?? C.text,
+      align: "center",
+      max: w - 4 * u,
+    });
+    if (t.sub)
+      text(ctx, t.sub, x + w / 2, H * 0.82, {
+        size: 5 * u,
+        color: C.sub,
+        align: "center",
+        max: w - 4 * u,
+      });
+  });
 }

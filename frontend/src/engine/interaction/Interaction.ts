@@ -141,7 +141,12 @@ export class Interaction {
         mesh && ev && isCharacter ? collectTargetMeshes(mesh, ev.target) : [],
         "#F5C9A8",
       );
-      this.frame.show(mesh && ev && !isCharacter ? mesh : null);
+      // Curved targets (the control-room video wall) opt out: a frame fitted
+      // to their bounding box would be metres deep.
+      const noFrame =
+        (mesh?.metadata as { noFocusFrame?: boolean } | null)?.noFocusFrame ===
+        true;
+      this.frame.show(mesh && ev && !isCharacter && !noFrame ? mesh : null);
       this.fx?.suppressGlow(
         mesh && !isCharacter && mesh.getClassName() === "Mesh"
           ? (mesh as Mesh)

@@ -71,6 +71,8 @@ export interface CampusSession {
   refs?: string[];
   /** Project / app name, e.g. "continuum" (repo basename or package name). */
   project?: string | null;
+  /** Key of the CampusProject this session belongs to (CampusState.projects[].id). */
+  projectId?: string | null;
   /** Where the session is at right now (deterministic, from the live tool stream). */
   phase?: SessionPhase | null;
   alive?: boolean | null;
@@ -133,6 +135,8 @@ export interface SessionTelemetry {
   cacheExpiresAt?: string | null; // ISO
   repo?: string | null; // "owner/name"
   outputStyle?: string | null;
+  /** "statusline" = exact (status line tee); "transcript" = estimated from the transcript JSONL. */
+  source?: "statusline" | "transcript" | null;
   updatedAt: string; // ISO, when the status line last reported
 }
 
@@ -176,8 +180,128 @@ export interface CampusStats {
   updatedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Projects (one team room per project) + CI/CD
+// ---------------------------------------------------------------------------
+
+export type CheckState =
+  "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+
+export type CheckKind =
+  "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
+
+export interface CheckRun {
+  name: string; // e.g. "build", "test (3.12)", "lint"
+  state: CheckState;
+  startedAt?: string | null;
+  durationS?: number | null;
+  url?: string | null;
+  kind?: CheckKind;
+  attempt?: number | null;
+}
+
+export interface CheckSummary {
+  state: CheckState; // rolled up: failure > running > queued > success > none
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  runs?: CheckRun[]; // <= 12
+}
+
+export interface PrLabel {
+  name: string;
+  color?: string | null; // "#rrggbb"
+}
+
+export interface PullRequestInfo {
+  number: number;
+  title: string;
+  branch: string;
+  author?: string | null;
+  url?: string | null;
+  draft: boolean;
+  state: "open" | "merged" | "closed";
+  reviewDecision?: "approved" | "changes_requested" | "review_required" | null;
+  mergeable?: "mergeable" | "conflicting" | "unknown" | null;
+  checks: CheckSummary;
+  /** Session whose git branch matches this PR's head branch, when any. */
+  sessionId?: string | null;
+  updatedAt: string;
+  baseBranch?: string | null;
+  additions?: number | null;
+  deletions?: number | null;
+  changedFiles?: number | null;
+  labels?: PrLabel[];
+  /** dependabot / renovate / github-actions author. */
+  bot?: boolean;
+  createdAt?: string | null;
+  mergedAt?: string | null;
+  closedAt?: string | null;
+}
+
+/** A recent workflow run on the default branch / tags (CI, deploy, release). */
+export interface PipelineRun {
+  id: string;
+  workflow: string;
+  kind: "ci" | "deploy" | "release" | "other";
+  branch?: string | null;
+  state: CheckState;
+  startedAt?: string | null;
+  durationS?: number | null;
+  url?: string | null;
+  event?: string | null;
+  headSha?: string | null;
+  attempt?: number | null;
+}
+
+export interface ReleaseInfo {
+  tag: string;
+  name?: string | null;
+  publishedAt?: string | null;
+  prerelease?: boolean;
+  url?: string | null;
+}
+
+export interface LocalGitState {
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  dirtyFiles: number;
+  lastCommit?: { hash: string; message: string; at: string } | null;
+  worktrees?: {
+    path: string;
+    branch: string | null;
+    sessionId?: string | null;
+  }[];
+}
+
+export interface CampusProject {
+  /** Stable key: "owner/name" when the remote is known, else the repo root path. */
+  id: string;
+  name: string; // display, e.g. "continuum"
+  repo?: string | null; // "owner/name"
+  defaultBranch?: string | null;
+  sessionIds: string[]; // live sessions working in this repo (incl. worktrees)
+  pullRequests?: PullRequestInfo[]; // open PRs + PRs merged/closed in the last 24 h, <= 20
+  pipelines?: PipelineRun[]; // newest first, <= 10
+  /** Whether CI data is available (gh installed + authenticated + GitHub remote). */
+  ciAvailable?: boolean;
+  updatedAt: string;
+  /** Rolled up from the newest CI run on defaultBranch. */
+  mainHealth?: CheckState;
+  releases?: ReleaseInfo[]; // <= 5
+  localGit?: LocalGitState | null;
+  /** Last fetch failed; data is last-good. */
+  stale?: boolean;
+  ciError?: string | null;
+  fetchedAt?: string | null;
+}
+
 export interface CampusState {
   sessions: CampusSession[];
+  /** Sessions grouped by project with CI/CD data; absent on older backends. */
+  projects?: CampusProject[] | null;
   /** Building-wide stats; absent on older backends. */
   stats?: CampusStats | null;
   lastUpdated: string;
@@ -204,27 +328,54 @@ export interface Vec3 {
 // ============================================================================
 // BUILDING LAYOUT (engine/layout/buildingLayout.ts produces these)
 // ============================================================================
+//
+// One TEAM ROOM per PROJECT off the hall; inside, one POD per session (the
+// session's lead desk at the head of a bench of 8 subagent desks). Rooms sit
+// on a bay grid along the hall (BAY_W per bay): an entry bay (door, lounge,
+// coffee point) + one bay per pod. Rooms grow by appending pod bays at the
+// far end, so existing pods never move when a room grows.
 
 export const LAYOUT = {
-  ROOM_W: 9, // along the hall (Z)
-  ROOM_D: 7, // across the hall (X)
+  /** Bay pitch along the hall (one pod per bay). */
+  ROOM_W: 4.8,
+  /** Project room depth across the hall (glass front → far / overlook wall). */
+  ROOM_D: 9.6,
   WALL_H: 3.2,
   HALL_W: 7,
   LOBBY_D: 12,
-  CONTROL_D: 10,
-  ROOM_GAP: 0.4, // wall thickness between neighbouring rooms
+  /** Control-room footprint at the hall's far end (round ops room inside). */
+  CONTROL_D: 18,
+  CONTROL_MIN_W: 20,
+  CONTROL_H: 4.5,
+  /** Inter-room walls live inside the room footprints (bay grid is gapless). */
+  ROOM_GAP: 0,
   DOOR_W: 1.4,
-  SILL_H: 0.9, // plaster below the glass front
-  MIN_BAYS: 2, // building always shows at least 2 bays per side
+  /** Circulation strip along the glass front inside a project room. */
+  CORRIDOR_W: 1.6,
+  SILL_H: 0.9,
+  /** Minimum hall length in bays (per side). */
+  MIN_BAYS: 4,
   MAX_FEEDS: 16,
 } as const;
 
 export type RoomSide = "east" | "west";
 
-export interface RoomSlot {
-  index: number; // 0-based allocation index
+/** Room size class by session count: 1–2 standard, 3–4 large, 5+ wing. */
+export type ProjectRoomSize = "standard" | "large" | "wing";
+
+/** A project room's place on the bay grid (stable across updates). */
+export interface ProjectSlot {
+  index: number; // stable allocation ordinal (accent colour, room number)
   side: RoomSide;
-  bay: number; // position along the hall
+  bay: number; // first bay along the hall
+  span: number; // bays occupied (entry bay + pod bays)
+}
+
+/** A pod's identity for the sync diff: changes iff the pod moves. */
+export interface RoomSlot {
+  index: number; // unique while the pod stays put
+  side: RoomSide;
+  bay: number; // bay of the pod along the hall
 }
 
 export interface DeskSlot {
@@ -240,36 +391,136 @@ export interface DeskSlot {
   monitor: { position: Vec3; yaw: number };
 }
 
+export interface Panel {
+  position: Vec3;
+  yaw: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * One SESSION's pod inside its project room (characters, monitors and the
+ * walking graph use it like a room). Pod frame: origin on the room's
+ * circulation spine at the pod centre; local +Z points into the room (away
+ * from the glass), local X runs along the hall.
+ */
 export interface RoomLayout {
   sessionId: string;
+  projectId: string;
+  podIndex: number;
   slot: RoomSlot;
-  /** Room centre at floor level (world space). */
+  /** Pod origin on the circulation spine (world space, floor level). */
   origin: Vec3;
-  /** Rotation of the room's local frame. Local -X faces the hall (door wall). */
+  /** Pod frame yaw (see above). */
   yaw: number;
   size: { w: number; d: number; h: number };
-  door: Vec3; // centre of the door gap, floor level
-  doorOutside: Vec3; // 1 m into the hall
-  doorInside: Vec3; // 1 m into the room
+  /** The project room's door (shared by its pods). */
+  door: Vec3;
+  doorOutside: Vec3;
+  doorInside: Vec3; // on the circulation spine
   bossDesk: DeskSlot;
-  desks: DeskSlot[]; // exactly 8, index == backend agent.desk - 1 (desk is 1-based) — see roomLayout
-  /** Walking spine from doorInside to the room centre. */
-  aisle: Vec3[];
-  whiteboard: { position: Vec3; yaw: number; width: number; height: number };
-  lounge: { position: Vec3; yaw: number };
-  lamp: Vec3; // status lamp above the door, hall side
-  nameplate: { position: Vec3; yaw: number };
+  desks: DeskSlot[]; // exactly 8, index == backend agent.desk - 1 (desk is 1-based)
+  /** Mobile whiteboard (session todos). */
+  whiteboard: Panel;
+  /** Pod nameplate monitor at the head of the bench, facing the spine. */
+  sign: Panel;
+  /** Pod footprint (bay × room depth). */
+  bounds: { min: Vec3; max: Vec3 };
+}
+
+export interface ProjectRoomLayout {
+  projectId: string;
+  name: string;
+  slot: ProjectSlot;
+  sizeClass: ProjectRoomSize;
+  /** Pod bays (span - 1). */
+  capacity: number;
+  /** Room centre at floor level. */
+  origin: Vec3;
+  /** Local frame yaw: local -X faces the hall (door wall), Z along the hall. */
+  yaw: number;
+  size: { w: number; d: number; h: number }; // w along the hall, d across
+  door: Vec3;
+  doorOutside: Vec3;
+  doorInside: Vec3;
+  /** Entry bay centre (door, lounge corner, coffee point). */
+  entry: { center: Vec3; yaw: number };
+  /** Every pod bay of the room in order (yaw = pod frame yaw). */
+  podBays: { center: Vec3; yaw: number; occupied: boolean }[];
+  pods: RoomLayout[];
+  /** Acoustic dividers between pod bays (centre, yaw of the panel's long axis frame). */
+  dividers: { position: Vec3; yaw: number }[];
+  /** LED panel over the door (hall side): project + aggregate status. */
+  led: Panel;
+  /** Wall-mounted info screen beside the door (hall side): one row per session. */
+  infoScreen: Panel;
+  /**
+   * The far wall, glazed onto the outside (city today, factory floor later)
+   * when `overlook` is on; null when the far wall is solid.
+   */
+  overlook: { origin: Vec3; dir: Vec3; length: number; height: number } | null;
   feedCamera: { position: Vec3; target: Vec3 };
   bounds: { min: Vec3; max: Vec3 };
+
+  // ---- Factory exposure (pure data; the factory is generated from these) ----
+  /** Room slab extents: x0 = glass-front line (s·3.5), x1 = outer glazing line (s·13.1). */
+  footprint: { x0: number; x1: number; z0: number; z1: number };
+  /** Outer glazing wall (the overlook side); yaw = its outward normal. */
+  outer: { x: number; yaw: number; z0: number; z1: number };
+  /** Balcony strip 1.2 m outside the outer glazing (x0 at the glazing); door at the entry bay. */
+  balcony: {
+    x0: number;
+    x1: number;
+    z0: number;
+    z1: number;
+    door: Vec3;
+    doorYaw: number;
+  };
+  /** Structural glass strip 1.0 m inside the outer glazing (x1 at the glazing). */
+  glassFloor: { x0: number; x1: number; z0: number; z1: number };
+  /** Column positions (y = 0) on the bay grid at the glass-front and outer lines (incl. slab corners). */
+  columns: Vec3[];
+  /** Bay index of the entry bay (== slot.bay) and the room's span in bays. */
+  entryBay: number;
+  span: number;
+}
+
+/** Macro-layout knobs (all optional; defaults = rooms on both sides). */
+export interface LayoutOptions {
+  /** Hall sides that carry project rooms. */
+  sides?: readonly RoomSide[];
+  /**
+   * Glaze one whole side of the hall as an overlook (no rooms on that side).
+   * Implies `sides` = the other side.
+   */
+  hallOverlook?: RoomSide | null;
+  /** Glaze the far wall of every project room (default true). */
+  roomOverlook?: boolean;
+  /**
+   * Per-project size demand in session-equivalents, e.g.
+   * max(sessions, ceil(activePRs / 2)). Honoured up to the `wing` size
+   * (6 pods); live sessions always get a pod.
+   */
+  spanFor?: (projectId: string, sessions: number) => number;
 }
 
 export interface BuildingLayout {
   lobby: { origin: Vec3; size: Vec3; spawn: Vec3; spawnYaw: number };
-  hall: { origin: Vec3; length: number; width: number }; // origin = hall start centre at floor
+  hall: {
+    origin: Vec3; // hall start centre at floor
+    length: number;
+    width: number;
+    /** Side of the hall glazed as an overlook (no rooms there), if any. */
+    overlook: RoomSide | null;
+  };
   controlRoom: {
+    /** Footprint centre (floor). The round ops room lives inside. */
     origin: Vec3;
+    /** Footprint (x = width ≥ CONTROL_MIN_W, y = clear height, z = depth). */
     size: Vec3;
+    /** Door centre on the hall axis, in the hall-side wall (z = hall end). */
     door: Vec3;
+    doorWidth: number;
     screenWall: {
       origin: Vec3;
       yaw: number;
@@ -280,10 +531,13 @@ export interface BuildingLayout {
     };
     spawn: Vec3;
   };
+  projects: ProjectRoomLayout[];
+  /** Every session pod (flattened from `projects`). */
   rooms: RoomLayout[];
-  bays: number; // rooms per side (>= MIN_BAYS)
-  /** Empty bay slots (no session) that render as plain wall. */
-  emptySlots: RoomSlot[];
+  bays: number; // bays per side (>= MIN_BAYS)
+  sides: readonly RoomSide[];
+  /** Free bay runs (no project) on room sides, rendered as plain wall. */
+  emptySlots: ProjectSlot[];
   bounds: { min: Vec3; max: Vec3 };
 }
 
@@ -291,7 +545,8 @@ export type Zone =
   | { kind: "lobby" }
   | { kind: "hall" }
   | { kind: "control" }
-  | { kind: "room"; sessionId: string }
+  /** Inside a project room; `sessionId` = the pod under the player (or the room's first pod). */
+  | { kind: "room"; sessionId: string; projectId?: string }
   | { kind: "outside" };
 
 // ============================================================================
@@ -306,6 +561,12 @@ export const STATUS_COLORS: Record<RoomStatus, string> = {
   done: "#22c55e",
   ended: "#475569",
 };
+
+export const CHECK_COLORS = {
+  ...STATUS_COLORS,
+  failure: "#ef4444",
+  merged: "#a855f7",
+} as const;
 
 export type CharacterPose =
   | "idle" // standing idle
@@ -362,6 +623,8 @@ export interface SyncInput {
   selectedSessionId: string | null;
   /** Building-wide stats for the control room (CampusState.stats). */
   stats?: CampusStats | null;
+  /** Projects (one team room each); grouped client-side when absent. */
+  projects?: CampusProject[] | null;
 }
 
 // ============================================================================
@@ -480,8 +743,10 @@ export interface IWorld {
   setBranding?(opts: BrandingOptions): void;
   /** Disable game input (HUD panel open) — releases pointer lock. */
   setInputEnabled(enabled: boolean): void;
-  /** Teleport the player to a room's door (minimap fast travel) or "lobby" / "control". */
-  teleport(to: { sessionId: string } | "lobby" | "control"): void;
+  /** Teleport the player to a project room's door (minimap fast travel) or "lobby" / "control". */
+  teleport(
+    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
+  ): void;
   /** Touch controls feed these. */
   setVirtualMove(x: number, y: number): void;
   addLook(dx: number, dy: number): void;

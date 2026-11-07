@@ -1,131 +1,326 @@
 import { describe, expect, it } from "vitest";
-import { LAYOUT, type RoomSlot, type Vec3 } from "@/engine/contracts";
 import {
+  LAYOUT,
+  type BuildingLayout,
+  type ProjectSlot,
+  type Vec3,
+} from "@/engine/contracts";
+import {
+  allocatePods,
   allocateSlots,
+  BALCONY_D,
+  demandSpan,
   generateLayout,
+  GLASS_FLOOR_W,
+  podCapacityFor,
+  projectOfSession,
   roomAt,
+  roomSizeFor,
+  roomSpanFor,
 } from "@/engine/layout/buildingLayout";
 
-const mk = (n: number) =>
-  Array.from({ length: n }, (_, i) => ({ id: `s${i}`, createdAt: 1000 + i }));
 const EPS = 1e-6;
-const inside = (b: { min: Vec3; max: Vec3 }, p: Vec3) =>
+const inside = (b: { min: Vec3; max: Vec3 }, p: { x: number; z: number }) =>
   p.x >= b.min.x - EPS &&
   p.x <= b.max.x + EPS &&
   p.z >= b.min.z - EPS &&
   p.z <= b.max.z + EPS;
+const overlap = (a: { min: Vec3; max: Vec3 }, b: { min: Vec3; max: Vec3 }) =>
+  a.min.x < b.max.x - EPS &&
+  b.min.x < a.max.x - EPS &&
+  a.min.z < b.max.z - EPS &&
+  b.min.z < a.max.z - EPS;
 
-describe("allocateSlots", () => {
-  it("alternates sides and increments bays", () => {
-    const m = allocateSlots(new Map(), mk(5));
-    expect([...m.values()].map((s) => s.side)).toEqual([
-      "east",
-      "west",
-      "east",
-      "west",
-      "east",
+/** 3 projects with 3 / 2 / 1 sessions (the demo shape). */
+const GROUPS = [
+  { id: "continuum", name: "continuum", sessionIds: ["c0", "c1", "c2"] },
+  { id: "payments", name: "payments-api", sessionIds: ["p0", "p1"] },
+  { id: "office", name: "claude-office", sessionIds: ["o0"] },
+];
+const req = (g: typeof GROUPS) =>
+  g.map((x, i) => ({ id: x.id, createdAt: i, sessions: x.sessionIds.length }));
+
+function demoLayout(): BuildingLayout {
+  const slots = allocateSlots(new Map(), req(GROUPS));
+  return generateLayout(slots, GROUPS, allocatePods(new Map(), GROUPS));
+}
+
+describe("room sizing", () => {
+  it("scales with the session count", () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map(roomSizeFor)).toEqual([
+      "standard",
+      "standard",
+      "large",
+      "large",
+      "wing",
+      "wing",
+      "wing",
     ]);
-    expect(m.get("s4")).toEqual({ index: 4, side: "east", bay: 2 });
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(podCapacityFor)).toEqual([
+      2, 2, 4, 4, 6, 6, 8, 8,
+    ]);
+    expect(roomSpanFor(1)).toBe(3);
+    expect(roomSpanFor(3)).toBe(5);
+    expect(roomSpanFor(5)).toBe(7);
   });
 
-  it("keeps slots across reorder/add and reuses the lowest freed index", () => {
-    const first = allocateSlots(new Map(), mk(3));
-    const reordered = allocateSlots(first, [...mk(3)].reverse());
-    expect(reordered).toEqual(first);
-    const removed = allocateSlots(
-      first,
-      mk(3).filter((s) => s.id !== "s1"),
+  it("honours spanFor demand up to the wing size", () => {
+    expect(demandSpan("x", 1, { spanFor: () => 3 })).toBe(5);
+    expect(demandSpan("x", 1, { spanFor: () => 40 })).toBe(7);
+    expect(demandSpan("x", 3, { spanFor: () => 1 })).toBe(5);
+    expect(demandSpan("x", 8, { spanFor: () => 2 })).toBe(9); // sessions always fit
+    const slots = allocateSlots(
+      new Map(),
+      [{ id: "busy", createdAt: 0, sessions: 1 }],
+      { spanFor: (id) => (id === "busy" ? 4 : 0) },
     );
-    expect(removed.has("s1")).toBe(false);
-    expect(removed.get("s2")).toEqual(first.get("s2"));
-    const added = allocateSlots(removed, [
-      ...mk(3).filter((s) => s.id !== "s1"),
-      { id: "new", createdAt: 5000 },
+    expect(slots.get("busy")?.span).toBe(5);
+  });
+});
+
+describe("allocateSlots", () => {
+  it("places rooms on both sides, entry bays from the lobby", () => {
+    const slots = allocateSlots(new Map(), req(GROUPS));
+    const c = slots.get("continuum")!;
+    const p = slots.get("payments")!;
+    const o = slots.get("office")!;
+    expect(c).toEqual({ index: 0, side: "east", bay: 0, span: 5 });
+    expect(p).toEqual({ index: 1, side: "west", bay: 0, span: 3 });
+    expect(o.side).toBe("west");
+    expect(o.bay).toBe(3);
+  });
+
+  it("keeps slots stable across reorder and unrelated changes", () => {
+    const first = allocateSlots(new Map(), req(GROUPS));
+    const again = allocateSlots(first, [...req(GROUPS)].reverse());
+    expect(again).toEqual(first);
+    const without = allocateSlots(
+      first,
+      req(GROUPS).filter((r) => r.id !== "payments"),
+    );
+    expect(without.get("continuum")).toEqual(first.get("continuum"));
+    expect(without.get("office")).toEqual(first.get("office"));
+  });
+
+  it("grows in place when free, else relocates only that room", () => {
+    const first = allocateSlots(new Map(), req(GROUPS));
+    // office (1 → 3 sessions) grows past its end: west bays 6.. are free.
+    const grown = allocateSlots(first, [
+      ...req(GROUPS).filter((r) => r.id !== "office"),
+      { id: "office", createdAt: 2, sessions: 3 },
     ]);
-    expect(added.get("new")?.index).toBe(1);
-    expect(added.get("s0")).toEqual(first.get("s0"));
+    expect(grown.get("office")).toEqual({ ...first.get("office")!, span: 5 });
+    expect(grown.get("continuum")).toEqual(first.get("continuum"));
+    // payments (2 → 3) is blocked by office right after it: it moves, alone.
+    const blocked = allocateSlots(first, [
+      ...req(GROUPS).filter((r) => r.id !== "payments"),
+      { id: "payments", createdAt: 1, sessions: 3 },
+    ]);
+    expect(blocked.get("continuum")).toEqual(first.get("continuum"));
+    expect(blocked.get("office")).toEqual(first.get("office"));
+    const moved = blocked.get("payments")!;
+    expect(moved.span).toBe(5);
+    expect(moved.index).toBe(first.get("payments")!.index);
+    expect(moved).not.toEqual({ ...first.get("payments")!, span: 5 });
+  });
+
+  it("shrinks in place and frees the tail", () => {
+    const first = allocateSlots(new Map(), req(GROUPS));
+    const shrunk = allocateSlots(first, [
+      { id: "continuum", createdAt: 0, sessions: 1 },
+      ...req(GROUPS).slice(1),
+    ]);
+    expect(shrunk.get("continuum")).toEqual({
+      ...first.get("continuum")!,
+      span: 3,
+    });
+  });
+
+  it("never overlaps runs on a side", () => {
+    let prev = new Map<string, ProjectSlot>();
+    for (let step = 0; step < 30; step++) {
+      const reqs = Array.from({ length: 1 + (step % 7) }, (_, i) => ({
+        id: `p${(i * 3 + step) % 9}`,
+        createdAt: (i * 3 + step) % 9,
+        sessions: 1 + ((i + step) % 6),
+      })).filter((r, i, a) => a.findIndex((x) => x.id === r.id) === i);
+      prev = allocateSlots(prev, reqs);
+      const used = new Set<string>();
+      for (const s of prev.values())
+        for (let b = s.bay; b < s.bay + s.span; b++) {
+          const k = `${s.side}:${b}`;
+          expect(used.has(k)).toBe(false);
+          used.add(k);
+        }
+      for (const r of reqs)
+        expect(prev.get(r.id)!.span).toBe(roomSpanFor(r.sessions));
+    }
+  });
+
+  it("respects a hall overlook side", () => {
+    const slots = allocateSlots(new Map(), req(GROUPS), {
+      hallOverlook: "west",
+    });
+    for (const s of slots.values()) expect(s.side).toBe("east");
+  });
+});
+
+describe("allocatePods", () => {
+  it("keeps pods stable and compacts only when needed", () => {
+    const first = allocatePods(new Map(), GROUPS);
+    expect(GROUPS[0].sessionIds.map((s) => first.get(s))).toEqual([0, 1, 2]);
+    // c0 leaves: c1, c2 keep their pods (capacity 4 → still fits? no: 2 → cap 2)
+    const g2 = [{ ...GROUPS[0], sessionIds: ["c1", "c2"] }];
+    const next = allocatePods(first, g2);
+    expect(next.get("c1")).toBe(1);
+    expect(next.get("c2")).toBe(0); // pod 2 ≥ capacity 2 → lowest free
+    const g3 = [{ ...GROUPS[0], sessionIds: ["c1", "c2", "c3"] }];
+    const n3 = allocatePods(next, g3);
+    expect(n3.get("c1")).toBe(1);
+    expect(n3.get("c2")).toBe(0);
+    expect(n3.get("c3")).toBe(2);
   });
 });
 
 describe("generateLayout", () => {
-  const slots = allocateSlots(new Map(), mk(6));
-  const layout = generateLayout(slots);
+  const layout = demoLayout();
 
-  it("has min bays and emptySlots", () => {
+  it("has one room per project with one pod per session", () => {
+    expect(layout.projects).toHaveLength(3);
+    expect(layout.rooms).toHaveLength(6);
+    const c = layout.projects.find((p) => p.projectId === "continuum")!;
+    expect(c.sizeClass).toBe("large");
+    expect(c.capacity).toBe(4);
+    expect(c.pods.map((p) => p.sessionId)).toEqual(["c0", "c1", "c2"]);
+    expect(c.podBays.map((b) => b.occupied)).toEqual([true, true, true, false]);
+    expect(c.dividers).toHaveLength(4);
+    expect(projectOfSession(layout, "p1")?.projectId).toBe("payments");
     expect(generateLayout(new Map()).bays).toBe(LAYOUT.MIN_BAYS);
-    expect(generateLayout(new Map()).emptySlots).toHaveLength(
-      LAYOUT.MIN_BAYS * 2,
-    );
-    const one = generateLayout(allocateSlots(new Map(), mk(1)));
-    expect(one.emptySlots.map((s) => s.index)).toEqual([1, 2, 3]);
-    expect(layout.bays).toBe(3);
-    expect(layout.emptySlots).toHaveLength(0);
   });
 
-  it("rooms do not overlap each other or the hall", () => {
+  it("rooms never overlap each other or the hall", () => {
     const hallHalf = LAYOUT.HALL_W / 2;
-    for (const r of layout.rooms) {
+    for (const r of layout.projects) {
       if (r.slot.side === "east")
         expect(r.bounds.min.x).toBeGreaterThanOrEqual(hallHalf - EPS);
       else expect(r.bounds.max.x).toBeLessThanOrEqual(-hallHalf + EPS);
-      expect(r.bounds.max.z).toBeLessThanOrEqual(layout.hall.length + EPS);
       expect(r.bounds.min.z).toBeGreaterThanOrEqual(-EPS);
+      expect(r.bounds.max.z).toBeLessThanOrEqual(layout.hall.length + EPS);
     }
+    for (const a of layout.projects)
+      for (const b of layout.projects)
+        if (a !== b) expect(overlap(a.bounds, b.bounds)).toBe(false);
     for (const a of layout.rooms)
-      for (const b of layout.rooms) {
-        if (a === b) continue;
-        const ox =
-          a.bounds.min.x < b.bounds.max.x - EPS &&
-          b.bounds.min.x < a.bounds.max.x - EPS;
-        const oz =
-          a.bounds.min.z < b.bounds.max.z - EPS &&
-          b.bounds.min.z < a.bounds.max.z - EPS;
-        expect(ox && oz).toBe(false);
-      }
+      for (const b of layout.rooms)
+        if (a !== b) expect(overlap(a.bounds, b.bounds)).toBe(false);
   });
 
-  it("keeps desk, seat, aisle and door points inside the room", () => {
-    for (const r of layout.rooms) {
-      const pts: Vec3[] = [
-        r.doorInside,
-        r.door,
-        ...r.aisle,
-        r.bossDesk.position,
-        r.bossDesk.seat,
-        r.bossDesk.approach,
-      ];
-      for (const d of r.desks)
-        pts.push(d.position, d.seat, d.approach, d.monitor.position);
-      expect(r.desks).toHaveLength(8);
-      for (const p of pts) expect(inside(r.bounds, p)).toBe(true);
+  it("keeps every pod, desk, seat and walking point inside its pod / room", () => {
+    for (const r of layout.projects) {
+      expect(inside(r.bounds, r.door)).toBe(true);
+      expect(inside(r.bounds, r.doorInside)).toBe(true);
       expect(inside(r.bounds, r.doorOutside)).toBe(false);
+      for (const pod of r.pods) {
+        expect(inside(r.bounds, pod.bounds.min)).toBe(true);
+        expect(inside(r.bounds, pod.bounds.max)).toBe(true);
+        const pts: Vec3[] = [
+          pod.bossDesk.position,
+          pod.bossDesk.seat,
+          pod.bossDesk.approach,
+          pod.whiteboard.position,
+          pod.sign.position,
+        ];
+        for (const d of pod.desks)
+          pts.push(d.position, d.seat, d.approach, d.monitor.position);
+        expect(pod.desks).toHaveLength(8);
+        for (const p of pts) expect(inside(pod.bounds, p)).toBe(true);
+        // Nothing in the circulation strip but the walking spine itself.
+        const fromGlass = (p: Vec3) => Math.abs(p.x) - LAYOUT.HALL_W / 2;
+        for (const d of pod.desks)
+          expect(fromGlass(d.approach)).toBeGreaterThan(LAYOUT.CORRIDOR_W);
+        expect(fromGlass(pod.origin)).toBeCloseTo(LAYOUT.CORRIDOR_W / 2);
+        expect(fromGlass(r.doorInside)).toBeCloseTo(LAYOUT.CORRIDOR_W / 2);
+      }
     }
   });
 
-  it("faces the boss desk and the door correctly", () => {
-    for (const r of layout.rooms) {
-      const toDoor = {
-        x: r.doorInside.x - r.bossDesk.position.x,
-        z: r.doorInside.z - r.bossDesk.position.z,
-      };
-      expect(Math.sin(r.bossDesk.yaw)).toBeCloseTo(Math.sign(toDoor.x) || 0, 5);
-      const hallDir = r.slot.side === "east" ? -1 : 1;
-      expect(Math.sin(r.desks[0].yaw)).toBeCloseTo(-hallDir, 5); // faces away from hall
-      expect(Math.sin(r.bossDesk.yaw)).toBeCloseTo(hallDir, 5);
+  it("faces the lead toward its bench and the bench toward each other", () => {
+    for (const pod of layout.rooms) {
+      const out = pod.slot.side === "east" ? 1 : -1; // into the room
+      // Lead faces back toward the bench / glass front.
+      expect(Math.sin(pod.bossDesk.yaw)).toBeCloseTo(-out, 5);
+      for (const d of pod.desks) {
+        // Bench desks face along the hall (±z), toward the bench centre line.
+        expect(Math.abs(Math.cos(d.yaw))).toBeCloseTo(1, 5);
+        const toCentre = pod.origin.z - d.seat.z;
+        expect(Math.sign(Math.cos(d.yaw))).toBe(Math.sign(toCentre));
+      }
     }
   });
 
-  it("classifies zones", () => {
-    const r = layout.rooms[1];
-    expect(roomAt(layout, r.origin)).toEqual({
+  it("exposes the factory fields (footprint, outer, balcony, glass floor, columns)", () => {
+    for (const r of layout.projects) {
+      const s = r.slot.side === "east" ? 1 : -1;
+      const { ROOM_W, HALL_W, ROOM_D } = LAYOUT;
+      expect(r.entryBay).toBe(r.slot.bay);
+      expect(r.span).toBe(r.slot.span);
+      expect(r.footprint).toEqual({
+        x0: s * (HALL_W / 2),
+        x1: s * (HALL_W / 2 + ROOM_D),
+        z0: r.slot.bay * ROOM_W,
+        z1: (r.slot.bay + r.slot.span) * ROOM_W,
+      });
+      expect(r.outer.x).toBe(r.footprint.x1);
+      expect(Math.sin(r.outer.yaw)).toBeCloseTo(s);
+      expect(r.balcony.x1 - r.balcony.x0).toBeCloseTo(s * BALCONY_D);
+      expect(r.balcony.door.x).toBe(r.footprint.x1);
+      expect(r.balcony.door.z).toBeGreaterThan(r.footprint.z0);
+      expect(r.balcony.door.z).toBeLessThan(r.footprint.z0 + ROOM_W);
+      expect(r.glassFloor.x1).toBe(r.footprint.x1);
+      expect(r.glassFloor.x1 - r.glassFloor.x0).toBeCloseTo(s * GLASS_FLOOR_W);
+      expect(r.columns).toHaveLength((r.span + 1) * 2);
+      for (const c of r.columns) {
+        expect(c.y).toBe(0);
+        expect([r.footprint.x0, r.footprint.x1]).toContain(c.x);
+        expect((c.z / ROOM_W) % 1).toBeCloseTo(0);
+      }
+      for (const [x, z] of [
+        [r.footprint.x0, r.footprint.z0],
+        [r.footprint.x1, r.footprint.z1],
+      ])
+        expect(r.columns.some((c) => c.x === x && c.z === z)).toBe(true);
+      expect(r.overlook).not.toBeNull();
+    }
+  });
+
+  it("lists free runs as empty slots and sizes the control room", () => {
+    // west: payments 0..2, office 3..5; east: continuum 0..4 → hall 6 bays.
+    expect(layout.bays).toBe(6);
+    expect(layout.emptySlots).toEqual([
+      { index: -1, side: "east", bay: 5, span: 1 },
+    ]);
+    const c = layout.controlRoom;
+    expect(c.size.x).toBeGreaterThanOrEqual(20);
+    expect(c.size.z).toBeGreaterThanOrEqual(18);
+    expect(c.door.x).toBe(0);
+    expect(c.door.z).toBe(layout.hall.length);
+    expect(c.origin.z - c.size.z / 2).toBeCloseTo(layout.hall.length);
+  });
+
+  it("classifies zones with the project and the pod under the player", () => {
+    const c = layout.projects.find((p) => p.projectId === "continuum")!;
+    const pod = c.pods[1];
+    expect(roomAt(layout, pod.bossDesk.seat)).toEqual({
       kind: "room",
-      sessionId: r.sessionId,
+      sessionId: pod.sessionId,
+      projectId: "continuum",
     });
-    expect(roomAt(layout, r.doorInside)).toEqual({
+    expect(roomAt(layout, c.doorInside)).toEqual({
       kind: "room",
-      sessionId: r.sessionId,
+      sessionId: c.pods[0].sessionId,
+      projectId: "continuum",
     });
-    expect(roomAt(layout, r.doorOutside)).toEqual({ kind: "hall" });
+    expect(roomAt(layout, c.doorOutside)).toEqual({ kind: "hall" });
     expect(roomAt(layout, layout.lobby.spawn)).toEqual({ kind: "lobby" });
     expect(roomAt(layout, layout.controlRoom.spawn)).toEqual({
       kind: "control",
@@ -134,13 +329,18 @@ describe("generateLayout", () => {
     expect(roomAt(layout, { x: 0, z: -50 })).toEqual({ kind: "outside" });
   });
 
-  it("allocates slots in the expected places", () => {
-    const e = layout.rooms.find((r) => r.slot.index === 0)!;
-    const w = layout.rooms.find((r) => r.slot.index === 1)!;
-    expect(e.origin.x).toBeGreaterThan(0);
-    expect(w.origin.x).toBeLessThan(0);
-    expect(e.origin.z).toBeCloseTo(w.origin.z);
-    const s: RoomSlot = layout.emptySlots[0] ?? e.slot;
-    expect(s).toBeDefined();
+  it("keeps pods in place when the room grows", () => {
+    const g2 = GROUPS.map((g) =>
+      g.id === "office" ? { ...g, sessionIds: ["o0", "o1", "o2"] } : g,
+    );
+    const first = allocateSlots(new Map(), req(GROUPS));
+    const pods1 = allocatePods(new Map(), GROUPS);
+    const a = generateLayout(first, GROUPS, pods1);
+    const slots2 = allocateSlots(first, req(g2));
+    const b = generateLayout(slots2, g2, allocatePods(pods1, g2));
+    const before = a.rooms.find((r) => r.sessionId === "o0")!;
+    const after = b.rooms.find((r) => r.sessionId === "o0")!;
+    expect(after.slot).toEqual(before.slot);
+    expect(after.bossDesk).toEqual(before.bossDesk);
   });
 });

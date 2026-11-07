@@ -5,7 +5,9 @@ import {
   computeVisibility,
   footprintDistance,
   halfFovFor,
-  visRoomsOf,
+  podDetail,
+  POD_IMPOSTOR_M,
+  visRoomsOfProjects,
   type VisInput,
 } from "@/engine/world/Visibility";
 import {
@@ -22,7 +24,14 @@ const sessions = Array.from({ length: 6 }, (_, i) => ({
   createdAt: i,
 }));
 const layout = generateLayout(allocateSlots(new Map(), sessions));
-const rooms = visRoomsOf(layout.rooms);
+const rooms = visRoomsOfProjects(layout.projects);
+const own0 = layout.projects[0];
+const roomZone = (p: (typeof layout.projects)[number]) =>
+  ({
+    kind: "room",
+    sessionId: p.pods[0].sessionId,
+    projectId: p.projectId,
+  }) as const;
 const HF = halfFovFor(1, 1.6);
 
 function vis(
@@ -45,43 +54,37 @@ const shown = (m: Map<string, string>) =>
 
 describe("computeVisibility", () => {
   it("inside a room only sees itself and opposite-side rooms", () => {
-    const own = layout.rooms[0]; // east, bay 0
-    const m = vis([own.origin.x, 1.7, own.origin.z], -90, {
-      kind: "room",
-      sessionId: own.sessionId,
-    });
-    expect(m.get(own.sessionId)).toBe("full");
+    const own = own0; // east, bay 0
+    const m = vis([own.origin.x, 1.7, own.origin.z], -90, roomZone(own));
+    expect(m.get(own.projectId)).toBe("full");
     // same-side neighbour is behind a solid wall
-    const sameSide = layout.rooms.find(
-      (r) => r.slot.side === own.slot.side && r.sessionId !== own.sessionId,
+    const sameSide = layout.projects.find(
+      (r) => r.slot.side === own.slot.side && r.projectId !== own.projectId,
     )!;
-    expect(m.get(sameSide.sessionId)).toBe("hidden");
+    expect(m.get(sameSide.projectId)).toBe("hidden");
     // looking at the hall (-X): opposite-side rooms in view
-    const opp = layout.rooms.filter((r) => r.slot.side !== own.slot.side);
-    expect(opp.some((r) => m.get(r.sessionId) !== "hidden")).toBe(true);
+    const opp = layout.projects.filter((r) => r.slot.side !== own.slot.side);
+    expect(opp.some((r) => m.get(r.projectId) !== "hidden")).toBe(true);
   });
 
   it("looking away from the glass hides the opposite side", () => {
-    const own = layout.rooms[0];
-    const m = vis([own.origin.x, 1.7, own.origin.z], 90, {
-      kind: "room",
-      sessionId: own.sessionId,
-    });
-    expect(shown(m)).toEqual([own.sessionId]);
+    const m = vis([own0.origin.x, 1.7, own0.origin.z], 90, roomZone(own0));
+    expect(shown(m)).toEqual([own0.projectId]);
   });
 
   it("in the hall looking down the hall sees rooms ahead, not behind", () => {
-    const m = vis([0, 1.7, 9], 0, { kind: "hall" });
-    const bay0 = layout.rooms.filter((r) => r.slot.bay === 0);
-    const bay2 = layout.rooms.filter((r) => r.slot.bay === 2);
-    expect(bay2.every((r) => m.get(r.sessionId) !== "hidden")).toBe(true);
-    // behind and far enough away: hidden (unless within the always-keep radius)
-    for (const r of bay0) {
+    const z = layout.hall.length * 0.55;
+    const m = vis([0, 1.7, z], 0, { kind: "hall" });
+    const ahead = layout.projects.filter((r) => r.bounds.min.z > z);
+    const behind = layout.projects.filter((r) => r.bounds.max.z < z);
+    expect(ahead.length).toBeGreaterThan(0);
+    expect(ahead.every((r) => m.get(r.projectId) !== "hidden")).toBe(true);
+    for (const r of behind) {
       const near = footprintDistance(
-        { x: 0, z: 9 },
-        rooms.find((x) => x.id === r.sessionId)!,
+        { x: 0, z },
+        rooms.find((x) => x.id === r.projectId)!,
       );
-      if (near > 4) expect(m.get(r.sessionId)).toBe("hidden");
+      if (near > 4) expect(m.get(r.projectId)).toBe("hidden");
     }
   });
 
@@ -103,11 +106,19 @@ describe("computeVisibility", () => {
     }
   });
 
-  it("control room sees back down the hall through the door", () => {
-    const m = vis([0, 1.7, 29.5], 180, { kind: "control" });
-    expect(shown(m).length).toBeGreaterThan(0);
-    const wall = vis([0, 1.7, 29.5], 0, { kind: "control" });
-    expect(shown(wall)).toHaveLength(0);
+  it("the control room is sealed: no project room from inside it", () => {
+    const cz = layout.hall.length + 4;
+    expect(shown(vis([0, 1.7, cz], 180, { kind: "control" }))).toHaveLength(0);
+    expect(shown(vis([0, 1.7, cz], 0, { kind: "control" }))).toHaveLength(0);
+  });
+});
+
+describe("pod detail", () => {
+  it("drops far pods of a visible room to impostor", () => {
+    expect(podDetail("full", 2)).toBe("full");
+    expect(podDetail("full", POD_IMPOSTOR_M + 1)).toBe("impostor");
+    expect(podDetail("hidden", 0)).toBe("hidden");
+    expect(podDetail("impostor", 0)).toBe("impostor");
   });
 });
 

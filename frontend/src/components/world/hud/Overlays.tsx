@@ -105,6 +105,13 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
   const { t } = useTranslation();
   const zone = useWorldUiStore((s) => s.pose?.zone ?? null);
   const roomId = zone?.kind === "room" ? zone.sessionId : null;
+  const projectName = useWorldUiStore((s) => {
+    const z = s.pose?.zone;
+    if (z?.kind !== "room" || !z.projectId) return null;
+    return (
+      s.layout?.projects.find((p) => p.projectId === z.projectId)?.name ?? null
+    );
+  });
   const campus = useCampusStore((s) =>
     roomId ? s.sessions.find((x) => x.sessionId === roomId) : undefined,
   );
@@ -114,7 +121,10 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
     [sessions, allCampus],
   );
   if (!zone) return null;
-  const label = zoneLabel(zone, labels, t);
+  const pod = zoneLabel(zone, labels, t);
+  // In a team room: "project · pod session" (the pod under the player).
+  const label =
+    projectName && pod && pod !== projectName ? `${projectName} · ${pod}` : pod;
   return (
     <div
       className={`pointer-events-none flex items-center gap-2.5 rounded-2xl px-3.5 py-2 ${GLASS}`}

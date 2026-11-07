@@ -199,6 +199,13 @@ export function glassPartition(
     frame?: SurfaceKey;
     frostBand?: boolean;
     solid?: Opening[];
+    /**
+     * Over the door: "glass" (legacy transom glass) or "solid" — a finished
+     * bulkhead from the door head to the ceiling in `bulkhead.mat`, `depth`
+     * deep, running over [a0, a1] (defaults to the door width). No void.
+     */
+    transom?: "glass" | "solid";
+    bulkhead?: { mat?: SurfaceKey; depth?: number; a0?: number; a1?: number };
   } = {},
 ): void {
   const pitch = opts.pitch ?? 1.25;
@@ -280,10 +287,26 @@ export function glassPartition(
     // transom glass above up to the head track: no box, no void.
     put(frame, door.a0 + 0.025, door.h / 2, 0.05, door.h, 0.06);
     put(frame, door.a1 - 0.025, door.h / 2, 0.05, door.h, 0.06);
-    put(frame, mid, door.h + DOOR_BAND / 2, w, DOOR_BAND, 0.06);
-    const t0 = door.h + DOOR_BAND;
-    const t1 = height - 0.05;
-    put(glass, mid, (t0 + t1) / 2, w, t1 - t0, 0.012);
+    if (opts.transom === "solid") {
+      const bk = opts.bulkhead ?? {};
+      const b0 = bk.a0 ?? door.a0;
+      const b1 = bk.a1 ?? door.a1;
+      put(
+        bk.mat ?? "wallFeature",
+        (b0 + b1) / 2,
+        (door.h + height) / 2,
+        b1 - b0,
+        height - door.h,
+        bk.depth ?? 0.18,
+      );
+      // Slim black reveal where the bulkhead meets the door head.
+      put(frame, mid, door.h + 0.008, w, 0.016, (bk.depth ?? 0.18) + 0.004);
+    } else {
+      put(frame, mid, door.h + DOOR_BAND / 2, w, DOOR_BAND, 0.06);
+      const t0 = door.h + DOOR_BAND;
+      const t1 = height - 0.05;
+      put(glass, mid, (t0 + t1) / 2, w, t1 - t0, 0.012);
+    }
     if (cols) {
       const cc = (door.a0 + door.a1) / 2;
       const hy = (door.h + height) / 2;

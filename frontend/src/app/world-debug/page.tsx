@@ -186,6 +186,7 @@ export default function WorldDebugPage() {
           sessions: demo.sessions,
           selectedSessionId: demo.sessions[0]?.id ?? null,
           stats: demo.stats,
+          projects: demo.projects,
         });
         if (p.ops)
           setOps({

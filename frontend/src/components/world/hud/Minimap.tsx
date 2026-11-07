@@ -50,7 +50,9 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
   const sz = (z: number): number => -z;
 
   const { lobby, hall, controlRoom } = layout;
-  const travel = (to: { sessionId: string } | "lobby" | "control"): void => {
+  const travel = (
+    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
+  ): void => {
     getWorld()?.teleport(to);
     close("minimap");
   };
@@ -130,59 +132,97 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
           </text>
         </g>
 
-        {layout.rooms.map((r) => {
-          const st = status.get(r.sessionId) ?? "ended";
-          const c = STATUS_COLORS[st];
-          const label = labels.get(r.sessionId) ?? r.sessionId.slice(0, 8);
-          const objective = objectives.get(r.sessionId) ?? null;
-          const rw = r.bounds.max.x - r.bounds.min.x;
-          // ~0.42 world units per glyph at fontSize 0.7; leave a margin.
-          const objChars = Math.floor((rw - 0.6) / 0.38);
-          const cx = (r.bounds.min.x + r.bounds.max.x) / 2;
-          const cz = (r.bounds.min.z + r.bounds.max.z) / 2;
+        {layout.projects.map((p) => {
+          const b = p.bounds;
+          const rw = b.max.x - b.min.x;
+          const sts = p.pods.map((d) => status.get(d.sessionId) ?? "ended");
+          const top: keyof typeof STATUS_COLORS = sts.includes("needs_you")
+            ? "needs_you"
+            : sts.includes("working")
+              ? "working"
+              : sts.includes("done")
+                ? "done"
+                : "ended";
+          const c = STATUS_COLORS[top];
+          // Name along the entry bay (lobby end), pods in their bays.
+          const ex = (b.min.x + b.max.x) / 2;
+          const ez = b.min.z + 2.4;
           return (
-            <g
-              key={r.sessionId}
-              className="cursor-pointer"
-              onClick={() => travel({ sessionId: r.sessionId })}
-              role="button"
-              aria-label={label}
-            >
-              <title>{objective ? `${label}\n${objective}` : label}</title>
-              <rect
-                x={sx(r.bounds.min.x)}
-                y={sz(r.bounds.max.z)}
-                width={r.bounds.max.x - r.bounds.min.x}
-                height={r.bounds.max.z - r.bounds.min.z}
-                fill={`${c}33`}
-                stroke={c}
-                strokeWidth={0.14}
-                rx={0.3}
-              />
-              <circle cx={sx(cx)} cy={sz(cz) - 0.9} r={0.4} fill={c} />
-              <text
-                x={sx(cx)}
-                y={sz(cz) + 0.4}
-                fill="#e2e8f0"
-                fontSize={0.8}
-                fontWeight={600}
-                textAnchor="middle"
-                dominantBaseline="middle"
+            <g key={p.projectId}>
+              <g
+                className="cursor-pointer"
+                onClick={() => travel({ projectId: p.projectId })}
+                role="button"
+                aria-label={`${t("hud.minimap.teamRoom")}: ${p.name}`}
               >
-                {clip(label, Math.max(6, Math.floor((rw - 0.6) / 0.5)))}
-              </text>
-              {objective && objChars >= 8 ? (
+                <title>{`${p.name} · ${p.pods.length}`}</title>
+                <rect
+                  x={sx(b.min.x)}
+                  y={sz(b.max.z)}
+                  width={rw}
+                  height={b.max.z - b.min.z}
+                  fill={`${c}1f`}
+                  stroke={c}
+                  strokeWidth={0.14}
+                  rx={0.3}
+                />
                 <text
-                  x={sx(cx)}
-                  y={sz(cz) + 1.5}
-                  fill="#94a3b8"
-                  fontSize={0.62}
+                  x={sx(ex)}
+                  y={sz(ez)}
+                  fill="#e2e8f0"
+                  fontSize={0.9}
+                  fontWeight={700}
                   textAnchor="middle"
                   dominantBaseline="middle"
                 >
-                  {clip(objective, objChars)}
+                  {clip(p.name, Math.max(6, Math.floor((rw - 0.6) / 0.55)))}
                 </text>
-              ) : null}
+              </g>
+              {p.pods.map((d) => {
+                const st = status.get(d.sessionId) ?? "ended";
+                const pc = STATUS_COLORS[st];
+                const label =
+                  labels.get(d.sessionId) ?? d.sessionId.slice(0, 8);
+                const objective = objectives.get(d.sessionId) ?? null;
+                const db = d.bounds;
+                const cx = (db.min.x + db.max.x) / 2;
+                const cz = (db.min.z + db.max.z) / 2;
+                return (
+                  <g
+                    key={d.sessionId}
+                    className="cursor-pointer"
+                    onClick={() => travel({ sessionId: d.sessionId })}
+                    role="button"
+                    aria-label={label}
+                  >
+                    <title>
+                      {objective ? `${label}\n${objective}` : label}
+                    </title>
+                    <rect
+                      x={sx(db.min.x + 0.35)}
+                      y={sz(db.max.z - 0.35)}
+                      width={db.max.x - db.min.x - 0.7}
+                      height={db.max.z - db.min.z - 0.7}
+                      fill={`${pc}33`}
+                      stroke={pc}
+                      strokeWidth={0.1}
+                      rx={0.25}
+                    />
+                    <circle cx={sx(cx)} cy={sz(cz) - 0.9} r={0.38} fill={pc} />
+                    <text
+                      x={sx(cx)}
+                      y={sz(cz) + 0.5}
+                      fill="#cbd5e1"
+                      fontSize={0.7}
+                      fontWeight={600}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                    >
+                      {clip(label, Math.max(6, Math.floor((rw - 1) / 0.45)))}
+                    </text>
+                  </g>
+                );
+              })}
             </g>
           );
         })}

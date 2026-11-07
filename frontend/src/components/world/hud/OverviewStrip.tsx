@@ -13,7 +13,13 @@ import { useCampusStore } from "@/stores/campusStore";
 import { STATUS_COLORS, type CampusSession } from "@/engine/contracts";
 import { roomStatus } from "@/engine/logic/status";
 import type { Session } from "@/hooks/useSessions";
-import { distinctName, labelMap, sessionProject } from "../sessionMeta";
+import { groupSessions } from "@/engine/logic/projectGroups";
+import {
+  distinctName,
+  labelMap,
+  sessionProject,
+  toSessionMeta,
+} from "../sessionMeta";
 import { enterSession } from "../enterSession";
 import { GLASS, LABEL } from "./glass";
 import { PhasePill, RefChips, midTruncate } from "./GlanceParts";
@@ -331,7 +337,41 @@ export function OverviewStrip({
       out.set(cs.sessionId, sessionProject(byId.get(cs.sessionId), cs));
     return out;
   }, [sessions, campus]);
+  const allProjects = useCampusStore((s) => s.projects);
   const sorted = useMemo(() => sortSessions(campus), [campus]);
+  // One block per project (its team room), most urgent project first.
+  const blocks = useMemo(() => {
+    const byId = new Map(sessions.map((x) => [x.id, x]));
+    const metas = campus.map((cs) => {
+      const s = byId.get(cs.sessionId);
+      return s
+        ? toSessionMeta(s, cs)
+        : {
+            id: cs.sessionId,
+            label: cs.project ?? cs.sessionId,
+            createdAt: 0,
+            status: "active" as const,
+          };
+    });
+    const rank = new Map(sorted.map((cs, i) => [cs.sessionId, i]));
+    const live = new Map(campus.map((c) => [c.sessionId, c]));
+    return groupSessions(campus, metas, allProjects)
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        list: g.sessionIds
+          .map((id) => live.get(id)!)
+          .sort(
+            (a, b) =>
+              (rank.get(a.sessionId) ?? 0) - (rank.get(b.sessionId) ?? 0),
+          ),
+      }))
+      .sort(
+        (a, b) =>
+          (rank.get(a.list[0].sessionId) ?? 0) -
+          (rank.get(b.list[0].sessionId) ?? 0),
+      );
+  }, [sessions, campus, allProjects, sorted]);
 
   if (!shown || sorted.length === 0) return null;
   const dotsOnly = shouldCollapse(sorted.length) && !hover;
@@ -347,15 +387,33 @@ export function OverviewStrip({
           : "left-3 max-h-[calc(100%-9rem)] flex-col overflow-y-auto pr-1"
       }`}
     >
-      {sorted.map((cs) => (
-        <SessionCard
-          key={cs.sessionId}
-          cs={cs}
-          label={labels.get(cs.sessionId) ?? cs.sessionId.slice(0, 8)}
-          project={projects.get(cs.sessionId) ?? null}
-          portrait={portrait}
-          dotsOnly={dotsOnly}
-        />
+      {blocks.map((b) => (
+        <section
+          key={b.id}
+          aria-label={b.name}
+          className={`flex gap-1.5 ${portrait ? "flex-row" : "flex-col"}`}
+        >
+          {!dotsOnly && (
+            <div
+              className={`${LABEL} flex items-center gap-1.5 px-1 pt-1 !text-[10px] text-slate-300`}
+            >
+              <span className="truncate">{b.name}</span>
+              <span className="text-slate-500">
+                {t("hud.overview.sessionCount", { count: b.list.length })}
+              </span>
+            </div>
+          )}
+          {b.list.map((cs) => (
+            <SessionCard
+              key={cs.sessionId}
+              cs={cs}
+              label={labels.get(cs.sessionId) ?? cs.sessionId.slice(0, 8)}
+              project={projects.get(cs.sessionId) ?? null}
+              portrait={portrait}
+              dotsOnly={dotsOnly}
+            />
+          ))}
+        </section>
       ))}
     </div>
   );

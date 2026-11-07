@@ -59,6 +59,7 @@ export class LedPanel {
   private pulseT = 0;
   private pulsing = false;
   private readonly uvs: Float32Array;
+  private readonly single: boolean;
 
   constructor(
     private readonly scene: Scene,
@@ -73,8 +74,11 @@ export class LedPanel {
       width?: number;
       height?: number;
       interact?: unknown;
+      /** 1 = a single static line using the full height (no ticker row). */
+      rows?: 1 | 2;
     },
   ) {
+    this.single = opts.rows === 1;
     const w = opts.width ?? 1.28;
     const h = opts.height ?? 0.2;
     this.root = new TransformNode(`${opts.name}:led`, scene);
@@ -85,26 +89,30 @@ export class LedPanel {
     const vd = new VertexData();
     const x0 = -w / 2;
     const x1 = w / 2;
+    // Single-line mode: the static row spans the full height, ticker collapsed.
+    const sy0 = this.single ? -h / 2 : 0;
+    const sy1 = this.single ? h / 2 : h / 2;
+    const ty0 = this.single ? 0 : -h / 2;
     vd.positions = [
       // static (top) row
       x0,
-      0,
-      0,
-      x1,
-      0,
+      sy0,
       0,
       x1,
-      h / 2,
+      sy0,
+      0,
+      x1,
+      sy1,
       0,
       x0,
-      h / 2,
+      sy1,
       0,
       // ticker (bottom) row
       x0,
-      -h / 2,
+      ty0,
       0,
       x1,
-      -h / 2,
+      ty0,
       0,
       x1,
       0,
@@ -219,7 +227,7 @@ export class LedPanel {
       this.mat.emissiveTexture = this.tex;
     }
     const ctx = this.tex.getContext() as unknown as CanvasRenderingContext2D;
-    this.scrolling = drawLed(ctx, c);
+    this.scrolling = drawLed(ctx, c, this.single) && !this.single;
     if (!this.scrolling) {
       const uv = this.uvs;
       uv[8] = 0;
@@ -239,7 +247,11 @@ export class LedPanel {
 }
 
 /** Draw both rows; returns true when the ticker needs to scroll. */
-function drawLed(ctx: CanvasRenderingContext2D, c: LedContent): boolean {
+function drawLed(
+  ctx: CanvasRenderingContext2D,
+  c: LedContent,
+  single = false,
+): boolean {
   const { sans } = screenFonts();
   // Board: black with a dim grid of unlit LED pixels (4 px pitch).
   ctx.fillStyle = "#030304";
@@ -301,7 +313,7 @@ function drawLed(ctx: CanvasRenderingContext2D, c: LedContent): boolean {
   // Status-coloured LED underline along the bottom edge.
   if (c.dot) {
     ctx.fillStyle = c.dot;
-    ctx.fillRect(0, TH - 7, TW, 4);
+    ctx.fillRect(0, (single ? ROW : TH) - 7, TW, 4);
   }
   // Pixel mask: black gaps between LEDs (keeps the dot-matrix look on text).
   ctx.fillStyle = "rgba(3,3,4,0.7)";

@@ -72,6 +72,7 @@ export function WorldCanvas({
       ),
       selectedSessionId: selectedRef.current || null,
       stats: useCampusStore.getState().stats,
+      projects: useCampusStore.getState().projects,
     });
 
     const flush = (): void => {
@@ -197,7 +198,11 @@ export function WorldCanvas({
 
         teardown.push(
           useCampusStore.subscribe((s, prev) => {
-            if (s.sessions !== prev.sessions || s.stats !== prev.stats)
+            if (
+              s.sessions !== prev.sessions ||
+              s.stats !== prev.stats ||
+              s.projects !== prev.projects
+            )
               schedule();
           }),
           usePreferencesStore.subscribe((s, prev) => {

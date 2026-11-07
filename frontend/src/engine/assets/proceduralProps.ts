@@ -539,16 +539,61 @@ const laptop: Builder = (b) => {
   });
 };
 
-/** Matte fibre-clay planter (hides the scanned plants' terracotta pots). */
+/**
+ * Matte fibre-clay planter: body, a rolled rim and a soil surface sunk
+ * 2.5 cm below the rim (the scanned foliage's base sits ON the soil, see
+ * PLANTER_SOIL_Y; stems below it disappear into the body).
+ */
 function planterBuilder(dia: number, h: number): Builder {
   return (b) => {
-    b.cylinder("planter", v3(0, h / 2, 0), h, dia, dia * 0.86, 40);
+    const sunk = 0.025; // soil surface below the rim
+    const body = h - sunk - 0.008;
+    // Body up to just under the soil.
+    b.cylinder(
+      "planter",
+      v3(0, body / 2, 0),
+      body,
+      dia * 0.985,
+      dia * 0.86,
+      40,
+    );
     b.cylinder("planter", v3(0, 0.01, 0), 0.02, dia * 0.8, dia * 0.8, 32);
-    b.paint = paintOf("#3A2C22");
-    b.cylinder("paint", v3(0, h - 0.03, 0), 0.02, dia * 0.94, dia * 0.94, 32);
-    b.paint = null;
+    // Rim ring: the pot wall standing proud of the soil.
+    b.arc(
+      "planter",
+      v3(0, 0, 0),
+      dia / 2 - 0.016,
+      dia / 2,
+      0,
+      Math.PI * 2,
+      body - 0.01,
+      h,
+      48,
+    );
+    // Soil disc, top surface `sunk` below the rim.
+    b.cylinder(
+      "soil",
+      v3(0, h - sunk - 0.004, 0),
+      0.008,
+      dia - 0.03,
+      dia - 0.03,
+      32,
+    );
   };
 }
+
+/** Planter heights (metres, scale 1). */
+export const PLANTER_H = { planter: 0.46, planterTall: 0.62 } as const;
+
+/**
+ * Where scanned foliage is placed in each planter role (scale 1): its base
+ * (the scan's original soil line) 5 mm under the soil surface, which is
+ * 2.5 cm below the rim. Multiply by the planter's scale.
+ */
+export const PLANTER_SOIL_Y = {
+  planter: PLANTER_H.planter - 0.03,
+  planterTall: PLANTER_H.planterTall - 0.03,
+} as const;
 
 /** Floor lamp: black stem, glowing linen drum shade. */
 const floorLamp: Builder = (b) => {
@@ -708,8 +753,8 @@ const BUILDERS: Record<PropRole, Builder> = {
   notepads,
   fireAlarm,
   wetFloorSign,
-  planter: planterBuilder(0.5, 0.46),
-  planterTall: planterBuilder(0.56, 0.62),
+  planter: planterBuilder(0.5, PLANTER_H.planter),
+  planterTall: planterBuilder(0.56, PLANTER_H.planterTall),
   floorLamp,
   coatHooks,
   sideTable,

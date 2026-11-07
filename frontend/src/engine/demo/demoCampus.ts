@@ -1,7 +1,11 @@
 /** Deterministic, time-varying fake campus data for screenshots / dev. */
 import type {
   CampusActivity,
+  CampusProject,
   CampusSession,
+  CheckState,
+  PipelineRun,
+  PullRequestInfo,
   CampusStats,
   RoomStatus,
   SessionActivityStats,
@@ -12,16 +16,6 @@ import type {
 } from "../contracts";
 import type { Agent, AgentState, BossState, TodoItem } from "@/types";
 
-const LABELS = [
-  "claude-office",
-  "git-continuum",
-  "payments-api",
-  "infra-terraform",
-  "mobile-app",
-  "docs-site",
-  "data-pipeline",
-  "auth-service",
-];
 const PALETTE = [
   "#3B82F6",
   "#22C55E",
@@ -88,14 +82,21 @@ const TODO_TEXT = [
 
 interface DemoProfile {
   project: string;
+  /** Claude Code session name (/rename). */
+  name: string;
   summary: string;
   refs: string[];
   branch: string;
   phases: Array<Omit<SessionPhase, "since">>;
 }
+/**
+ * One profile per session index. At n = 6 the campus has 3 projects with
+ * 3 / 2 / 1 sessions: continuum (0, 2, 5), payments-api (1, 4), claude-office (3).
+ */
 const PROFILES: DemoProfile[] = [
   {
     project: "continuum",
+    name: "webhook-retry",
     summary: "Retry failed webhook deliveries with backoff",
     refs: ["CONT-839"],
     branch: "feat/cont-839-webhook-retry",
@@ -107,6 +108,7 @@ const PROFILES: DemoProfile[] = [
   },
   {
     project: "payments-api",
+    name: "sso-login",
     summary: "Add SSO login to the admin dashboard",
     refs: ["PAY-212", "#412"],
     branch: "feat/pay-212-sso-login",
@@ -121,7 +123,52 @@ const PROFILES: DemoProfile[] = [
     ],
   },
   {
+    project: "continuum",
+    name: "pg-job-queue",
+    summary: "Move the job queue to Postgres advisory locks",
+    refs: ["CONT-851"],
+    branch: "feat/cont-851-pg-locks",
+    phases: [
+      { kind: "coding", label: "Coding", detail: "editing queue/locks.py" },
+      { kind: "testing", label: "Running tests", detail: "pytest tests/queue" },
+    ],
+  },
+  {
+    project: "claude-office",
+    name: "3d-office",
+    summary: "Group the 3D office into project team rooms",
+    refs: ["#57"],
+    branch: "feat/3d-office",
+    phases: [
+      { kind: "coding", label: "Coding", detail: "editing buildingLayout.ts" },
+      { kind: "building", label: "Building", detail: "bun run typecheck" },
+    ],
+  },
+  {
+    project: "payments-api",
+    name: "payout-recon",
+    summary: "Reconcile Stripe payouts every night",
+    refs: ["PAY-230"],
+    branch: "fix/pay-230-payout-recon",
+    phases: [
+      { kind: "researching", label: "Researching", detail: "Stripe API docs" },
+      { kind: "running", label: "Running", detail: "make recon-dry-run" },
+    ],
+  },
+  {
+    project: "continuum",
+    name: "faster-ci",
+    summary: "Cut the integration suite time in half",
+    refs: ["CONT-860"],
+    branch: "chore/cont-860-faster-ci",
+    phases: [
+      { kind: "running", label: "Running", detail: "pytest --durations=20" },
+      { kind: "planning", label: "Planning", detail: null },
+    ],
+  },
+  {
     project: "infra-terraform",
+    name: "private-subnets",
     summary: "Move staging VPC to private subnets",
     refs: ["#88"],
     branch: "chore/staging-private-subnets",
@@ -132,6 +179,7 @@ const PROFILES: DemoProfile[] = [
   },
   {
     project: "mobile-app",
+    name: "push-crash",
     summary: "Fix crash when opening push notifications",
     refs: ["MOB-1042"],
     branch: "fix/mob-1042-push-crash",
@@ -141,6 +189,8 @@ const PROFILES: DemoProfile[] = [
     ],
   },
 ];
+
+const projectId = (name: string) => `acme/${name}`;
 
 // Phase "since" is anchored to real time (the HUD shows elapsed vs Date.now()),
 // fixed per process so createDemoCampus stays deterministic.
@@ -283,6 +333,7 @@ function demoTelemetry(
   ended: boolean,
 ): SessionTelemetry {
   const d = TEL[i % TEL.length];
+  const repo = projectId(PROFILES[i % PROFILES.length].project);
   const drift = (tMs / 1000) * 0.01 * (1 + (i % 3));
   const pct = Math.min(97, d.ctx + (ended ? 0 : drift));
   const grow = ended ? 0 : tMs / 60_000;
@@ -298,7 +349,7 @@ function demoTelemetry(
     durationMs: d.durMs + (ended ? 0 : tMs),
     cacheWarm: !ended,
     cacheExpiresAt: ended ? null : agoIso(-d.cacheMin * MIN),
-    repo: d.repo,
+    repo,
     outputStyle: null,
     updatedAt: agoIso(2_000),
   };
@@ -409,10 +460,167 @@ export function createDemoStats(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Projects (PRs + pipelines)
+// ---------------------------------------------------------------------------
+
+interface DemoPr {
+  number: number;
+  title: string;
+  author: string;
+  draft?: boolean;
+  state?: "open" | "merged" | "closed";
+  review?: PullRequestInfo["reviewDecision"];
+  /** Profile index of the session working on this branch. */
+  session?: number;
+  checks: [CheckState, number, number, number, number]; // state, total, passed, failed, pending
+}
+
+const PRS: Record<string, DemoPr[]> = {
+  continuum: [
+    {
+      number: 1287,
+      session: 0,
+      title: "Retry failed webhook deliveries with backoff",
+      author: "claude",
+      checks: ["running", 9, 5, 0, 4],
+      review: "review_required",
+    },
+    {
+      number: 1281,
+      session: 2,
+      title: "Postgres advisory locks for the job queue",
+      author: "claude",
+      draft: true,
+      checks: ["failure", 9, 7, 2, 0],
+    },
+    {
+      number: 1276,
+      session: 5,
+      title: "Split integration suite into 4 shards",
+      author: "mara",
+      checks: ["success", 9, 9, 0, 0],
+      review: "approved",
+    },
+    {
+      number: 1270,
+      title: "Bump sqlalchemy to 2.0.36",
+      author: "dependabot",
+      state: "merged",
+      checks: ["success", 9, 9, 0, 0],
+      review: "approved",
+    },
+  ],
+  "payments-api": [
+    {
+      number: 412,
+      session: 1,
+      title: "SSO login for the admin dashboard",
+      author: "claude",
+      checks: ["queued", 6, 0, 0, 6],
+      review: "changes_requested",
+    },
+    {
+      number: 409,
+      session: 4,
+      title: "Nightly payout reconciliation job",
+      author: "claude",
+      checks: ["success", 6, 6, 0, 0],
+      review: "approved",
+    },
+  ],
+  "claude-office": [
+    {
+      number: 57,
+      session: 3,
+      title: "3D office: one team room per project",
+      author: "claude",
+      draft: true,
+      checks: ["running", 4, 2, 0, 2],
+    },
+  ],
+};
+
+const PIPES: Record<
+  string,
+  Array<[string, PipelineRun["kind"], CheckState]>
+> = {
+  continuum: [
+    ["CI", "ci", "success"],
+    ["Deploy staging", "deploy", "running"],
+    ["Release", "release", "success"],
+  ],
+  "payments-api": [
+    ["CI", "ci", "success"],
+    ["Deploy production", "deploy", "success"],
+  ],
+  "claude-office": [
+    ["checkall", "ci", "running"],
+    ["Pages", "deploy", "success"],
+  ],
+};
+
+function demoProjects(campus: CampusSession[], tMs: number): CampusProject[] {
+  const byName = new Map<string, CampusSession[]>();
+  for (const cs of campus) {
+    const n = cs.project ?? "unknown";
+    byName.set(n, [...(byName.get(n) ?? []), cs]);
+  }
+  return [...byName.entries()].map(([name, list]) => {
+    const prs: PullRequestInfo[] = (PRS[name] ?? []).map((p) => {
+      const prof = p.session !== undefined ? PROFILES[p.session] : undefined;
+      const live = list.find((cs) => cs.gitBranch === prof?.branch);
+      const [state, total, passed, failed, pending] = p.checks;
+      return {
+        number: p.number,
+        title: p.title,
+        branch: prof?.branch ?? `feat/pr-${p.number}`,
+        author: p.author,
+        url: `https://github.com/${projectId(name)}/pull/${p.number}`,
+        draft: !!p.draft,
+        state: p.state ?? "open",
+        reviewDecision: p.review ?? null,
+        mergeable: failed ? "conflicting" : "mergeable",
+        checks: { state, total, passed, failed, pending },
+        sessionId: live?.sessionId ?? null,
+        updatedAt: isoAt(tMs - p.number * 1000),
+      };
+    });
+    const pipelines: PipelineRun[] = (PIPES[name] ?? []).map(
+      ([workflow, kind, state], k) => ({
+        id: `${name}-run-${k}`,
+        workflow,
+        kind,
+        branch: "main",
+        state,
+        startedAt: agoIso((k + 1) * 9 * MIN),
+        durationS: state === "running" ? null : 180 + k * 95,
+        url: null,
+      }),
+    );
+    return {
+      id: projectId(name),
+      name,
+      repo: projectId(name),
+      defaultBranch: "main",
+      sessionIds: list.map((cs) => cs.sessionId),
+      pullRequests: prs,
+      pipelines,
+      ciAvailable: true,
+      updatedAt: isoAt(tMs),
+    };
+  });
+}
+
 export function createDemoCampus(
   count: number,
   tMs: number,
-): { campus: CampusSession[]; sessions: SessionMeta[]; stats: CampusStats } {
+): {
+  campus: CampusSession[];
+  sessions: SessionMeta[];
+  stats: CampusStats;
+  projects: CampusProject[];
+} {
   const campus: CampusSession[] = [];
   const sessions: SessionMeta[] = [];
   const permIdx = count > 1 ? 1 : 0;
@@ -474,6 +682,8 @@ export function createDemoCampus(
     campus.push({
       sessionId: id,
       project: prof.project,
+      projectId: projectId(prof.project),
+      sessionName: prof.name,
       summary: prof.summary,
       refs: prof.refs,
       gitBranch: prof.branch,
@@ -523,11 +733,16 @@ export function createDemoCampus(
     sessions.push({
       id,
       label:
-        LABELS[i % LABELS.length] +
-        (i >= LABELS.length ? `-${Math.floor(i / LABELS.length) + 1}` : ""),
+        prof.project +
+        (i >= PROFILES.length ? `-${Math.floor(i / PROFILES.length) + 1}` : ""),
       createdAt: BASE_MS + i * 60000,
       status: ended ? "completed" : "active",
     });
   }
-  return { campus, sessions, stats: createDemoStats(campus, tMs) };
+  return {
+    campus,
+    sessions,
+    stats: createDemoStats(campus, tMs),
+    projects: demoProjects(campus, tMs),
+  };
 }

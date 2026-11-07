@@ -537,7 +537,7 @@ export function startActorsScene(
     scene.meshes.filter(
       (m) => !wallMeshes.has(m) && m.isEnabled() && m.isVisible,
     );
-  feeds.addFeed("demo-0", room.feedCamera, renderList);
+  feeds.addFeed("demo-0", layout.projects[0].feedCamera, renderList);
   feeds.addFeed(
     "demo-1",
     { position: { x: 2.5, y: 2.4, z: -1.2 }, target: { x: 0, y: 0.8, z: -4 } },
@@ -559,6 +559,7 @@ export function startActorsScene(
     origin: { x: -8, y: 0, z: 2 },
     size: { x: 4, y: 3, z: 4 },
     door: { x: -8, y: 0, z: 0 },
+    doorWidth: 1.8,
     spawn: { x: -6, y: 0, z: 2 },
     screenWall: {
       origin: { x: -8, y: 1.9, z: 2 },

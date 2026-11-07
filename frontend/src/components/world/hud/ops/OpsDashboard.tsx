@@ -11,6 +11,7 @@ import {
 import { useTranslation, type TranslationKey } from "@/hooks/useTranslation";
 import {
   STATUS_COLORS,
+  type CampusProject,
   type CampusSession,
   type CampusStats,
 } from "@/engine/contracts";
@@ -33,10 +34,13 @@ import {
 import { isPhaseKind } from "@/engine/logic/sessionInfo";
 import { Keycap } from "../Keycap";
 import { Gauge, Sparkline, StackedBar } from "./OpsCharts";
+import { OpsProjectMap } from "./OpsProjectMap";
 
 export interface OpsDashboardProps {
   campus: readonly CampusSession[];
   stats: CampusStats | null | undefined;
+  /** CampusState.projects (sessions are grouped by `project` when absent). */
+  projects?: readonly CampusProject[] | null;
   labels?: ReadonlyMap<string, string>;
   nowMs: number;
   /** Session highlighted on open (console monitor F). */
@@ -77,7 +81,15 @@ export function OpsDashboard(props: OpsDashboardProps): ReactNode {
       <AlertStrip alerts={m.alerts} t={t} />
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 sm:px-4">
         <div className="grid gap-3 landscape:lg:h-full landscape:lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,1fr)]">
-          <SessionsBoard m={m} t={t} {...props} />
+          <div className="flex min-h-0 flex-col gap-3">
+            <SessionsBoard m={m} t={t} {...props} />
+            <OpsProjectMap
+              campus={campus}
+              projects={props.projects}
+              labels={labels}
+              className={`${CARD} shrink-0 pb-2`}
+            />
+          </div>
           <div className="flex min-h-0 flex-col gap-3 landscape:lg:overflow-y-auto">
             <UsageCard m={m} t={t} />
             <ActivityCard m={m} t={t} />
@@ -213,7 +225,7 @@ function SessionsBoard({
   const live = m.rows.filter((r) => r.status !== "ended");
   const ended = m.rows.length - live.length;
   return (
-    <section className={`${CARD} flex min-h-0 flex-col`}>
+    <section className={`${CARD} flex min-h-0 flex-1 flex-col`}>
       <div className="flex items-center justify-between px-4 pb-2 pt-3">
         <h3 className={H2}>{t("ops.sessions")}</h3>
         {ended > 0 && (

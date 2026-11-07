@@ -3,7 +3,11 @@
 import { WS_BASE } from "@/utils/api";
 import { useCallback, useEffect, useRef } from "react";
 import { useCampusStore } from "@/stores/campusStore";
-import type { CampusSession, CampusStats } from "@/engine/contracts";
+import type {
+  CampusProject,
+  CampusSession,
+  CampusStats,
+} from "@/engine/contracts";
 
 /**
  * Connects to the global `/ws/campus` feed that carries one boss snapshot per
@@ -32,6 +36,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
 
   const setSessions = useCampusStore((s) => s.setSessions);
   const setStats = useCampusStore((s) => s.setStats);
+  const setProjects = useCampusStore((s) => s.setProjects);
   const setConnected = useCampusStore((s) => s.setConnected);
 
   const connect = useCallback(() => {
@@ -64,7 +69,11 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
       try {
         const msg = JSON.parse(event.data) as {
           type?: string;
-          state?: { sessions?: CampusSession[]; stats?: CampusStats | null };
+          state?: {
+            sessions?: CampusSession[];
+            stats?: CampusStats | null;
+            projects?: CampusProject[] | null;
+          };
         };
         if (msg.type === "state_update") {
           // Validate the shape before applying so a malformed payload can't
@@ -72,6 +81,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
           if (Array.isArray(msg.state?.sessions)) {
             setSessions(msg.state.sessions);
             setStats(msg.state.stats ?? null);
+            setProjects(msg.state.projects ?? null);
           } else {
             console.warn("[campus WS] ignoring malformed state_update frame");
           }
@@ -104,7 +114,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
         }, delay);
       }
     };
-  }, [setConnected, setSessions, setStats]);
+  }, [setConnected, setSessions, setStats, setProjects]);
 
   // Expose the latest connect to the reconnect timer.
   useEffect(() => {

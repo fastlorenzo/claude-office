@@ -253,7 +253,8 @@ export class DoorSign {
         this.texW,
         this.texH,
       );
-      this.mat.emissiveColor = Color3.White();
+      // StandardMaterial ADDS emissiveColor to the emissive texture: keep it black.
+      this.mat.emissiveColor = Color3.Black();
       this.mat.emissiveTexture = this.tex;
     }
     const ctx = this.tex.getContext() as unknown as Ctx2D;
