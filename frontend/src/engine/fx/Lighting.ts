@@ -310,7 +310,7 @@ export class Lighting {
   }
 
   /**
-   * Replace the skybox content with a baked cube (Skyline: sky + far city +
+   * Replace the skybox content with a baked cube (Exterior: sky + hills + far park +
    * aerial haze). Also returns a CUBIC view of it for glass reflections.
    */
   setSkyTexture(cube: BaseTexture): BaseTexture | null {
