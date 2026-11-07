@@ -1,0 +1,13 @@
+{
+  "name": "mpfb-cast-tools",
+  "private": true,
+  "type": "module",
+  "description": "gltf-transform post-processing for the MPFB cast (see README.md)",
+  "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
+    "meshoptimizer": "^0.25.0",
+    "sharp": "0.35.5"
+  }
+}

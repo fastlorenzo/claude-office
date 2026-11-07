@@ -19,7 +19,7 @@ install:			# Install all component dependencies
 	cd opencode-plugin && $(PKG_INSTALL)
 	$(MAKE) assets
 
-assets:			# Download CC0 3D assets (Poly Haven) + Havok wasm into frontend/public
+assets:			# Download CC0 3D assets (Poly Haven, ambientCG) + Havok wasm into frontend/public
 	cd frontend && $(PKG_MGR) run assets
 
 install-all: install hooks-install opencode-install		# Install everything including hooks and plugins

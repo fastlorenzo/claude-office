@@ -27,7 +27,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
-    "assets": "bun scripts/fetch-assets.ts",
+    "assets": "bun scripts/fetch-assets.ts && bun scripts/fetch-materials.ts",
     "characters": "bun scripts/fetch-characters.ts",
     "materials": "bun scripts/fetch-materials.ts"
   },

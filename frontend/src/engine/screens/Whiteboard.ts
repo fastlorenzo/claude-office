@@ -13,12 +13,14 @@ import {
   Scene,
   StandardMaterial,
   TransformNode,
+  Vector3,
   VertexBuffer,
   type DynamicTexture,
 } from "../babylon";
 import type { Vec3 } from "../contracts";
 import type { TodoItem } from "@/types";
 import type { Lod } from "../characters/types";
+import { ScreenHub, type HubScreen } from "./ScreenHub";
 import {
   createScreenTexture,
   fitText,
@@ -64,8 +66,11 @@ const NOTE: Record<
   },
 };
 
-export class WhiteboardScreen {
+export class WhiteboardScreen implements HubScreen {
   readonly mesh: Mesh;
+  readonly sessionId: string;
+  readonly worldPos: Vector3;
+  private readonly hub: ScreenHub;
   private readonly scene: Scene;
   private readonly pivot: TransformNode;
   private readonly frame: Mesh;
@@ -84,6 +89,13 @@ export class WhiteboardScreen {
     private readonly opts: WhiteboardOptions,
   ) {
     this.scene = scene;
+    this.sessionId = opts.sessionId;
+    this.worldPos = new Vector3(
+      opts.position.x,
+      opts.position.y,
+      opts.position.z,
+    );
+    this.hub = ScreenHub.get(scene);
     const id = `board_${opts.sessionId}`;
     this.pivot = new TransformNode(id, scene);
     this.pivot.position.set(opts.position.x, opts.position.y, opts.position.z);
@@ -115,6 +127,7 @@ export class WhiteboardScreen {
     this.frame.parent = this.pivot;
     this.frame.metadata = this.mesh.metadata;
 
+    this.hub.add(this);
     this.texW = 1024;
     this.texH = Math.max(256, Math.round((1024 * h) / w / 8) * 8);
     this.render(true);
@@ -149,9 +162,18 @@ export class WhiteboardScreen {
     return [this.frame, this.mesh];
   }
 
+  /** ScreenHub: hide the board while its room is culled or it is too far to read. */
+  applyHub(show: boolean, dist: number): void {
+    const on = show && dist < (this.mesh.isEnabled(false) ? 20 : 17);
+    if (this.mesh.isEnabled(false) === on) return;
+    this.mesh.setEnabled(on);
+    this.frame.setEnabled(on);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.hub.remove(this);
     this.release();
     this.mat.dispose();
     this.pivot.dispose(false, false);

@@ -35,12 +35,15 @@ import {
 } from "@/engine/contracts";
 import { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import type { PropRole } from "@/engine/assets/proceduralProps";
+import { coarseTier, settingsForQuality } from "@/engine/fx/Quality";
 import {
-  LEVELS,
-  QualityGovernor,
-  tierOf,
-  type QualityLevel,
-} from "@/engine/fx/Quality";
+  GraphicsController,
+  type DetailSettings,
+} from "@/engine/fx/GraphicsController";
+import {
+  defaultGraphicsSettings,
+  type GraphicsSettings,
+} from "@/engine/fx/graphicsSettings";
 import { Lighting } from "@/engine/fx/Lighting";
 import { PostFx } from "@/engine/fx/PostFx";
 import { InputController, type InputEvent } from "@/engine/input/Input";
@@ -59,14 +62,22 @@ import { Materials } from "@/engine/materials/Materials";
 import { Colliders } from "@/engine/physics/Colliders";
 import { loadHavok } from "@/engine/physics/havok";
 import { createPlayerAvatar } from "@/engine/player/Avatar";
+import { ActorHub } from "@/engine/characters/ActorHub";
 import { preloadCharacterPack } from "@/engine/characters/GltfRig";
 import { Player, PLAYER } from "@/engine/player/Player";
 import { ControlRoomWall } from "@/engine/screens/ControlRoomWall";
 import { FeedScheduler } from "@/engine/screens/FeedScheduler";
 import { LabelLayer } from "@/engine/screens/LabelLayer";
+import { StaticOccluders } from "@/engine/screens/labelOcclusion";
+import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
 import { Room, type RoomContext } from "@/engine/world/Room";
+import {
+  halfFovFor,
+  VisibilityController,
+  visRoomsOf,
+} from "@/engine/world/Visibility";
 
 export interface WorldDebugOptions {
   /** Fixed screenshot camera: eye position + yaw/pitch (radians). Freezes the player. */
@@ -105,6 +116,10 @@ function sameSlots(
   return true;
 }
 
+function defaultDetail(): DetailSettings {
+  return { characterDetail: "high", liveScreens: "all", securityFeeds: "high" };
+}
+
 function zoneKey(z: Zone): string {
   return z.kind === "room" ? `room:${z.sessionId}` : z.kind;
 }
@@ -119,7 +134,7 @@ class World implements IWorld {
   private readonly lighting: Lighting;
   private readonly input: InputController;
   private readonly labels: LabelLayer;
-  private readonly governor: QualityGovernor;
+  private readonly gfx: GraphicsController;
   private player: Player | null = null;
   private fx: PostFx | null = null;
   private interaction: Interaction | null = null;
@@ -133,6 +148,11 @@ class World implements IWorld {
   private pending: SyncInput | null = null;
   private lastInput: SyncInput | null = null;
   private ready = false;
+  private visibility: VisibilityController | null = null;
+  private actorHub: ActorHub | null = null;
+  private screenHub: ScreenHub | null = null;
+  private lastScreensAt = 0;
+  private lastDbgAt = 0;
   private disposed = false;
   private inputEnabled = true;
   private cameraMode: CameraMode;
@@ -143,7 +163,6 @@ class World implements IWorld {
   private frameMsAcc = 0;
   private readonly sceneInstr: SceneInstrumentation;
   private readonly engineInstr: EngineInstrumentation;
-  private qualityLevel: QualityLevel = LEVELS[0];
   private readonly resizeObserver: ResizeObserver | null = null;
   private readonly debug: WorldDebugOptions;
 
@@ -199,8 +218,23 @@ class World implements IWorld {
       opts.isMobile ||
       (typeof navigator !== "undefined" &&
         (navigator.hardwareConcurrency ?? 8) <= 4);
-    this.governor = new QualityGovernor(opts.quality, lowEnd, (lvl) =>
-      this.applyQuality(lvl),
+    this.gfx = new GraphicsController(
+      {
+        engine: this.engine,
+        scene,
+        lighting: this.lighting,
+        materials: this.materials,
+        input: this.input,
+        getFx: () => this.fx,
+        getPlayer: () => this.player,
+        setDetail: (d) => this.setDetail(d),
+      },
+      opts.graphics ??
+        settingsForQuality(
+          opts.quality,
+          defaultGraphicsSettings(opts.isMobile),
+        ),
+      lowEnd,
     );
 
     this.layout = generateLayout(this.slots);
@@ -270,6 +304,11 @@ class World implements IWorld {
         this.events,
         () => this.player!.position.add(new Vector3(0, PLAYER.eyeHeight, 0)),
       );
+      // Depth of field follows the inspect action; ends when input returns.
+      this.events.on("action", ({ action }) => {
+        if (action === "inspect")
+          this.gfx.beginInspect(this.interaction?.target?.distance ?? 2);
+      });
 
       await Promise.all([
         this.lighting.loadEnvironment(this.opts.assetBase, 256),
@@ -299,8 +338,10 @@ class World implements IWorld {
         if (/rim/i.test(m.name)) this.fx.addGlow(m);
       this.updateFixtures();
       this.events.emit("layout", this.layout);
+      this.setupLod();
 
-      this.governor.start();
+      this.gfx.syncPlayer();
+      this.gfx.start();
       this.ready = true;
       const pending = this.pending;
       this.pending = null;
@@ -397,6 +438,9 @@ class World implements IWorld {
       this.applyOps(ops);
       applyToModel(this.model, ops);
     }
+    // Art: door signs read summary / refs / phase straight from the campus
+    // session (RoomSign redraws only when its strings change).
+    for (const cs of input.campus) this.rooms.get(cs.sessionId)?.setCampus(cs);
   }
 
   private applyOps(ops: SyncOp[]): void {
@@ -412,6 +456,9 @@ class World implements IWorld {
           this.rooms.get(op.sessionId)?.dispose();
           const room = new Room(this.roomCtx(), rl, op.label);
           this.rooms.set(op.sessionId, room);
+          (room as { setDetail?(d: DetailSettings): void }).setDetail?.(
+            this.detail ?? defaultDetail(),
+          );
           createdNow.add(op.sessionId);
           this.feeds?.addFeed(op.sessionId, rl.feedCamera, () =>
             room.getRenderList(),
@@ -511,17 +558,20 @@ class World implements IWorld {
 
   private frame(): void {
     if (this.disposed || !this.player) return;
-    const dtMs = Math.min(this.engine.getDeltaTime(), 100);
-    const dt = Math.min(dtMs / 1000, 0.05);
     const now = performance.now();
+    const rafMs = this.engine.getDeltaTime();
+    this.gfx.sampleFrame(rafMs, now);
+    const dtMs = this.gfx.beginFrame(now, Math.min(rafMs, 100)); // fps cap
+    if (dtMs < 0) return;
+    const dt = Math.min(dtMs / 1000, 0.05);
+    this.gfx.update(dtMs);
 
     this.input.update(dtMs);
     this.player.update(dt, this.inputEnabled ? this.input : null);
     const eye = this.player.camera.globalPosition;
     this.assets.flush();
     for (const r of this.rooms.values()) r.update(dt, eye);
-    if (this.qualityLevel.pointLights)
-      this.lighting.update(dt, this.player.position);
+    if (this.gfx.dynamicLights) this.lighting.update(dt, this.player.position);
     this.interaction?.update(now);
 
     const zone = roomAt(this.layout, this.player.position);
@@ -532,6 +582,8 @@ class World implements IWorld {
       this.feeds.setActive(nearControl);
       this.feeds.update();
     }
+
+    this.updateLod(now, zone);
 
     this.scene.render();
 
@@ -548,10 +600,9 @@ class World implements IWorld {
     }
 
     // Stats (1 Hz) + governor
-    const frameMs = this.engine.getDeltaTime();
+    const frameMs = rafMs;
     this.frames += 1;
     this.frameMsAcc += frameMs;
-    this.governor.sample(frameMs, now);
     if (now - this.lastStatsAt >= STATS_MS) {
       const elapsed = now - this.lastStatsAt;
       const fps = this.lastStatsAt ? (this.frames * 1000) / elapsed : 0;
@@ -559,33 +610,15 @@ class World implements IWorld {
         fps: Math.round(fps),
         frameMs:
           Math.round((this.frameMsAcc / Math.max(1, this.frames)) * 10) / 10,
-        tier: tierOf(this.governor.index),
+        tier: coarseTier(this.gfx.effective),
+        effective: this.gfx.effective,
+        postProcesses: this.fx?.postProcessCount ?? 0,
         drawCalls: this.sceneInstr.drawCallsCounter.current,
       });
       this.lastStatsAt = now;
       this.frames = 0;
       this.frameMsAcc = 0;
     }
-  }
-
-  private applyQuality(level: QualityLevel): void {
-    this.qualityLevel = level;
-    const dpr =
-      typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    this.engine.setHardwareScalingLevel(
-      level.scaling / Math.min(dpr, level.maxDpr),
-    );
-    this.materials.setAnisotropy(level.anisotropy);
-    this.fx?.apply({
-      ssao: level.ssao,
-      msaa: level.msaa,
-      glow: level.glow,
-      bloom: level.bloom,
-    });
-    if (level.shadows > 0) this.lighting.enableShadows(level.shadows);
-    else this.lighting.disableShadows();
-    this.lighting.setPoolIntensity(level.pointLights ? 1 : 0);
-    if (!level.pointLights) this.lighting.update(1, Vector3.Zero());
   }
 
   // -------------------------------------------------------------------------
@@ -618,11 +651,130 @@ class World implements IWorld {
   }
 
   setQuality(q: QualitySetting): void {
-    this.governor.setSetting(q);
+    this.gfx.set(settingsForQuality(q, this.gfx.settings));
+  }
+
+  /** Debug (world-debug ?inspect=1): behave as if the player pressed F on a screen 1.6 m away. */
+  debugInspect(): void {
+    this.gfx.beginInspect(1.6);
+  }
+
+  setGraphics(settings: GraphicsSettings): void {
+    this.gfx.set(settings);
+  }
+
+  /** Characters / screens / feeds detail fan-out (each target is feature-detected). */
+  private detail: DetailSettings | null = null;
+  private setDetail(d: DetailSettings): void {
+    this.detail = d;
+    type Detailed = { setDetail?(d: DetailSettings): void };
+    for (const t of [this.feeds, this.controlWall, ...this.rooms.values()])
+      (t as Detailed | null)?.setDetail?.(d);
+    this.actorHub?.setDetail(d.characterDetail);
+    this.screenHub?.setDetail(d.liveScreens);
+  }
+
+  // -------------------------------------------------------------------------
+  // LOD + visibility (Visibility.ts, ActorHub, ScreenHub, label occlusion)
+  // -------------------------------------------------------------------------
+
+  private setupLod(): void {
+    this.actorHub = ActorHub.get(this.scene);
+    this.screenHub = ScreenHub.get(this.scene);
+    this.actorHub.setShadowSink({
+      add: (m) => this.lighting.addShadowCaster(m),
+      remove: (m) => this.lighting.removeShadowCaster(m),
+    });
+    if (this.detail) this.setDetail(this.detail);
+    this.visibility = new VisibilityController({
+      screens: this.screenHub,
+      actors: this.actorHub,
+    });
+    const occluders = new StaticOccluders(this.scene);
+    this.labels.setOccluder((a, b) => occluders.blocked(a, b));
+  }
+
+  private readonly dbgHist: number[] = [];
+  /** Median of the last samples (a single frame can include one-off passes). */
+  private dbgDraws(v: number): number {
+    this.dbgHist.push(v);
+    if (this.dbgHist.length > 5) this.dbgHist.shift();
+    const s = [...this.dbgHist].sort((a, b) => a - b);
+    return s[s.length >> 1];
+  }
+
+  private activeKinds(): Record<string, number> {
+    const by: Record<string, number> = {};
+    const list = this.scene.getActiveMeshes();
+    for (let i = 0; i < list.length; i++) {
+      const m = list.data[i];
+      const k = m.name.replace(/[_:.\d].*$/, "");
+      by[k] = (by[k] ?? 0) + (m.subMeshes?.length || 1);
+    }
+    return Object.fromEntries(
+      Object.entries(by)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 16),
+    );
+  }
+
+  private updateLod(now: number, zone: Zone): void {
+    if (!this.player || !this.visibility || !this.actorHub || !this.screenHub)
+      return;
+    const off = !!(globalThis as { __lodOff?: boolean }).__lodOff;
+    this.actorHub.bypass = off;
+    this.screenHub.bypass = off;
+    const cam = this.player.camera;
+    const eye = cam.globalPosition;
+    const feedMode = this.feeds?.isActive ?? false;
+    this.actorHub.setFeedMode(feedMode);
+    this.screenHub.setFeedMode(feedMode);
+    const dir = cam.getForwardRay(1).direction;
+    const yaw =
+      Math.hypot(dir.x, dir.z) > 0.2
+        ? Math.atan2(dir.x, dir.z)
+        : this.player.yaw;
+    if (!off)
+      this.visibility.update(
+        now,
+        this.rooms,
+        {
+          eye,
+          yaw,
+          halfFov: halfFovFor(cam.fov, this.engine.getAspectRatio(cam)),
+          zone,
+          rooms: visRoomsOf(this.layout.rooms),
+          hallLength: this.layout.hall.length,
+          hallHalfWidth: this.layout.hall.width / 2,
+        },
+        feedMode,
+      );
+    if (this.screenHub.needsUpdate || now - this.lastScreensAt >= 200) {
+      this.lastScreensAt = now;
+      this.screenHub.update(eye);
+    }
+    this.actorHub.update(eye);
+    if (this.controlWall) {
+      const o = this.layout.controlRoom.screenWall.origin;
+      const d = Math.hypot(eye.x - o.x, eye.z - o.z);
+      this.controlWall.setFar(!feedMode && d > 22);
+    }
+    if (now - this.lastDbgAt >= 500) {
+      this.lastDbgAt = now;
+      (globalThis as { __worldStats?: unknown }).__worldStats = {
+        draws: this.dbgDraws(this.sceneInstr.drawCallsCounter.current),
+        active: this.scene.getActiveMeshes().length,
+        textures: this.scene.textures.length,
+        actors: this.actorHub.stats(),
+        zone: zone.kind,
+        kinds: this.activeKinds(),
+      };
+    }
   }
 
   setInputEnabled(enabled: boolean): void {
     this.inputEnabled = enabled;
+    if (enabled) this.gfx.endInspect();
     this.input.setEnabled(enabled);
     if (this.interaction) this.interaction.enabled = enabled;
   }

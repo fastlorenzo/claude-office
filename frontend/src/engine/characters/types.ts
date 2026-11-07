@@ -22,6 +22,8 @@ export interface CharacterRig {
   setTint(hex: string): void;
   /** far = frozen, mid = ~15 Hz, near = every frame. */
   update(dt: number, lod: Lod): void;
+  /** Optional: hide fine detail (lanyard) when not near the camera. */
+  setDetail?(full: boolean): void;
   /** Visible meshes (shadow casters, feed render lists, picking). */
   getMeshes(): AbstractMesh[];
   dispose(): void;

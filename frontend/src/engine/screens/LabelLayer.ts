@@ -53,13 +53,34 @@ interface Entry {
   wanted: boolean; // setVisible
   alpha: number;
   scale: number;
+  /** Occlusion fade factor 0..1 (1 = clear line of sight). */
+  occ: number;
+  occTarget: number;
 }
+
+/** True when the segment from -> to is blocked by solid static geometry. */
+export type Occluder = (from: Vector3, to: Vector3) => boolean;
+
+const OCCLUSION_PERIOD = 0.2; // s (5 Hz)
+const OCCLUSION_FADE = 9; // 1/s
 
 export class LabelLayer {
   private readonly scene: Scene;
   private readonly ui: AdvancedDynamicTexture;
   private readonly entries = new Map<string, Entry>();
   private readonly observer: Observer<Scene> | null;
+  private occluder: Occluder | null = null;
+  private occAcc = 0;
+
+  /** Labels whose anchor is hidden behind solid geometry fade out (5 Hz test). */
+  setOccluder(fn: Occluder | null): void {
+    this.occluder = fn;
+    for (const e of this.entries.values()) {
+      e.occ = 1;
+      e.occTarget = 1;
+    }
+    this.occAcc = OCCLUSION_PERIOD;
+  }
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -145,6 +166,8 @@ export class LabelLayer {
       wanted: true,
       alpha: -1,
       scale: -1,
+      occ: -1,
+      occTarget: 1,
     });
     this.applyFade(this.entries.get(id) as Entry, true);
   }
@@ -296,7 +319,28 @@ export class LabelLayer {
   private tick(): void {
     if (this.entries.size === 0) return;
     const dt = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
+    this.occAcc += dt;
+    const testOcc = this.occAcc >= OCCLUSION_PERIOD;
+    if (testOcc) this.occAcc = 0;
+    const cam = this.scene.activeCamera;
     for (const e of this.entries.values()) {
+      if (this.occluder && cam) {
+        if (testOcc && e.wanted) {
+          e.anchor.computeWorldMatrix(true);
+          e.occTarget = this.occluder(
+            cam.globalPosition,
+            e.anchor.getAbsolutePosition(),
+          )
+            ? 0
+            : 1;
+          if (e.occ < 0) e.occ = e.occTarget;
+        }
+        if (e.occ >= 0 && e.occ !== e.occTarget)
+          e.occ += (e.occTarget - e.occ) * Math.min(1, dt * OCCLUSION_FADE);
+        if (Math.abs(e.occ - e.occTarget) < 0.01) e.occ = e.occTarget;
+      } else if (e.occ !== 1) {
+        e.occ = 1;
+      }
       if (e.bubble && e.bubble.remaining !== Infinity) {
         e.bubble.remaining -= dt;
         if (e.bubble.remaining <= 0) this.removeBubble(e);
@@ -319,6 +363,7 @@ export class LabelLayer {
       alpha = f.alpha;
       scale = f.scale;
     }
+    alpha *= e.occ < 0 ? 1 : e.occ;
     if (!e.wanted) alpha = 0;
     if (
       !force &&

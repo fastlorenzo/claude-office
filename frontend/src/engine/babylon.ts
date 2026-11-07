@@ -103,6 +103,7 @@ export { MirrorTexture } from "@babylonjs/core/Materials/Textures/mirrorTexture"
 export { ReflectionProbe } from "@babylonjs/core/Probes/reflectionProbe";
 export { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 export { ColorCurves } from "@babylonjs/core/Materials/colorCurves";
+export { ImageProcessingPostProcess } from "@babylonjs/core/PostProcesses/imageProcessingPostProcess";
 
 // Cameras
 export { Camera } from "@babylonjs/core/Cameras/camera";
@@ -191,3 +192,18 @@ export { TextWrapping } from "@babylonjs/gui";
 export { Constants } from "@babylonjs/core/Engines/constants";
 export type { CharacterSurfaceInfo } from "@babylonjs/core/Physics/v2/characterController";
 export { PhysicsShapeContainer } from "@babylonjs/core/Physics/v2/physicsShape";
+
+// ---------------------------------------------------------------------------
+// Added by the graphics-controller agent (additive)
+// ---------------------------------------------------------------------------
+export { TAARenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/taaRenderingPipeline";
+export { FSR1RenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/fsr1RenderingPipeline";
+export { MotionBlurPostProcess } from "@babylonjs/core/PostProcesses/motionBlurPostProcess";
+export { DepthOfFieldEffectBlurLevel } from "@babylonjs/core/PostProcesses/depthOfFieldEffect";
+export { PostProcess } from "@babylonjs/core/PostProcesses/postProcess";
+
+// ---------------------------------------------------------------------------
+// Added by the art / lighting agent (additive)
+// ---------------------------------------------------------------------------
+export { ClusteredLightContainer } from "@babylonjs/core/Lights/Clustered/clusteredLightContainer";
+export { RectAreaLight } from "@babylonjs/core/Lights/rectAreaLight";

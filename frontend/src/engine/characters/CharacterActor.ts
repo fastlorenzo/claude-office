@@ -4,7 +4,13 @@
  * backend state as a pose, and keeps its nameplate / bubble up to date.
  */
 
-import { AbstractMesh, CreateCylinder, Scene, TransformNode } from "../babylon";
+import {
+  AbstractMesh,
+  CreateCylinder,
+  Scene,
+  TransformNode,
+  type Vector3,
+} from "../babylon";
 import type { CharacterPose, RoomLayout, Vec3 } from "../contracts";
 import type { Agent, AgentState, BossState, BubbleContent } from "@/types";
 import type { Boss1 as Boss } from "@/types/generated";
@@ -16,6 +22,8 @@ import {
   type PathPoint,
 } from "../logic/motion";
 import type { LabelLayer } from "../screens/LabelLayer";
+import { ActorHub, type HubActor } from "./ActorHub";
+import type { ActorTier } from "./lod";
 import { MannequinRig } from "./MannequinRig";
 import { tryCreateGltfRig } from "./GltfRig";
 import { agentStateLabel, bossStateLabel } from "./identity";
@@ -57,7 +65,7 @@ type Phase =
 const samePoint = (a: PathPoint, b: PathPoint): boolean =>
   typeof a === "string" || typeof b === "string" ? a === b : a.desk === b.desk;
 
-export class CharacterActor {
+export class CharacterActor implements HubActor {
   readonly root: TransformNode;
   private readonly ctx: ActorContext;
   private readonly opts: ActorOptions;
@@ -77,6 +85,9 @@ export class CharacterActor {
   private departing: (() => void) | null = null;
   private gone = false;
   private lod: Lod | null = null;
+  private tier: ActorTier = "near";
+  private vis = 1;
+  private readonly hub: ActorHub;
   private bubbleKey = "";
   private stateLabel = "";
   private color: string;
@@ -144,6 +155,48 @@ export class CharacterActor {
       subtitle: "",
       color: this.isBoss ? "#D97757" : opts.color,
     });
+    this.hub = ActorHub.get(ctx.scene);
+    this.hub.add(this);
+  }
+
+  // --- HubActor -----------------------------------------------------------
+
+  get sessionId(): string {
+    return this.opts.sessionId;
+  }
+
+  get feet(): Vector3 {
+    return this.root.position;
+  }
+
+  get tintHex(): string {
+    return this.isBoss ? "#D97757" : this.color;
+  }
+
+  get seatedNow(): boolean {
+    return this.seated || this.phase.k === "sit";
+  }
+
+  get presence(): number {
+    return this.vis;
+  }
+
+  get isGone(): boolean {
+    return this.gone || this.disposed;
+  }
+
+  shadowMeshes(): AbstractMesh[] {
+    return this.rig.getMeshes();
+  }
+
+  /** LOD tier from the ActorHub: enable / disable the skinned mesh. */
+  applyTier(tier: ActorTier): void {
+    if (this.disposed) return;
+    this.tier = tier;
+    const show = tier === "near" || tier === "mid";
+    this.root.setEnabled(show);
+    this.rig.setDetail?.(tier === "near");
+    this.ctx.labels.setVisible(this.labelId, tier === "near" && !this.gone);
   }
 
   private get isBoss(): boolean {
@@ -223,12 +276,14 @@ export class CharacterActor {
 
   update(dt: number, lod: Lod): void {
     if (this.disposed) return;
-    if (lod !== this.lod) {
-      this.lod = lod;
-      this.ctx.labels.setVisible(this.labelId, lod === "near" && !this.gone);
-    }
+    // The ActorHub owns the tier (distance to the eye); the room LOD is only a
+    // fallback until the hub has assigned one.
+    void lod;
+    const eff: Lod =
+      this.tier === "near" ? "near" : this.tier === "mid" ? "mid" : "far";
+    this.lod = eff;
     this.step(Math.max(0, Math.min(dt, 0.25)));
-    this.rig.update(dt, lod);
+    this.rig.update(dt, eff);
   }
 
   getHeadAnchor(): TransformNode {
@@ -238,6 +293,7 @@ export class CharacterActor {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.hub.remove(this);
     this.ctx.labels.detach(this.labelId);
     this.pickProxy.dispose();
     this.rig.dispose();
@@ -365,6 +421,7 @@ export class CharacterActor {
       t: 0,
       then: () => {
         this.gone = true;
+        this.vis = 0;
         this.ctx.labels.setVisible(this.labelId, false);
         const cb = this.departing;
         this.departing = null;
@@ -466,6 +523,7 @@ export class CharacterActor {
   }
 
   private setVisibility(v: number): void {
+    this.vis = v;
     for (const m of this.rig.getMeshes()) {
       m.visibility = v;
       m.isVisible = v > 0.001;

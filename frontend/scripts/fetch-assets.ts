@@ -107,11 +107,13 @@ async function resolveJobs(entry: Entry): Promise<Job[]> {
       jobs.push({ id, kind, rel: `${dir}/${rel}`, url: f.url, size: f.size });
     }
   } else {
-    const f = need(files.hdri?.["1k"]?.hdr, "hdri 1k hdr");
+    const res =
+      entry.role === "exteriorHdri" ? ASSET_MANIFEST.exteriorHdri.res : "1k";
+    const f = need(files.hdri?.[res]?.hdr, `hdri ${res} hdr`);
     jobs.push({
       id,
       kind,
-      rel: hdriPath(id, "").replace(/^\//, ""),
+      rel: hdriPath(id, "", res).replace(/^\//, ""),
       url: f.url,
       size: f.size,
     });
@@ -202,6 +204,11 @@ async function main(): Promise<void> {
       role: m.role,
     })),
     { id: ASSET_MANIFEST.hdri.id, kind: "hdri" as const, role: "hdri" },
+    {
+      id: ASSET_MANIFEST.exteriorHdri.id,
+      kind: "hdri" as const,
+      role: "exteriorHdri",
+    },
   ];
 
   const failures: string[] = [];

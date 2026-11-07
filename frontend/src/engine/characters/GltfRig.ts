@@ -186,6 +186,7 @@ export class GltfRig implements CharacterRig {
   private tint: string;
   private sitOffset = 0;
   private paused = false;
+  private detailFull = true;
   private disposed = false;
 
   constructor(scene: Scene, st: PackState, opts: MannequinOptions) {
@@ -248,6 +249,12 @@ export class GltfRig implements CharacterRig {
       const w = this.layers[layer].get("walk");
       if (w) w.group.speedRatio = ratio;
     }
+  }
+
+  setDetail(full: boolean): void {
+    if (full === this.detailFull) return;
+    this.detailFull = full;
+    for (const m of this.extras) m.setEnabled(full);
   }
 
   setTint(hex: string): void {
@@ -483,6 +490,7 @@ export class GltfRig implements CharacterRig {
     merged.material = this.badgeMaterial();
     merged.isPickable = false;
     merged.setParent(parent);
+    merged.setEnabled(this.detailFull);
     this.extras.push(merged);
   }
 

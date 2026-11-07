@@ -218,6 +218,18 @@ export class ControlRoomWall {
     this.drawOverlay();
   }
 
+  private far = false;
+
+  /** Far from the wall (> ~22 m): drop the 16 screens + rims (overlay stays). */
+  setFar(far: boolean): void {
+    if (far === this.far) return;
+    this.far = far;
+    for (const c of this.cells) {
+      c.screen.setEnabled(!far);
+      c.rim.setEnabled(!far);
+    }
+  }
+
   /** Screens + status rims (add to a GlowLayer). */
   getGlowMeshes(): Mesh[] {
     return [

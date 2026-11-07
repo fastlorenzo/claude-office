@@ -5,6 +5,7 @@ import { MousePointerClick } from "lucide-react";
 import { useTranslation, type TranslationKey } from "@/hooks/useTranslation";
 import { useWorldUiStore, selectPanels } from "@/stores/worldUiStore";
 import { useCampusStore } from "@/stores/campusStore";
+import { usePreferencesStore } from "@/stores/preferencesStore";
 import { STATUS_COLORS, type Zone } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
@@ -148,18 +149,22 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
 export function StatsChip(): ReactNode {
   const { t } = useTranslation();
   const stats = useWorldUiStore((s) => s.stats);
+  const showFps = usePreferencesStore((s) => s.graphics.showFps);
+  const auto = usePreferencesStore((s) => s.graphics.preset === "auto");
   const connected = useCampusStore((s) => s.connected);
   return (
     <div
       className={`pointer-events-none flex items-center gap-3 rounded-2xl px-3.5 py-2 font-mono text-[11px] text-slate-300 ${GLASS}`}
     >
-      {stats ? (
+      {stats && showFps ? (
         <>
           <span>
             <span className="text-white">{Math.round(stats.fps)}</span> fps
           </span>
           <span className="uppercase text-slate-400">
-            {t(stats.tier === "high" ? "hud.tier.high" : "hud.tier.low")}
+            {auto ? "auto · " : ""}
+            {stats.effective ??
+              t(stats.tier === "high" ? "hud.tier.high" : "hud.tier.low")}
           </span>
           <span className="hidden sm:inline">
             <span className="text-white">{stats.drawCalls}</span> dc

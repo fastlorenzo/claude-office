@@ -1,5 +1,10 @@
 /** Deterministic, time-varying fake campus data for screenshots / dev. */
-import type { CampusActivity, CampusSession, SessionMeta } from "../contracts";
+import type {
+  CampusActivity,
+  CampusSession,
+  SessionMeta,
+  SessionPhase,
+} from "../contracts";
 import type { Agent, AgentState, BossState, TodoItem } from "@/types";
 
 const LABELS = [
@@ -75,6 +80,67 @@ const TODO_TEXT = [
   "Run the full check suite",
   "Open the pull request",
 ];
+
+interface DemoProfile {
+  project: string;
+  summary: string;
+  refs: string[];
+  branch: string;
+  phases: Array<Omit<SessionPhase, "since">>;
+}
+const PROFILES: DemoProfile[] = [
+  {
+    project: "continuum",
+    summary: "Retry failed webhook deliveries with backoff",
+    refs: ["CONT-839"],
+    branch: "feat/cont-839-webhook-retry",
+    phases: [
+      { kind: "testing", label: "Running tests", detail: "pytest -q" },
+      { kind: "coding", label: "Coding", detail: "editing webhooks.py" },
+      { kind: "building", label: "Building", detail: "tsc --noEmit" },
+    ],
+  },
+  {
+    project: "payments-api",
+    summary: "Add SSO login to the admin dashboard",
+    refs: ["PAY-212", "#412"],
+    branch: "feat/pay-212-sso-login",
+    phases: [
+      {
+        kind: "exploring",
+        label: "Exploring code",
+        detail: "auth/middleware.py",
+      },
+      { kind: "git", label: "Git", detail: "git push origin" },
+      { kind: "coding", label: "Coding", detail: "editing sso.py" },
+    ],
+  },
+  {
+    project: "infra-terraform",
+    summary: "Move staging VPC to private subnets",
+    refs: ["#88"],
+    branch: "chore/staging-private-subnets",
+    phases: [
+      { kind: "researching", label: "Researching", detail: "terraform docs" },
+      { kind: "running", label: "Running", detail: "terraform plan" },
+    ],
+  },
+  {
+    project: "mobile-app",
+    summary: "Fix crash when opening push notifications",
+    refs: ["MOB-1042"],
+    branch: "fix/mob-1042-push-crash",
+    phases: [
+      { kind: "planning", label: "Planning", detail: null },
+      { kind: "testing", label: "Running tests", detail: "jest · 3 failing" },
+    ],
+  },
+];
+
+// Phase "since" is anchored to real time (the HUD shows elapsed vs Date.now()),
+// fixed per process so createDemoCampus stays deterministic.
+const DEMO_EPOCH = Date.now();
+const agoIso = (ms: number) => new Date(DEMO_EPOCH - ms).toISOString();
 
 const isoAt = (ms: number) => new Date(BASE_MS + ms).toISOString();
 
@@ -171,8 +237,40 @@ export function createDemoCampus(
         });
       }
     }
+    const prof = PROFILES[i % PROFILES.length];
+    const phase: SessionPhase | null = ended
+      ? { kind: "ended", label: "Ended" }
+      : needs
+        ? {
+            kind: "needs_approval",
+            label: "Waiting for your approval",
+            detail: "Bash: rm -rf build/",
+            since: agoIso(45_000),
+          }
+        : bossState === "idle" || bossState === "completing"
+          ? {
+              kind: "waiting_user",
+              label: "Waiting for your reply",
+              since: agoIso(130_000),
+            }
+          : bossState === "delegating"
+            ? {
+                kind: "delegating",
+                label: "Delegating",
+                detail: `${agents.length} subagents`,
+                since: agoIso(20_000),
+              }
+            : {
+                ...prof.phases[Math.floor(tMs / 9000 + i) % prof.phases.length],
+                since: agoIso(60_000 * (1 + (i % 3))),
+              };
     campus.push({
       sessionId: id,
+      project: prof.project,
+      summary: prof.summary,
+      refs: prof.refs,
+      gitBranch: prof.branch,
+      phase,
       bucket,
       boss: {
         state: bossState,

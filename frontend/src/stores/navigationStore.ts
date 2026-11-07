@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { initialView } from "./initialView";
 import type {
   ViewMode,
   BuildingConfig,
@@ -41,7 +42,10 @@ interface NavigationActions {
   /** Navigate to the single office view (keeps building config for back-nav) */
   goToSingle: () => void;
   /** Set building config from API (auto-switches to building view if floors exist) */
-  setBuildingConfig: (config: BuildingConfig) => void;
+  setBuildingConfig: (
+    config: BuildingConfig,
+    renderer?: "3d" | "pixel",
+  ) => void;
   /** Update building config in-place without triggering a view change */
   updateBuildingConfig: (config: BuildingConfig) => void;
   /** Set loading state */
@@ -113,23 +117,12 @@ export const useNavigationStore = create<NavigationStore>()((set, get) => ({
       transitionOrigin: null,
     }),
 
-  setBuildingConfig: (config) =>
-    set((state) => {
-      // If config has floors, auto-switch to building view from single
-      const hasFloors = config.floors.length > 0;
-      const currentView = state.view;
-      const newView: ViewMode =
-        currentView === "single" && hasFloors
-          ? "building"
-          : currentView === "single"
-            ? "single"
-            : currentView;
-      return {
-        buildingConfig: config,
-        isLoading: false,
-        view: newView,
-      };
-    }),
+  setBuildingConfig: (config, renderer = "pixel") =>
+    set((state) => ({
+      buildingConfig: config,
+      isLoading: false,
+      view: initialView(renderer, config, state.view),
+    })),
 
   updateBuildingConfig: (config) => set({ buildingConfig: config }),
 

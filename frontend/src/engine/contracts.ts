@@ -61,12 +61,51 @@ export interface CampusSession {
   focus?: string | null;
   /** Up to 4 concrete work items in flight (in-progress todos, then active subagent tasks). */
   workItems?: string[];
+  /**
+   * Plain-language summary of what the session is building, <= 70 chars,
+   * understandable without context, e.g. "Add SSO login to the admin dashboard".
+   * Never just a ticket id. Null until it can be inferred.
+   */
+  summary?: string | null;
+  /** Ticket / PR references found in the session (name, branch, prompts), e.g. ["CONT-839", "#412"]. */
+  refs?: string[];
+  /** Project / app name, e.g. "continuum" (repo basename or package name). */
+  project?: string | null;
+  /** Where the session is at right now (deterministic, from the live tool stream). */
+  phase?: SessionPhase | null;
   /** Claude Code session name (/rename → transcript `custom-title`), when set. */
   sessionName?: string | null;
   /** Git branch of the session's working dir when known, e.g. "feat/3d-office". */
   gitBranch?: string | null;
   ended: boolean;
   lastUpdated: string; // ISO
+}
+
+/** Coarse activity phase shown at a glance ("Running tests", "Waiting for you"). */
+export type SessionPhaseKind =
+  | "needs_approval" // permission prompt pending
+  | "waiting_user" // turn ended, waiting for the user's reply
+  | "planning" // plan mode / thinking before tools
+  | "researching" // web search / fetch / reading docs
+  | "exploring" // reading / grepping code
+  | "coding" // Edit / Write
+  | "testing" // test runners
+  | "building" // build / typecheck / lint
+  | "running" // other shell commands
+  | "git" // commit / push / PR
+  | "delegating" // subagents running
+  | "compacting"
+  | "idle"
+  | "ended";
+
+export interface SessionPhase {
+  kind: SessionPhaseKind;
+  /** Short human label, <= 40 chars, e.g. "Running tests", "Waiting for your approval". */
+  label: string;
+  /** Optional specifics, <= 80 chars, e.g. "vitest · 3 failing", "editing World.ts". */
+  detail?: string | null;
+  /** ISO timestamp when this phase started (for "for 2m"). */
+  since?: string | null;
 }
 
 export interface CampusState {
@@ -317,7 +356,16 @@ export interface WorldEvents {
   /** ~10 Hz while moving. */
   pose: PlayerPose;
   /** ~1 Hz. */
-  stats: { fps: number; frameMs: number; tier: QualityTier; drawCalls: number };
+  stats: {
+    fps: number;
+    frameMs: number;
+    tier: QualityTier;
+    drawCalls: number;
+    /** Concrete preset in effect (the governor's tier under "auto"). */
+    effective?: "low" | "medium" | "high" | "ultra";
+    /** Active camera post-processes. */
+    postProcesses?: number;
+  };
   pointerLock: boolean;
   cameraMode: CameraMode;
   layout: BuildingLayout;
@@ -337,8 +385,8 @@ export interface IWorld {
   sync(input: SyncInput): void;
   setCameraMode(mode: CameraMode): void;
   setQuality(q: QualitySetting): void;
-  /** Apply full graphics settings live (presets / custom). Optional until the quality pass lands. */
-  setGraphics?(settings: GraphicsSettings): void;
+  /** Apply full graphics settings live (presets / custom). */
+  setGraphics(settings: GraphicsSettings): void;
   /** Disable game input (HUD panel open) — releases pointer lock. */
   setInputEnabled(enabled: boolean): void;
   /** Teleport the player to a room's door (minimap fast travel) or "lobby" / "control". */

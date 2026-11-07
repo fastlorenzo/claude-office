@@ -25,7 +25,12 @@ describe("monitorText", () => {
     const s = createDemoCampus(1, 0).campus[0];
     s.boss = { state: "working", currentTask: null };
     s.recentActivity = [];
+    s.summary = null;
+    s.objective = null;
+    s.gitBranch = null;
+    s.phase = null;
     s.office = { contextUtilization: 0.42 };
+    s.boss = { state: "working", currentTask: null };
     s.todos = Array.from({ length: 10 }, (_, i) => ({
       content: `t${i}`,
       status: i < 6 ? "completed" : "pending",
@@ -38,8 +43,21 @@ describe("monitorText", () => {
     expect(lines[12]).toBe("ctx  [████░░░░░░] 42%");
   });
 
+  it("puts summary and phase at the top when known", () => {
+    const s = createDemoCampus(1, 0).campus[0];
+    s.summary = "Retry failed webhook deliveries with backoff";
+    s.phase = { kind: "testing", label: "Running tests", detail: "pytest -q" };
+    const lines = buildMonitorLines(s, "p", 0);
+    expect(lines).toHaveLength(13);
+    expect(lines[1]).toBe("Retry failed webhook deliveries with backoff");
+    expect(lines[2]).toBe("▸ Running tests · pytest -q");
+  });
+
   it("formats activity lines and wraps tasks", () => {
     const s = createDemoCampus(1, 5000).campus[0];
+    s.summary = null;
+    s.objective = null;
+    s.gitBranch = null;
     s.boss = { state: "working", currentTask: "word ".repeat(40) };
     const lines = buildMonitorLines(s, "p", 0);
     expect(lines[2].endsWith("…")).toBe(true);

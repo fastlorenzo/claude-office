@@ -13,6 +13,9 @@ import {
   Scene,
   Vector3,
   Color4,
+  Constants,
+  ImageProcessingConfiguration,
+  ImageProcessingPostProcess,
   Texture,
 } from "../babylon";
 import type { Vec3 } from "../contracts";
@@ -26,6 +29,7 @@ interface Feed {
   rtt: RenderTargetTexture;
   getRenderList: () => AbstractMesh[];
   rendered: boolean;
+  tone: ImageProcessingPostProcess;
 }
 
 export class FeedScheduler {
@@ -36,6 +40,9 @@ export class FeedScheduler {
   private order: string[] = [];
   private cursor = 0;
   private active = false;
+  private wantActive = false;
+  private mode: "off" | "low" | "high" = "high";
+  private tick = 0;
   private disposed = false;
 
   constructor(scene: Scene) {
@@ -91,12 +98,37 @@ export class FeedScheduler {
     rtt.wrapU = Texture.CLAMP_ADDRESSMODE;
     rtt.wrapV = Texture.CLAMP_ADDRESSMODE;
     rtt.renderList = [];
+    // Materials skip tone mapping when the scene applies it as a post
+    // process, so a bare RTT comes out linear / un-toned (orange). Give every
+    // feed the same ACES + exposure + contrast as the main view (no vignette).
+    const scene = this.scene;
+    const main = scene.imageProcessingConfiguration;
+    const cfg = new ImageProcessingConfiguration();
+    cfg.toneMappingEnabled = true;
+    cfg.toneMappingType = main.toneMappingEnabled
+      ? main.toneMappingType
+      : ImageProcessingConfiguration.TONEMAPPING_ACES;
+    cfg.exposure = main.toneMappingEnabled ? main.exposure : 1.05;
+    cfg.contrast = main.toneMappingEnabled ? main.contrast : 1.12;
+    cfg.vignetteEnabled = false;
+    const tone = new ImageProcessingPostProcess(
+      `feedTone_${sessionId}`,
+      1,
+      null,
+      Texture.BILINEAR_SAMPLINGMODE,
+      scene.getEngine(),
+      false,
+      Constants.TEXTURETYPE_UNSIGNED_BYTE,
+      cfg,
+    );
+    rtt.addPostProcess(tone);
     const feed: Feed = {
       sessionId,
       camera,
       rtt,
       getRenderList,
       rendered: false,
+      tone,
     };
     // Refresh the render list lazily, right before this feed renders.
     rtt.onBeforeRenderObservable.add(() => {
@@ -118,6 +150,7 @@ export class FeedScheduler {
     const f = this.feeds.get(sessionId);
     if (!f) return;
     this.detach(f.rtt);
+    f.tone.dispose();
     f.rtt.dispose();
     f.camera.dispose();
     this.feeds.delete(sessionId);
@@ -125,7 +158,20 @@ export class FeedScheduler {
     this.onChanged.notifyObservers(sessionId);
   }
 
+  /** Graphics setting "securityFeeds": off = never render, low = half rate. */
+  setDetail(d: { securityFeeds: "off" | "low" | "high" }): void {
+    if (d.securityFeeds === this.mode) return;
+    this.mode = d.securityFeeds;
+    this.applyActive(this.wantActive);
+  }
+
   setActive(active: boolean): void {
+    this.wantActive = active;
+    this.applyActive(active);
+  }
+
+  private applyActive(wanted: boolean): void {
+    const active = wanted && this.mode !== "off";
     if (active === this.active) return;
     this.active = active;
     for (const f of this.feeds.values()) {
@@ -141,6 +187,7 @@ export class FeedScheduler {
   /** Call once per frame: re-arms one feed (never-rendered feeds first). */
   update(): void {
     if (!this.active || this.disposed || this.order.length === 0) return;
+    if (this.mode === "low" && (this.tick++ & 1) === 1) return;
     const fresh = this.order.find((id) => !this.feeds.get(id)?.rendered);
     let id = fresh;
     if (!id) {

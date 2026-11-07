@@ -8,6 +8,9 @@
  *   n=6                      number of demo sessions
  *   quality=auto|high|low
  *   cam=x,y,z,yawDeg,pitchDeg  fixed eye pose for screenshots (freezes the player)
+ *   gfx=low|medium|high|ultra|auto  force a graphics preset
+ *   gfxset=key:value,...     override single graphics settings (e.g. antiAliasing:taa)
+ *   inspect=1                simulate the inspect action (DoF) after ready
  *   tp=1                     start in third person
  *   shot=1                   set document.title = "ready" ~N frames after ready
  *   frames=40                frames to wait before "ready" when shot=1
@@ -15,6 +18,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import {
+  applyPreset,
+  defaultGraphicsSettings,
+  type GraphicsSettings,
+} from "@/engine/fx/graphicsSettings";
 import type {
   CameraMode,
   IWorld,
@@ -46,7 +54,41 @@ function parseParams() {
       };
     }
   }
+  const gfxRaw = q.get("gfx");
+  let graphics: GraphicsSettings | undefined;
+  if (gfxRaw) {
+    const preset =
+      gfxRaw === "low" ||
+      gfxRaw === "medium" ||
+      gfxRaw === "high" ||
+      gfxRaw === "ultra"
+        ? gfxRaw
+        : "auto";
+    graphics = {
+      ...applyPreset(preset, defaultGraphicsSettings()),
+      showFps: true,
+    };
+    const over = q.get("gfxset");
+    if (over) {
+      const g = graphics as unknown as Record<string, unknown>;
+      for (const kv of over.split(",")) {
+        const [k, v] = kv.split(":");
+        if (!(k in g)) continue;
+        g[k] =
+          v === "true"
+            ? true
+            : v === "false"
+              ? false
+              : isNaN(Number(v))
+                ? v
+                : Number(v);
+      }
+      graphics.preset = "custom";
+    }
+  }
   return {
+    graphics,
+    inspect: q.get("inspect") === "1",
     n,
     quality,
     cameraMode,
@@ -81,6 +123,7 @@ export default function WorldDebugPage() {
         canvas,
         {
           quality: p.quality,
+          graphics: p.graphics,
           cameraMode: p.cameraMode,
           isMobile: false,
           assetBase: "/assets",
@@ -92,6 +135,10 @@ export default function WorldDebugPage() {
       offs.push(
         world.on("ready", () => {
           setStatus("ready");
+          if (p.inspect) {
+            const w = world as unknown as { debugInspect?: () => void };
+            w.debugInspect?.();
+          }
           if (p.shot) {
             let left = p.frames;
             const tick = () => {
@@ -147,7 +194,7 @@ export default function WorldDebugPage() {
         {stats && (
           <div>
             {stats.fps} fps · {stats.frameMs} ms · {stats.drawCalls} draws ·{" "}
-            {stats.tier}
+            {stats.effective ?? stats.tier} · {stats.postProcesses ?? 0} pp
           </div>
         )}
       </div>

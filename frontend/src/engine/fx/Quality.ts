@@ -1,148 +1,96 @@
 /**
- * Quality tiers + auto governor.
+ * Auto quality governor.
  *
- * Levels (0 = best):
- *   0  high: SSAO2, MSAA 4x, 2048 cascaded shadows, glow, bloom, scale 1
- *   1  high without SSAO
- *   2  low: FXAA, 1024 shadows, glow, bloom
- *   3  low: no shadows, no glow, hardware scaling 1.5
- * "high"/"low" pin the level (0 / 2). "auto" starts at 0 (2 on mobile or
- * ≤ 4 cores) and moves with hysteresis: a 2 s mean frame time above 24 ms
- * steps down; below 12 ms for 20 s steps up.
+ * With preset "auto" the governor walks AUTO_LADDER (high → medium → low, see
+ * graphicsSettings.ts) from the frame time: a 2 s mean above 24 ms steps down
+ * (at most one step per 3 s); below 12 ms for 20 s steps up. Other presets
+ * pin the tier and the governor ignores samples. The governor only decides
+ * the tier — `GraphicsController` turns it into a render plan.
  */
 import type { QualitySetting, QualityTier } from "@/engine/contracts";
+import {
+  AUTO_LADDER,
+  applyPreset,
+  type GraphicsSettings,
+} from "@/engine/fx/graphicsSettings";
+import { autoStartTier, type ConcretePreset } from "@/engine/fx/fxPlan";
 
-export interface QualityLevel {
-  ssao: boolean;
-  msaa: boolean;
-  shadows: number; // 0 = off, else map size
-  glow: boolean;
-  bloom: boolean;
-  scaling: number; // extra hardware scaling on top of the device ratio (1 = native)
-  /** Cap on devicePixelRatio honoured by this level. */
-  maxDpr: number;
-  /** Anisotropic filtering for tiled surface textures. */
-  anisotropy: number;
-  pointLights: boolean;
+/** Contract tier ("high" | "low") for stats: low only for the lowest preset. */
+export function coarseTier(preset: ConcretePreset): QualityTier {
+  return preset === "low" ? "low" : "high";
 }
 
-export const LEVELS: QualityLevel[] = [
-  {
-    ssao: true,
-    msaa: true,
-    shadows: 2048,
-    glow: true,
-    bloom: true,
-    scaling: 1,
-    maxDpr: 2,
-    anisotropy: 16,
-    pointLights: true,
-  },
-  {
-    ssao: false,
-    msaa: true,
-    shadows: 2048,
-    glow: true,
-    bloom: true,
-    scaling: 1,
-    maxDpr: 2,
-    anisotropy: 16,
-    pointLights: true,
-  },
-  {
-    ssao: false,
-    msaa: false,
-    shadows: 1024,
-    glow: true,
-    bloom: true,
-    scaling: 1,
-    maxDpr: 1,
-    anisotropy: 8,
-    pointLights: true,
-  },
-  {
-    ssao: false,
-    msaa: false,
-    shadows: 0,
-    glow: false,
-    bloom: true,
-    scaling: 1.5,
-    maxDpr: 1,
-    anisotropy: 8,
-    pointLights: false,
-  },
-];
-
-export function tierOf(level: number): QualityTier {
-  return level <= 1 ? "high" : "low";
+/** Legacy `setQuality(auto|high|low)` mapped onto presets, keeping personal prefs. */
+export function settingsForQuality(
+  q: QualitySetting,
+  current: GraphicsSettings,
+): GraphicsSettings {
+  return applyPreset(q === "auto" ? "auto" : q, current);
 }
 
 export class QualityGovernor {
-  private level = 0;
-  private setting: QualitySetting;
+  private index: number;
+  private auto: boolean;
   private window: number[] = [];
   private windowStart = 0;
   private goodSince = 0;
   private lastChange = 0;
 
   constructor(
-    setting: QualitySetting,
+    auto: boolean,
     private readonly lowEnd: boolean,
-    private readonly apply: (level: QualityLevel, index: number) => void,
+    private readonly apply: (tier: ConcretePreset, index: number) => void,
   ) {
-    this.setting = setting;
-    this.level = this.initialLevel();
+    this.auto = auto;
+    this.index = AUTO_LADDER.indexOf(autoStartTier(lowEnd));
   }
 
-  private initialLevel(): number {
-    if (this.setting === "high") return 0;
-    if (this.setting === "low") return 2;
-    return this.lowEnd ? 2 : 0;
+  get tier(): ConcretePreset {
+    return AUTO_LADDER[this.index];
   }
 
-  /** Force the current level (e.g. after the world is built). */
-  start(): void {
-    this.apply(LEVELS[this.level], this.level);
+  get isAuto(): boolean {
+    return this.auto;
   }
 
-  get tier(): QualityTier {
-    return tierOf(this.level);
-  }
-
-  get index(): number {
-    return this.level;
-  }
-
-  setSetting(q: QualitySetting): void {
-    this.setting = q;
-    this.level = this.initialLevel();
+  /** Switch auto on/off; turning it on restarts from the best tier for the device. */
+  setAuto(on: boolean): void {
+    if (on === this.auto) return;
+    this.auto = on;
     this.window = [];
     this.goodSince = 0;
-    this.apply(LEVELS[this.level], this.level);
+    if (on) {
+      this.index = AUTO_LADDER.indexOf(autoStartTier(this.lowEnd));
+      this.apply(this.tier, this.index);
+    }
+  }
+
+  /** Force the current tier (e.g. after the world is built). */
+  start(): void {
+    this.apply(this.tier, this.index);
+  }
+
+  private step(delta: 1 | -1, nowMs: number): void {
+    this.index += delta;
+    this.lastChange = nowMs;
+    this.goodSince = 0;
+    this.apply(this.tier, this.index);
   }
 
   /** Feed one frame time (ms). */
   sample(frameMs: number, nowMs: number): void {
-    if (this.setting !== "auto") return;
+    if (!this.auto) return;
     if (this.window.length === 0) this.windowStart = nowMs;
     this.window.push(frameMs);
     if (nowMs - this.windowStart < 2000) return;
     const mean = this.window.reduce((a, b) => a + b, 0) / this.window.length;
     this.window = [];
     if (nowMs - this.lastChange < 3000) return;
-    if (mean > 24 && this.level < LEVELS.length - 1) {
-      this.level += 1;
-      this.lastChange = nowMs;
-      this.goodSince = 0;
-      this.apply(LEVELS[this.level], this.level);
-    } else if (mean < 12 && this.level > 0) {
+    if (mean > 24 && this.index < AUTO_LADDER.length - 1) {
+      this.step(1, nowMs);
+    } else if (mean < 12 && this.index > 0) {
       if (!this.goodSince) this.goodSince = nowMs;
-      if (nowMs - this.goodSince > 20000) {
-        this.level -= 1;
-        this.lastChange = nowMs;
-        this.goodSince = 0;
-        this.apply(LEVELS[this.level], this.level);
-      }
+      if (nowMs - this.goodSince > 20000) this.step(-1, nowMs);
     } else {
       this.goodSince = 0;
     }

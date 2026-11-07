@@ -6,76 +6,26 @@ The textures, models and HDRI below are downloaded from [Poly Haven](https://pol
 and released under the CC0 1.0 Universal public-domain dedication. Attribution is not required
 but is gratefully given.
 
-| Asset                  | Id                       | Type    | Authors                                          | License                                                       | Source                                         |
-| ---------------------- | ------------------------ | ------- | ------------------------------------------------ | ------------------------------------------------------------- | ---------------------------------------------- |
-| Blender Institute      | `blender_institute`      | hdri    | Greg Zaal                                        | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/blender_institute      |
-| Classic Laptop         | `classic_laptop`         | model   | Arrangemonk                                      | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/classic_laptop         |
-| Coffee Cart 01         | `CoffeeCart_01`          | model   | Joe Seabuhr                                      | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/CoffeeCart_01          |
-| Fire Alarm             | `fire_alarm`             | model   | Slinc                                            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/fire_alarm             |
-| Metal Office Desk      | `metal_office_desk`      | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/metal_office_desk      |
-| Modern Arm Chair 01    | `modern_arm_chair_01`    | model   | Vibrant Nordic                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/modern_arm_chair_01    |
-| Office Notepads        | `office_notepads`        | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/office_notepads        |
-| Potted Plant 01        | `potted_plant_01`        | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_01        |
-| Potted Plant 02        | `potted_plant_02`        | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_02        |
-| Potted Plant 04        | `potted_plant_04`        | model   | James Ray Cock                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_04        |
-| Projector Screen       | `projector_screen`       | model   | PeterM                                           | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/projector_screen       |
-| Security Camera 01     | `security_camera_01`     | model   | Alexander Otterbeck, Yann Kervran                | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/security_camera_01     |
-| Sofa 02                | `sofa_02`                | model   | Kirill Sannikov                                  | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/sofa_02                |
-| Steel Frame Shelves 01 | `steel_frame_shelves_01` | model   | James Ray Cock                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/steel_frame_shelves_01 |
-| Wet Floor Sign 01      | `WetFloorSign_01`        | model   | Fran Calvente                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/WetFloorSign_01        |
-| Concrete Wall 001      | `concrete_wall_001`      | texture | Dimitrios Savva, Rico Cilliers                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/concrete_wall_001      |
-| Grey Tiles             | `grey_tiles`             | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/grey_tiles             |
-| Herringbone Parquet    | `herringbone_parquet`    | texture | Jenelle van Heerden, Sergej Majboroda            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/herringbone_parquet    |
-| Laminate Floor 02      | `laminate_floor_02`      | texture | Dario Barresi, Charlotte Baglioni                | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/laminate_floor_02      |
-| Painted Metal Shutter  | `painted_metal_shutter`  | texture | Dario Barresi, Rico Cilliers, Charlotte Baglioni | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/painted_metal_shutter  |
-| Painted Plaster Wall   | `painted_plaster_wall`   | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/painted_plaster_wall   |
-| Walnut Veneer 02       | `walnut_veneer_02`       | texture | Jenelle van Heerden                              | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/walnut_veneer_02       |
-| White Stucco           | `white_stucco`           | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/white_stucco           |
+| Asset                                   | Id                                     | Type    | Authors                                          | License                                                       | Source                                                       |
+| --------------------------------------- | -------------------------------------- | ------- | ------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| Blender Institute                       | `blender_institute`                    | hdri    | Greg Zaal                                        | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/blender_institute                    |
+| Kloofendal 48d Partly Cloudy (Pure Sky) | `kloofendal_48d_partly_cloudy_puresky` | hdri    | Greg Zaal, Jarod Guest                           | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky |
+| Fire Alarm                              | `fire_alarm`                           | model   | Slinc                                            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/fire_alarm                           |
+| Metal Office Desk                       | `metal_office_desk`                    | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/metal_office_desk                    |
+| Office Notepads                         | `office_notepads`                      | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/office_notepads                      |
+| Potted Plant 01                         | `potted_plant_01`                      | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_01                      |
+| Potted Plant 02                         | `potted_plant_02`                      | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_02                      |
+| Potted Plant 04                         | `potted_plant_04`                      | model   | James Ray Cock                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_04                      |
+| Projector Screen                        | `projector_screen`                     | model   | PeterM                                           | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/projector_screen                     |
+| Security Camera 01                      | `security_camera_01`                   | model   | Alexander Otterbeck, Yann Kervran                | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/security_camera_01                   |
+| Concrete Wall 001                       | `concrete_wall_001`                    | texture | Dimitrios Savva, Rico Cilliers                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/concrete_wall_001                    |
+| Grey Tiles                              | `grey_tiles`                           | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/grey_tiles                           |
+| Herringbone Parquet                     | `herringbone_parquet`                  | texture | Jenelle van Heerden, Sergej Majboroda            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/herringbone_parquet                  |
+| Laminate Floor 02                       | `laminate_floor_02`                    | texture | Dario Barresi, Charlotte Baglioni                | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/laminate_floor_02                    |
+| Painted Metal Shutter                   | `painted_metal_shutter`                | texture | Dario Barresi, Rico Cilliers, Charlotte Baglioni | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/painted_metal_shutter                |
+| Painted Plaster Wall                    | `painted_plaster_wall`                 | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/painted_plaster_wall                 |
+| Walnut Veneer 02                        | `walnut_veneer_02`                     | texture | Jenelle van Heerden                              | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/walnut_veneer_02                     |
+| White Stucco                            | `white_stucco`                         | texture | Amal Kumar                                       | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/white_stucco                         |
 
 `HavokPhysics.wasm` (copied to `public/havok/`) is distributed under the license of the
 `@babylonjs/havok` package.
-
-<!-- BEGIN ROCKETBOX (appended by scripts/fetch-characters.ts docs; re-append if this file is regenerated) -->
-
-## Characters: Microsoft Rocketbox
-
-The realistic office characters and their animations (`public/assets/characters/`)
-are derived from the [Microsoft Rocketbox Avatar Library](https://github.com/microsoft/Microsoft-Rocketbox)
-(converted from FBX to glTF, textures resized to WebP). The full text is also in
-`public/assets/characters/LICENSE-ROCKETBOX.md`.
-
-```
-MIT License
-
-Copyright (c) 2020 Microsoft
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-<!-- END ROCKETBOX -->
-
-<!-- BEGIN MATERIALS2 -->
-
-## materials2 (ambientCG, CC0 1.0)
-
-PBR textures under `materials2/` come from [ambientCG](https://ambientcg.com)
-and are released under CC0 1.0 Universal (public domain); credit is not
-required. Fetched by `bun run materials` (`scripts/fetch-materials.ts`); ids
-are listed in `materials2/LICENSE.md` and `materials2/manifest.json`.
-<!-- END MATERIALS2 -->

@@ -2,6 +2,7 @@
 
 import { useNavigationStore } from "@/stores/navigationStore";
 import { LOBBY_FLOOR_ID } from "@/types/navigation";
+import { usePreferencesStore } from "@/stores/preferencesStore";
 import { useTranslation } from "@/hooks/useTranslation";
 
 /**
@@ -13,6 +14,8 @@ export function Breadcrumb(): React.ReactNode {
   const floorId = useNavigationStore((s) => s.floorId);
   const buildingConfig = useNavigationStore((s) => s.buildingConfig);
   const goToBuilding = useNavigationStore((s) => s.goToBuilding);
+  const goToSingle = useNavigationStore((s) => s.goToSingle);
+  const renderer = usePreferencesStore((s) => s.renderer);
   const { t } = useTranslation();
 
   // Hidden in the single office view.
@@ -21,7 +24,7 @@ export function Breadcrumb(): React.ReactNode {
   const hasBuilding = (buildingConfig?.floors.length ?? 0) > 0;
   // In the Command Center, only show the crumb when there's a building to
   // return to (otherwise the header COMMAND button is the only entry point).
-  if (view === "command" && !hasBuilding) return null;
+  if (view === "command" && !hasBuilding && renderer !== "3d") return null;
 
   const isCommand = view === "command";
   const isLobby = floorId === LOBBY_FLOOR_ID;
@@ -34,6 +37,18 @@ export function Breadcrumb(): React.ReactNode {
       className="flex items-center gap-1.5 text-sm font-mono"
       aria-label="Building navigation"
     >
+      {renderer === "3d" && (
+        <>
+          <button
+            onClick={goToSingle}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-orange-400 hover:bg-slate-800/50 transition-colors"
+          >
+            <span>{"\u2190"}</span>
+            <span>{t("settings.renderer3d")}</span>
+          </button>
+          <span className="text-slate-600">/</span>
+        </>
+      )}
       <button
         onClick={(e) => {
           useNavigationStore

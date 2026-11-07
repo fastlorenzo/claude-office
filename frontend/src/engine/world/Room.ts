@@ -13,6 +13,7 @@
  * the hall, origin at the room centre on the floor.
  */
 import {
+  CreateBox,
   CreateCylinder,
   Mesh,
   PBRMaterial,
@@ -23,6 +24,7 @@ import {
   type DynamicTexture,
 } from "@/engine/babylon";
 import type {
+  CampusSession,
   InteractionTarget,
   RoomLayout,
   RoomStatus,
@@ -34,26 +36,26 @@ import type { Boss1 as Boss } from "@/types/generated";
 import type { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import { CharacterActor } from "@/engine/characters/CharacterActor";
 import type { Lod } from "@/engine/characters/types";
-import type { Lighting } from "@/engine/fx/Lighting";
+import { FixturePoint, type Lighting } from "@/engine/fx/Lighting";
 import type { PostFx } from "@/engine/fx/PostFx";
-import {
-  lin,
-  type Materials,
-  type SurfaceKey,
-} from "@/engine/materials/Materials";
+import { lin, type Materials } from "@/engine/materials/Materials";
 import { framedSink, type Colliders } from "@/engine/physics/Colliders";
 import { AgentMonitor, BossMonitor } from "@/engine/screens/Monitor";
 import type { LabelLayer } from "@/engine/screens/LabelLayer";
 import { WhiteboardScreen } from "@/engine/screens/Whiteboard";
 import { agentScreenText } from "@/engine/logic/monitorText";
-import { MeshBatcher, v3 } from "@/engine/util/MeshBatcher";
 import {
-  ceilingPanels,
   drawNameplate,
-  glassPartition,
   makeTexture,
+  partitionColliders,
   texturedPlane,
 } from "@/engine/world/architecture";
+import { RoomShellModule, ROOM_PIER } from "@/engine/world/RoomShell";
+import {
+  RoomSign,
+  roomSignData,
+  type RoomSignData,
+} from "@/engine/world/RoomSign";
 
 export interface RoomContext {
   scene: Scene;
@@ -65,15 +67,16 @@ export interface RoomContext {
   labels: LabelLayer;
 }
 
+/** Muted felt colours (one per room, cycling): sage, clay, slate, sand, … */
 const ACCENTS = [
-  "#8FA392",
-  "#C79A7E",
-  "#7D8FA6",
-  "#CDB68E",
-  "#A3907F",
-  "#8E9C8A",
-  "#B48C8C",
-  "#7F9C9E",
+  "#7F927F",
+  "#A87E66",
+  "#6C7C90",
+  "#B3A07E",
+  "#8C7D72",
+  "#5F7470",
+  "#9A7A7A",
+  "#6F8A8E",
 ];
 
 const BOSS_COLOR = "#D97757";
@@ -94,6 +97,9 @@ export class Room {
   private readonly lampMeshes: Mesh[] = [];
   private nameplateTex: DynamicTexture | null = null;
   private nameplate: Mesh | null = null;
+  private sign: RoomSign | null = null;
+  private releaseShell: (() => void) | null = null;
+  private campus: CampusSession | null = null;
   private bossMonitor: BossMonitor | null = null;
   private readonly agentMonitors: AgentMonitor[] = [];
   private whiteboard: WhiteboardScreen | null = null;
@@ -154,97 +160,62 @@ export class Room {
       new Vector3(L.origin.x, L.origin.y, L.origin.z),
       L.yaw,
     );
-    const b = new MeshBatcher(scene, materials, this.group);
-
-    // Floor + ceiling
-    b.box("floorRoom", v3(0, -0.05, 0), v3(hx * 2, 0.1, hz * 2));
+    // Static architecture: one shared thin-instanced module for all rooms.
+    const shell = RoomShellModule.get(scene, materials, this.ctx.lighting, L);
+    const accent = ACCENTS[L.slot.index % ACCENTS.length];
+    this.releaseShell = shell.add(this.root.computeWorldMatrix(true), accent);
+    for (const p of shell.localFixtures) {
+      const wp = this.w(p.x, p.y, p.z);
+      const spec = { ...p.spec };
+      if (spec.size)
+        spec.size = { ...spec.size, yaw: (spec.size.yaw ?? 0) + L.yaw };
+      this.fixtures.push(new FixturePoint(wp.x, wp.y, wp.z, spec));
+    }
+    this.statics.push(...shell.parts);
+    const { z0: pierZ0, z1: pierZ1 } = ROOM_PIER;
+    const pz = (pierZ0 + pierZ1) / 2;
+    // Colliders (per room): floor, glazed front, pier.
     cols.addBox(
       this.group,
       new Vector3(0, -0.1, 0),
       new Vector3(hx * 2, 0.2, hz * 2),
     );
-    b.box("ceiling", v3(0, H + 0.05, 0), v3(hx * 2, 0.1, hz * 2));
-    const panels = ceilingPanels(
-      b,
-      -hx + 0.6,
-      hx - 0.4,
-      -hz + 0.6,
-      hz - 0.6,
-      H,
-      { w: 0.6, d: 1.2 },
-      { x: 3, z: 4 },
-    );
-    for (const p of panels) {
-      const wp = this.w(p.x, p.y, p.z);
-      this.fixtures.push(new Vector3(wp.x, wp.y, wp.z));
-    }
-    // Shadow-gap cove where ceiling meets the glass front.
-    b.box("ceiling", v3(-hx + 0.2, H - 0.1, 0), v3(0.4, 0.2, hz * 2));
-
-    // Glazed front (door wall at -X) with a solid pier for the nameplate.
-    const pierZ0 = doorHalf + 0.25;
-    const pierZ1 = pierZ0 + 1.0;
-    glassPartition(
-      b,
+    partitionColliders(
       cols,
       this.group,
       "z",
       -hx,
       -hz,
       hz,
-      H - 0.2,
-      { a0: -doorHalf, a1: doorHalf, h: 2.3 },
+      H,
       {
-        pitch: 1.3,
-        frostBand: true,
-        solid: [{ a0: pierZ0, a1: pierZ1, y0: 0, y1: H }],
+        a0: -doorHalf,
+        a1: doorHalf,
+        h: 2.4,
       },
-    );
-    b.box(
-      "charcoal",
-      v3(-hx, (H - 0.2) / 2, (pierZ0 + pierZ1) / 2),
-      v3(0.16, H - 0.2, pierZ1 - pierZ0),
+      [{ a0: pierZ0, a1: pierZ1 }],
     );
     cols.addBox(
       this.group,
-      new Vector3(-hx, H / 2, (pierZ0 + pierZ1) / 2),
-      new Vector3(0.16, H, pierZ1 - pierZ0),
+      new Vector3(-hx, H / 2, pz),
+      new Vector3(0.18, H, pierZ1 - pierZ0),
     );
-    // Header above the glazing (hall side bulkhead hides the ceiling edge).
-    b.box("wall", v3(-hx, H - 0.1, 0), v3(0.16, 0.2, hz * 2));
-
-    // Status: emissive bar over the door + round lamp (hall side).
-    b.box(
-      this.lampMat,
-      v3(-hx - 0.085, 2.42, 0),
-      v3(0.02, 0.035, LAYOUT.DOOR_W - 0.1),
-      { keepUVs: true },
-    );
-
-    // Accent wall (+Z side) and skirting.
-    const accent = ACCENTS[L.slot.index % ACCENTS.length];
-    b.box(
-      materials.color(accent, 0.85),
-      v3(0.15, H / 2, hz - 0.012),
-      v3(hx * 2 - 0.3, H, 0.024),
-    );
-    const sk: SurfaceKey = "charcoal";
-    b.box(sk, v3(0.15, 0.04, hz - 0.03), v3(hx * 2 - 0.3, 0.08, 0.016));
-    b.box(sk, v3(0.15, 0.04, -hz + 0.008), v3(hx * 2 - 0.3, 0.08, 0.016));
-    b.box(sk, v3(hx - 0.008, 0.04, 0), v3(0.016, 0.08, hz * 2));
-
-    const meshes = b.build({ parent: this.root, receiveShadows: true });
-    for (const m of meshes)
-      (m.material === this.lampMat ? this.lampMeshes : this.statics).push(m);
-
-    // Lamp disc above the door (separate mesh so it can glow).
-    const lamp = CreateCylinder(
-      `${this.group}:lamp`,
-      { height: 0.04, diameter: 0.16, tessellation: 24 },
+    // Status bar over the door + round lamp (hall side): one animated mesh.
+    const bar = CreateBox(
+      `${this.group}:statusBar`,
+      { width: 0.02, height: 0.03, depth: LAYOUT.DOOR_W - 0.16 },
       scene,
     );
-    lamp.rotation.z = Math.PI / 2;
-    lamp.position.set(-hx - 0.1, H - 0.48, 0);
+    bar.position.set(-hx - 0.09, 2.47, 0);
+    const disc = CreateCylinder(
+      `${this.group}:lampDisc`,
+      { height: 0.03, diameter: 0.12, tessellation: 24 },
+      scene,
+    );
+    disc.rotation.z = Math.PI / 2;
+    disc.position.set(-hx - 0.1, H - 0.38, 0);
+    const lamp = Mesh.MergeMeshes([bar, disc], true, true) ?? bar;
+    lamp.name = `${this.group}:lamp`;
     lamp.parent = this.root;
     lamp.material = this.lampMat;
     lamp.isPickable = false;
@@ -260,19 +231,19 @@ export class Room {
       scene,
       `${this.group}:np`,
       768,
-      256,
+      224,
       () => {},
     );
     const np = texturedPlane(
       scene,
       `${this.group}:nameplate`,
       this.nameplateTex,
-      0.9,
-      0.3,
-      { emissive: 0.9 },
+      0.84,
+      0.245,
+      { emissive: 0.85 },
     );
     np.parent = this.root;
-    np.position.set(-hx - 0.085, 2.05, (pierZ0 + pierZ1) / 2);
+    np.position.set(-hx - 0.112, 2.25, pz);
     np.rotation.y = Math.PI / 2; // face -X (hall)
     np.isPickable = true;
     const doorTarget: InteractionTarget = {
@@ -284,81 +255,44 @@ export class Room {
     this.nameplate = np;
     this.redrawNameplate();
 
-    // Furniture
-    const place = (
-      role: Parameters<AssetLibrary["instantiate"]>[0],
-      lx: number,
-      lz: number,
-      localYaw: number,
-      scale?: number | Vec3,
-      y = 0,
-    ) =>
-      assets.instantiate(
-        role,
-        this.root,
-        { position: { x: lx, y, z: lz }, yaw: localYaw, scale },
-        { group: this.group },
+    // Digital door sign: what the session is doing.
+    this.sign = new RoomSign(
+      scene,
+      {
+        parent: this.root,
+        x: -hx - 0.112,
+        y: 1.45,
+        z: pz,
+        yaw: Math.PI / 2,
+        width: 0.84,
+        height: 0.48,
+        name: this.group,
+        interact: doorTarget,
+      },
+      this.signData(),
+    );
+    if (this.ctx.fx)
+      for (const g of this.sign.glowMeshes) this.ctx.fx.addGlow(g as Mesh);
+
+    // ---- Furniture: merged into the shell module; colliders + plants per room.
+    for (const c of shell.colliders)
+      cols.addBox(
+        this.group,
+        new Vector3(c.x, c.size.y / 2, c.z),
+        new Vector3(c.size.x * 0.9, c.size.y, c.size.z * 0.9),
+        c.yaw,
       );
-    const toLocal = (p: Vec3) => {
-      const c = Math.cos(L.yaw);
-      const s = Math.sin(L.yaw);
-      const dx = p.x - L.origin.x;
-      const dz = p.z - L.origin.z;
-      return { x: dx * c - dz * s, z: dx * s + dz * c };
-    };
-    const bd = toLocal(L.bossDesk.position);
-    const bossYaw = L.bossDesk.yaw - L.yaw;
-    place("execDesk", bd.x, bd.z, bossYaw);
-    const bs = toLocal(L.bossDesk.seat);
-    place("taskChair", bs.x, bs.z, bossYaw);
-    // Laptop + notes on the boss desk (to the boss's right).
-    const r = { x: Math.cos(bossYaw), z: -Math.sin(bossYaw) };
-    const f = { x: Math.sin(bossYaw), z: Math.cos(bossYaw) };
-    place(
-      "laptop",
-      bd.x + r.x * 0.6 - f.x * 0.05,
-      bd.z + r.z * 0.6 - f.z * 0.05,
-      bossYaw - 0.35,
-      undefined,
-      0.75,
-    );
-    place(
-      "plantSmall",
-      bd.x - r.x * 0.75 + f.x * 0.2,
-      bd.z - r.z * 0.75 + f.z * 0.2,
-      0,
-      undefined,
-      0.75,
-    );
-
-    L.desks.forEach((d, i) => {
-      const p = toLocal(d.position);
-      const yaw = d.yaw - L.yaw;
-      place("workDesk", p.x, p.z, yaw);
-      const s = toLocal(d.seat);
-      place("taskChair", s.x, s.z, yaw + (((i * 37) % 7) - 3) * 0.04);
-      const dr = { x: Math.cos(yaw), z: -Math.sin(yaw) };
-      const df = { x: Math.sin(yaw), z: Math.cos(yaw) };
-      if (i % 3 === 0)
-        place(
-          "plantSmall",
-          p.x + dr.x * 0.55 + df.x * 0.15,
-          p.z + dr.z * 0.55 + df.z * 0.15,
-          i,
-          undefined,
-          0.75,
-        );
-    });
-
-    // Lounge by the glass front (+Z end), coffee point + shelves at the -Z end.
-    place("sofa", -hx + 0.55, hz - 1.35, Math.PI / 2, 0.85);
-    place("plant", -hx + 0.45, pierZ1 + 0.45, 0.4);
-    place("shelves", -hx + 1.15, -hz + 0.3, Math.PI);
-    place("coffeeCart", -hx + 0.42, -hz + 1.9, Math.PI / 2, 0.75);
-    place("plantTall", hx - 0.45, hz - 0.45, 1.1);
-    // Framed print beside the whiteboard.
-    place("artPrint", 2.55, -hz + 0.04, Math.PI, undefined, 1.0);
-    place("plant", hx - 0.45, -hz + 0.45, 2.3);
+    for (const pl of shell.plants)
+      assets.instantiate(
+        pl.role,
+        this.root,
+        {
+          position: { x: pl.x, y: pl.y ?? 0, z: pl.z },
+          yaw: pl.yaw,
+          scale: pl.scale,
+        },
+        { group: this.group, collider: "none" },
+      );
 
     // Screens (actors agent)
     const common = { sessionId: this.sessionId, roomLabel: this.label };
@@ -394,6 +328,21 @@ export class Room {
     this.applyStatus();
   }
 
+  /** Campus data for the door sign (summary / refs / phase / project). */
+  setCampus(cs: CampusSession): void {
+    this.campus = cs;
+    this.sign?.update(this.signData());
+  }
+
+  private signData(): RoomSignData {
+    return roomSignData(
+      this.campus,
+      this.label,
+      this.layout.slot.index + 1,
+      this.status,
+    );
+  }
+
   // -------------------------------------------------------------------------
   // Live state
   // -------------------------------------------------------------------------
@@ -402,6 +351,7 @@ export class Room {
     if (label === this.label) return;
     this.label = label;
     this.redrawNameplate();
+    this.sign?.update(this.signData());
     if (this.nameplate) {
       const meta = this.nameplate.metadata as { interact: InteractionTarget };
       meta.interact = { ...meta.interact, roomLabel: label };
@@ -413,6 +363,7 @@ export class Room {
     this.status = status;
     this.applyStatus();
     this.redrawNameplate();
+    this.sign?.update(this.signData());
   }
 
   get currentStatus(): RoomStatus {
@@ -549,7 +500,7 @@ export class Room {
     drawNameplate(
       ctx,
       768,
-      256,
+      224,
       this.label,
       this.layout.slot.index,
       STATUS_COLORS[this.status],
@@ -578,6 +529,7 @@ export class Room {
       this.bossMonitor?.setLod(lod);
       for (const m of this.agentMonitors) m.setLod(lod);
       this.whiteboard?.setLod(lod);
+      this.sign?.setLod(lod);
       // Far rooms: hide screens entirely; only near rooms cast character shadows.
       const show = lod !== "far";
       const screens = [
@@ -643,8 +595,11 @@ export class Room {
     this.bossMonitor?.dispose();
     for (const m of this.agentMonitors) m.dispose();
     this.whiteboard?.dispose();
-    for (const m of this.statics) m.dispose(false, false);
+    // Statics are the shared shell module: release this room's instance only.
+    this.releaseShell?.();
+    this.releaseShell = null;
     for (const m of this.lampMeshes) m.dispose(false, false);
+    this.sign?.dispose();
     this.nameplate?.material?.dispose();
     this.nameplate?.dispose();
     this.nameplateTex?.dispose();

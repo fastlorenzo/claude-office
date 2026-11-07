@@ -17,12 +17,12 @@ import {
   Scene,
   StandardMaterial,
   TransformNode,
+  Vector3,
   type DynamicTexture,
 } from "../babylon";
 import { STATUS_COLORS, type Vec3 } from "../contracts";
 import type { Lod } from "../characters/types";
 import {
-  buildMonitorBody,
   createEmissiveMaterial,
   createScreenTexture,
   fitText,
@@ -35,6 +35,8 @@ import {
   type Ctx2D,
 } from "./canvasKit";
 import { parseMonitorLines, type MonitorModel } from "./screenModels";
+import { MonitorBatch } from "./MonitorBatch";
+import { nextLive, ScreenHub, type HubScreen } from "./ScreenHub";
 
 export interface MonitorOptions {
   parent?: TransformNode;
@@ -49,16 +51,22 @@ export interface MonitorOptions {
 const DESK_TOP_Y = 0.755;
 
 /** Shared hardware + texture lifecycle for both monitor kinds. */
-abstract class ScreenBase {
+abstract class ScreenBase implements HubScreen {
   readonly screenMesh: Mesh;
   protected readonly scene: Scene;
   protected readonly pivot: TransformNode;
-  protected readonly body: Mesh;
+  readonly sessionId: string;
+  readonly worldPos: Vector3;
   protected readonly liveMat: StandardMaterial;
   protected tex: DynamicTexture | null = null;
   protected lod: Lod = "near";
   protected dirty = true;
   protected key = "";
+  /** Own textured plane in use (close to the camera); else a shared static. */
+  protected live = false;
+  private readonly batch: MonitorBatch;
+  private readonly batchId: number;
+  protected readonly hub: ScreenHub;
   private disposed = false;
 
   protected constructor(
@@ -76,8 +84,22 @@ abstract class ScreenBase {
     this.pivot.rotation.y = opts.yaw;
 
     const drop = Math.max(0, opts.position.y - opts.height / 2 - DESK_TOP_Y);
-    this.body = buildMonitorBody(id, scene, opts.width, opts.height, drop);
-    this.body.parent = this.pivot;
+    this.sessionId = opts.sessionId;
+    this.worldPos = new Vector3(
+      opts.position.x,
+      opts.position.y,
+      opts.position.z,
+    );
+    // Hardware (bezel / back / stand) lives in the shared thin-instance batch.
+    this.batch = MonitorBatch.get(scene);
+    this.batchId = this.batch.register({
+      position: opts.position,
+      yaw: opts.yaw,
+      width: opts.width,
+      height: opts.height,
+      drop,
+    });
+    this.hub = ScreenHub.get(scene);
 
     this.screenMesh = CreatePlane(
       `${id}_screen`,
@@ -94,18 +116,48 @@ abstract class ScreenBase {
         roomLabel: opts.roomLabel,
       },
     };
-    this.body.metadata = this.screenMesh.metadata;
+    this.screenMesh.setEnabled(false); // the hub enables it while live
     this.liveMat = createEmissiveMaterial(`${id}_mat`, scene, null);
     this.screenMesh.material = this.liveMat;
+    this.hub.add(this);
     whenFontsReady(() => {
       this.dirty = true;
       this.refresh();
     });
   }
 
-  /** Hardware + screen meshes (for shadows / feed render lists). */
+  /** Live screen mesh (for feed render lists). */
   getMeshes(): Mesh[] {
-    return [this.body, this.screenMesh];
+    return [this.screenMesh];
+  }
+
+  /** Called by the ScreenHub (~5 Hz): live plane vs shared static screen. */
+  applyHub(
+    show: boolean,
+    dist: number,
+    feedMode: boolean,
+    liveScale: number,
+  ): void {
+    if (this.disposed) return;
+    const showNow = show && this.pivot.isEnabled(true);
+    const wantLive =
+      showNow &&
+      !feedMode &&
+      this.isLive() &&
+      nextLive(this.live, dist, liveScale);
+    if (wantLive !== this.live) {
+      this.live = wantLive;
+      this.screenMesh.setEnabled(wantLive);
+      if (wantLive) {
+        this.screenMesh.material = this.liveMat;
+        this.refresh(true);
+      }
+    }
+    this.batch.showBody(this.batchId, showNow);
+    this.batch.showStatic(
+      this.batchId,
+      !showNow || wantLive ? null : this.isLive() ? "idle" : "off",
+    );
   }
 
   /** Meshes to add to a GlowLayer (emissive screen). */
@@ -116,6 +168,7 @@ abstract class ScreenBase {
   setLod(lod: Lod): void {
     if (lod === this.lod) return;
     this.lod = lod;
+    this.hub.touch();
     if (lod === "far") {
       this.releaseTexture();
       this.screenMesh.material = this.offMaterial();
@@ -130,6 +183,8 @@ abstract class ScreenBase {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.hub.remove(this);
+    this.batch.unregister(this.batchId);
     this.releaseTexture();
     this.liveMat.dispose();
     this.pivot.dispose(false, false);
@@ -149,7 +204,7 @@ abstract class ScreenBase {
   }
 
   protected refresh(force = false): void {
-    if (this.disposed || !this.dirty || !this.isLive()) return;
+    if (this.disposed || !this.dirty || !this.isLive() || !this.live) return;
     if (this.lod === "far") return;
     if (this.lod === "mid" && !force) return;
     if (!this.tex) {
@@ -464,6 +519,7 @@ export class AgentMonitor extends ScreenBase {
     if (on === this.active) return;
     this.active = on;
     this.applyActive();
+    this.hub.touch();
   }
 
   protected isLive(): boolean {

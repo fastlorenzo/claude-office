@@ -52,6 +52,7 @@ export function HeaderControls({
   const { t } = useTranslation();
   const view = useNavigationStore((s) => s.view);
   const goToCommand = useNavigationStore((s) => s.goToCommand);
+  const goToSingle = useNavigationStore((s) => s.goToSingle);
   const unreadCount = useAttentionStore(selectUnreadCount);
   const openCommandBar = useAttentionStore((s) => s.openCommandBar);
   const renderer = usePreferencesStore((s) => s.renderer);
@@ -68,7 +69,10 @@ export function HeaderControls({
         {(["3d", "pixel"] as const).map((r) => (
           <button
             key={r}
-            onClick={() => setRenderer(r)}
+            onClick={() => {
+              void setRenderer(r);
+              if (r === "3d" && view !== "single") goToSingle();
+            }}
             aria-pressed={renderer === r}
             className={`px-2.5 py-1 rounded-sm text-[11px] font-bold tracking-wide transition-colors ${
               renderer === r

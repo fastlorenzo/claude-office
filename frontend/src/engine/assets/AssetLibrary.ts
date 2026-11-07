@@ -50,6 +50,11 @@ interface RoleConfig {
   fit?: { axis: "x" | "y" | "z" | "maxXZ"; size: number };
   /** Non-uniform fit to an exact box (after yaw). Used for the oversized desk. */
   stretch?: { x: number; y: number; z: number };
+  /**
+   * Drop primitives whose material name matches (the scanned plants' own
+   * terracotta pots: the foliage sits in our procedural planters instead).
+   */
+  strip?: RegExp;
 }
 
 /**
@@ -61,9 +66,10 @@ const ROLE_CONFIG: Record<ModelRole, RoleConfig> = {
   chair: { yawOffset: 0, fit: { axis: "y", size: 0.98 } },
   sofa: { yawOffset: 0, fit: { axis: "maxXZ", size: 1.9 } },
   shelves: { yawOffset: Math.PI, fit: { axis: "y", size: 1.95 } },
-  plant: { yawOffset: 0, fit: { axis: "y", size: 1.3 } },
+  // Foliage only (pot stripped): base at y = 0, placed at the planter rim.
+  plant: { yawOffset: 0, fit: { axis: "y", size: 0.85 }, strip: /_pot$/ },
   plantSmall: { yawOffset: 0, fit: { axis: "y", size: 0.3 } },
-  plantTall: { yawOffset: 0, fit: { axis: "y", size: 0.95 } },
+  plantTall: { yawOffset: 0, fit: { axis: "y", size: 1.05 }, strip: /_pot$/ },
   coffeeCart: { yawOffset: Math.PI, fit: { axis: "maxXZ", size: 1.5 } },
   laptop: { yawOffset: Math.PI, fit: { axis: "maxXZ", size: 0.34 } },
   securityCamera: { yawOffset: 0 },
@@ -82,7 +88,51 @@ const PROCEDURAL_COLLIDERS: Record<
   taskChair: "cylinder",
   artPrint: "none",
   loungeTable: "cylinder",
+  sofa: "box",
+  chair: "cylinder",
+  shelves: "box",
+  coffeeCart: "box",
+  laptop: "none",
+  planter: "cylinder",
+  planterTall: "cylinder",
+  floorLamp: "none",
+  coatHooks: "none",
+  sideTable: "cylinder",
 };
+
+/**
+ * Per-instance albedo variation (thin-instance colour): ±amplitude luminance
+ * with a slight warm/cool drift, seeded by the placement id so it is stable.
+ * Kills the "every chair is the same pixel colour" CG tell.
+ */
+const INSTANCE_JITTER: Partial<Record<PropRole, number>> = {
+  workDesk: 0.05,
+  execDesk: 0.04,
+  taskChair: 0.05,
+  sofa: 0.04,
+  chair: 0.05,
+  shelves: 0.04,
+  plant: 0.12,
+  plantSmall: 0.12,
+  plantTall: 0.12,
+  planter: 0.06,
+  planterTall: 0.06,
+  coffeeCart: 0.04,
+};
+
+function jitterColor(id: number, amp: number, out: Float32Array, o: number) {
+  let h = Math.imul(id ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  const r = () => {
+    h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+    return (h & 0xffff) / 0xffff;
+  };
+  const l = (r() * 2 - 1) * amp;
+  const t = (r() * 2 - 1) * amp * 0.5;
+  out[o] = 1 + l + t;
+  out[o + 1] = 1 + l;
+  out[o + 2] = 1 + l - t;
+  out[o + 3] = 1;
+}
 
 export interface PlacementTransform {
   position: Vec3;
@@ -181,9 +231,15 @@ export class AssetLibrary {
           container.dispose();
           return;
         }
-        parts = this.flatten(container.meshes, container.transformNodes, () => {
-          container.addAllToScene();
-        });
+        const strip = ROLE_CONFIG[asset.role].strip;
+        parts = this.flatten(
+          container.meshes,
+          container.transformNodes,
+          () => {
+            container.addAllToScene();
+          },
+          strip,
+        );
         for (const ag of container.animationGroups) ag.dispose();
         for (const m of container.materials) {
           if (m instanceof PBRMaterial) {
@@ -230,6 +286,17 @@ export class AssetLibrary {
     for (const p of entry.parts) {
       p.isPickable = false;
       p.receiveShadows = true;
+      // Furniture never moves: it also occludes the static daylight map.
+      // Small parts (accessories, trims) skip the per-frame cascades: each
+      // caster part costs one draw per cascade for the whole building.
+      p.refreshBoundingInfo();
+      const ext = p.getBoundingInfo().boundingBox.extendSize;
+      const big = Math.max(ext.x, ext.y, ext.z) * 2 > 0.45 && ext.y * 2 > 0.12;
+      p.metadata = {
+        ...(p.metadata ?? {}),
+        staticCaster: true,
+        noDynamicShadow: !big,
+      };
       p.isVisible = false;
       p.alwaysSelectAsActiveMesh = false;
       for (const cb of this.shadowCasterCbs) cb(p, role);
@@ -259,11 +326,13 @@ export class AssetLibrary {
     meshes: AbstractMesh[],
     nodes: TransformNode[],
     addToScene: () => void,
+    strip?: RegExp,
   ): Mesh[] {
     addToScene();
     const parts: Mesh[] = [];
     for (const m of meshes) {
       if (!(m instanceof Mesh) || m.getTotalVertices() === 0) continue;
+      if (strip && m.material && strip.test(m.material.name)) continue;
       const world = m.computeWorldMatrix(true).clone();
       m.makeGeometryUnique();
       m.setParent(null);
@@ -441,18 +510,23 @@ export class AssetLibrary {
       e.dirty = false;
       const n = e.placements.size;
       const buf = new Float32Array(Math.max(1, n) * 16);
+      const amp = INSTANCE_JITTER[e.role] ?? 0;
+      const cols = amp > 0 ? new Float32Array(Math.max(1, n) * 4) : null;
       let i = 0;
-      for (const p of e.placements.values()) {
+      for (const [id, p] of e.placements) {
         p.matrix.copyToArray(buf, i * 16);
+        if (cols) jitterColor(id, amp, cols, i * 4);
         i += 1;
       }
       for (const part of e.parts) {
         if (n === 0) {
           part.isVisible = false;
           part.thinInstanceSetBuffer("matrix", null);
+          if (cols) part.thinInstanceSetBuffer("color", null);
           continue;
         }
         part.thinInstanceSetBuffer("matrix", buf, 16, true);
+        if (cols) part.thinInstanceSetBuffer("color", cols, 4, true);
         part.thinInstanceRefreshBoundingInfo(false);
         part.isVisible = true;
       }

@@ -1,9 +1,13 @@
 /**
  * Architectural building blocks shared by Building and Room: walls with
- * openings, glazed partitions with aluminium mullions, window frames,
- * skirting, recessed light panels, signage textures and the exterior sky /
- * skyline backdrop. Everything is emitted into a MeshBatcher (merged per
- * material) plus static colliders.
+ * openings, window units with deep reveals and slim black frames (plus their
+ * daylight "portal" lights), frameless-look glazed partitions with black
+ * mullions and a frosted manifestation band, recessed door frames, and the
+ * luminaires (suspended linear pendants, recessed slots, downlights) that
+ * return the FixturePoints the Lighting turns into real lights.
+ *
+ * Everything is emitted into a MeshBatcher / ArtBatcher (merged per
+ * material) plus static colliders. Signage textures live at the bottom.
  */
 import {
   Color3,
@@ -17,6 +21,8 @@ import {
 } from "@/engine/babylon";
 import type { ColliderSink } from "@/engine/physics/Colliders";
 import type { SurfaceKey } from "@/engine/materials/Materials";
+import { fixture, type FixturePoint } from "@/engine/fx/Lighting";
+import { ArtBatcher } from "@/engine/art/geometry";
 import { MeshBatcher, v3 } from "@/engine/util/MeshBatcher";
 
 export interface Opening {
@@ -27,6 +33,10 @@ export interface Opening {
   y0: number;
   y1: number;
 }
+
+/** Frosted manifestation band on glazed partitions (height range, metres). */
+export const MANIFEST_Y0 = 1.0;
+export const MANIFEST_H = 0.3;
 
 /**
  * Axis-aligned wall segment with rectangular openings.
@@ -83,65 +93,88 @@ export function wallWithOpenings(
 }
 
 /**
- * Window: aluminium frame, mullions roughly every `pitch` metres, a transom,
- * and one glass pane. Wall plane at `fixed`; `inward` = +1/-1 along the
- * wall normal toward the interior (frame sits flush on the inside face).
+ * Window: slim black frame set in the middle of the wall depth (deep plaster
+ * reveals), mullions roughly every `pitch` metres, exterior glass, and a
+ * white solid-surface sill on the inside. Returns daylight portal fixtures
+ * (cool, aimed into the room) — `inward` = ±1 along the wall normal towards
+ * the interior.
  */
 export function windowUnit(
   b: MeshBatcher,
   axis: "x" | "z",
   fixed: number,
   o: Opening,
-  pitch = 1.4,
-  frameMat: SurfaceKey = "aluminium",
-): void {
-  const f = 0.05; // frame face
-  const d = 0.12; // frame depth
-  const put = (a: number, y: number, len: number, h: number, depth = d) => {
-    if (axis === "z") b.box(frameMat, v3(fixed, y, a), v3(depth, h, len));
-    else b.box(frameMat, v3(a, y, fixed), v3(len, h, depth));
+  opts: {
+    pitch?: number;
+    inward?: 1 | -1;
+    wallT?: number;
+    portals?: boolean;
+  } = {},
+): FixturePoint[] {
+  const pitch = opts.pitch ?? 1.4;
+  const inward = opts.inward ?? 1;
+  const T = opts.wallT ?? 0.2;
+  const f = 0.045; // frame face
+  const d = 0.07; // frame depth
+  const put = (
+    mat: SurfaceKey,
+    a: number,
+    y: number,
+    len: number,
+    h: number,
+    depth: number,
+    off = 0,
+  ) => {
+    if (axis === "z") b.box(mat, v3(fixed + off, y, a), v3(depth, h, len));
+    else b.box(mat, v3(a, y, fixed + off), v3(len, h, depth));
   };
   const w = o.a1 - o.a0;
   const h = o.y1 - o.y0;
   const cy = (o.y0 + o.y1) / 2;
-  put(o.a0 + f / 2, cy, f, h);
-  put(o.a1 - f / 2, cy, f, h);
-  put((o.a0 + o.a1) / 2, o.y0 + f / 2, w, f);
-  put((o.a0 + o.a1) / 2, o.y1 - f / 2, w, f);
+  const ca = (o.a0 + o.a1) / 2;
+  put("blackMetal", o.a0 + f / 2, cy, f, h, d);
+  put("blackMetal", o.a1 - f / 2, cy, f, h, d);
+  put("blackMetal", ca, o.y0 + f / 2, w, f, d);
+  put("blackMetal", ca, o.y1 - f / 2, w, f, d);
   const n = Math.max(1, Math.round(w / pitch));
-  for (let i = 1; i < n; i++) put(o.a0 + (w * i) / n, cy, 0.04, h, 0.1);
-  // Sill board
-  if (axis === "z")
-    b.box(
-      "skirting",
-      v3(fixed, o.y0 - 0.01, (o.a0 + o.a1) / 2),
-      v3(0.26, 0.03, w + 0.06),
+  for (let i = 1; i < n; i++)
+    put("blackMetal", o.a0 + (w * i) / n, cy, 0.035, h, 0.06);
+  // Interior sill (solid surface), projecting 25 mm past the inner face.
+  const sillDepth = T / 2 + 0.025;
+  put(
+    "quartz",
+    ca,
+    o.y0 - 0.012,
+    w + 0.04,
+    0.025,
+    sillDepth,
+    inward * (sillDepth / 2),
+  );
+  put("glassExterior", ca, cy, w - 2 * f, h - 2 * f, 0.012);
+  if (opts.portals === false) return [];
+  const pts: FixturePoint[] = [];
+  const m = Math.max(1, Math.round(w / 2.6));
+  for (let i = 0; i < m; i++) {
+    const a = o.a0 + (w * (i + 0.5)) / m;
+    const inset = T / 2 + 0.35;
+    const y = Math.min(o.y1 - 0.2, o.y0 + 1.3);
+    const dir =
+      axis === "z"
+        ? new Vector3(inward, -0.45, 0)
+        : new Vector3(0, -0.45, inward);
+    pts.push(
+      axis === "z"
+        ? fixture(fixed + inward * inset, y, a, { kind: "window", dir })
+        : fixture(a, y, fixed + inward * inset, { kind: "window", dir }),
     );
-  else
-    b.box(
-      "skirting",
-      v3((o.a0 + o.a1) / 2, o.y0 - 0.01, fixed),
-      v3(w + 0.06, 0.03, 0.26),
-    );
-  // Glass
-  if (axis === "z")
-    b.box(
-      "glass",
-      v3(fixed, cy, (o.a0 + o.a1) / 2),
-      v3(0.012, h - 2 * f, w - 2 * f),
-    );
-  else
-    b.box(
-      "glass",
-      v3((o.a0 + o.a1) / 2, cy, fixed),
-      v3(w - 2 * f, h - 2 * f, 0.012),
-    );
+  }
+  return pts;
 }
 
 /**
- * Floor-to-ceiling glazed partition along `axis` with aluminium head/base
- * tracks, slim mullions and an optional door gap (with a frame). Returns the
- * door gap interval so callers can place signage.
+ * Floor-to-ceiling glazed partition along `axis` with black head / base
+ * tracks, slim mullions, a frosted manifestation band and an optional
+ * recessed door frame (black jambs, transom glass).
  */
 export function glassPartition(
   b: MeshBatcher,
@@ -163,7 +196,7 @@ export function glassPartition(
 ): void {
   const pitch = opts.pitch ?? 1.25;
   const glass = opts.glass ?? "glass";
-  const frame = opts.frame ?? "aluminium";
+  const frame = opts.frame ?? "blackMetal";
   const put = (
     mat: SurfaceKey,
     a: number,
@@ -191,14 +224,28 @@ export function glassPartition(
 
   for (const [r0, r1] of runs) {
     const w = r1 - r0;
-    put(frame, (r0 + r1) / 2, 0.025, w, 0.05, 0.08); // base track
-    put(frame, (r0 + r1) / 2, height - 0.03, w, 0.06, 0.08); // head track
-    put(glass, (r0 + r1) / 2, height / 2, w, height - 0.11, 0.012);
+    put(frame, (r0 + r1) / 2, 0.02, w, 0.04, 0.06); // base track
+    put(frame, (r0 + r1) / 2, height - 0.035, w, 0.07, 0.07); // head track
+    put(glass, (r0 + r1) / 2, height / 2, w, height - 0.1, 0.012);
     if (opts.frostBand)
-      put("glassFrosted", (r0 + r1) / 2, 1.12, w, 0.16, 0.016);
+      put(
+        "glassFrosted",
+        (r0 + r1) / 2,
+        MANIFEST_Y0 + MANIFEST_H / 2,
+        w - 0.04,
+        MANIFEST_H,
+        0.016,
+      );
     const n = Math.max(1, Math.round(w / pitch));
     for (let i = 0; i <= n; i++)
-      put(frame, r0 + (w * i) / n, height / 2, 0.04, height, 0.07);
+      put(
+        frame,
+        r0 + (w * i) / n,
+        height / 2,
+        i === 0 || i === n ? 0.04 : 0.025,
+        height,
+        0.05,
+      );
     if (cols) {
       const cc = (r0 + r1) / 2;
       if (axis === "z")
@@ -221,10 +268,10 @@ export function glassPartition(
   }
   if (door) {
     const w = door.a1 - door.a0;
-    // Door frame + transom glass above the door.
-    put(frame, door.a0 + 0.03, door.h / 2, 0.06, door.h, 0.1);
-    put(frame, door.a1 - 0.03, door.h / 2, 0.06, door.h, 0.1);
-    put(frame, (door.a0 + door.a1) / 2, door.h, w, 0.08, 0.1);
+    // Recessed door frame: deep black jambs + head, transom glass above.
+    put(frame, door.a0 + 0.03, door.h / 2, 0.06, door.h, 0.16);
+    put(frame, door.a1 - 0.03, door.h / 2, 0.06, door.h, 0.16);
+    put(frame, (door.a0 + door.a1) / 2, door.h + 0.03, w, 0.06, 0.16);
     put(
       glass,
       (door.a0 + door.a1) / 2,
@@ -245,7 +292,197 @@ export function glassPartition(
   }
 }
 
-/** Grid of recessed light panels on a ceiling at height `y`. */
+/**
+ * Colliders matching `glassPartition` (for modules whose geometry is shared
+ * and built without colliders).
+ */
+export function partitionColliders(
+  cols: ColliderSink,
+  group: string,
+  axis: "x" | "z",
+  fixed: number,
+  a0: number,
+  a1: number,
+  height: number,
+  door: { a0: number; a1: number; h: number } | null,
+  solids: { a0: number; a1: number }[] = [],
+): void {
+  const cuts = [...(door ? [door] : []), ...solids].sort((p, q) => p.a0 - q.a0);
+  const runs: [number, number][] = [];
+  let c = a0;
+  for (const cut of cuts) {
+    if (cut.a0 > c) runs.push([c, cut.a0]);
+    c = Math.max(c, cut.a1);
+  }
+  if (a1 > c) runs.push([c, a1]);
+  const box = (cc: number, y: number, len: number, h: number, see: boolean) =>
+    axis === "z"
+      ? cols.addBox(
+          group,
+          new Vector3(fixed, y, cc),
+          new Vector3(0.1, h, len),
+          0,
+          see ? { seeThrough: true } : undefined,
+        )
+      : cols.addBox(
+          group,
+          new Vector3(cc, y, fixed),
+          new Vector3(len, h, 0.1),
+          0,
+          see ? { seeThrough: true } : undefined,
+        );
+  for (const [r0, r1] of runs)
+    box((r0 + r1) / 2, height / 2, r1 - r0, height, true);
+  if (door)
+    box(
+      (door.a0 + door.a1) / 2,
+      (door.h + height) / 2,
+      door.a1 - door.a0,
+      height - door.h,
+      false,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Luminaires
+// ---------------------------------------------------------------------------
+
+/**
+ * Suspended linear pendant: black aluminium profile with an opal diffuser,
+ * steel cables and ceiling canopies. Returns one fixture per ~1.3 m.
+ */
+export function linearPendant(
+  b: ArtBatcher,
+  x: number,
+  z: number,
+  ceilingY: number,
+  len: number,
+  axis: "x" | "z",
+  hang = 0.55,
+  diffuser: SurfaceKey = "lightPanel",
+): FixturePoint[] {
+  const y = ceilingY - hang;
+  const size = axis === "x" ? v3(len, 0.05, 0.065) : v3(0.065, 0.05, len);
+  b.rbox("blackMetal", v3(x, y, z), size, { r: 0.008 });
+  const ds =
+    axis === "x" ? v3(len - 0.03, 0.006, 0.045) : v3(0.045, 0.006, len - 0.03);
+  b.box(diffuser, v3(x, y - 0.026, z), ds, { keepUVs: true });
+  for (const s of [-1, 1]) {
+    const o = s * (len / 2 - 0.15);
+    const cx = axis === "x" ? x + o : x;
+    const cz = axis === "x" ? z : z + o;
+    b.cylinder(
+      "blackMetal",
+      v3(cx, (y + ceilingY) / 2, cz),
+      hang,
+      0.004,
+      0.004,
+      4,
+    );
+    b.cylinder(
+      "blackMetal",
+      v3(cx, ceilingY - 0.008, cz),
+      0.016,
+      0.07,
+      0.07,
+      16,
+    );
+  }
+  const n = Math.max(1, Math.round(len / 1.3));
+  // Indirect component: the profile also throws light onto the ceiling.
+  const pts: FixturePoint[] = [
+    fixture(x, y + 0.04, z, {
+      kind: "accent",
+      dir: new Vector3(0, 1, 0),
+      intensity: 0.55 * len,
+      range: 3.2,
+      color: "#FFE6CC",
+    }),
+  ];
+  for (let i = 0; i < n; i++) {
+    const t = -len / 2 + (len * (i + 0.5)) / n;
+    pts.push(
+      fixture(axis === "x" ? x + t : x, y - 0.06, axis === "x" ? z : z + t, {
+        kind: "down",
+        size: { w: len / n, d: 0.05, yaw: axis === "x" ? 0 : Math.PI / 2 },
+      }),
+    );
+  }
+  return pts;
+}
+
+/**
+ * Recessed linear LED slot flush with a ceiling at `y`: black shadow-gap
+ * channel with an inset diffuser. Returns fixtures every `step` metres.
+ */
+export function recessedSlot(
+  b: MeshBatcher,
+  axis: "x" | "z",
+  cross: number,
+  a0: number,
+  a1: number,
+  y: number,
+  step = 2.4,
+  width = 0.09,
+  intensity = 1,
+): FixturePoint[] {
+  const len = a1 - a0;
+  const c = (a0 + a1) / 2;
+  const put = (
+    mat: SurfaceKey,
+    w: number,
+    yy: number,
+    h: number,
+    keep = false,
+  ) => {
+    if (axis === "z")
+      b.box(mat, v3(cross, yy, c), v3(w, h, len), { keepUVs: keep });
+    else b.box(mat, v3(c, yy, cross), v3(len, h, w), { keepUVs: keep });
+  };
+  put("shadowGap", width, y - 0.003, 0.006);
+  put("lightPanel", width * 0.55, y - 0.008, 0.004, true);
+  const pts: FixturePoint[] = [];
+  const n = Math.max(1, Math.round(len / step));
+  for (let i = 0; i < n; i++) {
+    const t = a0 + (len * (i + 0.5)) / n;
+    pts.push(
+      axis === "z"
+        ? fixture(cross, y - 0.05, t, {
+            kind: "down",
+            intensity,
+            size: { w: len / n, d: width, yaw: Math.PI / 2 },
+          })
+        : fixture(t, y - 0.05, cross, {
+            kind: "down",
+            intensity,
+            size: { w: len / n, d: width, yaw: 0 },
+          }),
+    );
+  }
+  return pts;
+}
+
+/** Recessed round downlight (black trim, warm diffuser). */
+export function downlight(
+  b: MeshBatcher,
+  x: number,
+  z: number,
+  y: number,
+  intensity = 0.8,
+): FixturePoint {
+  b.cylinder("blackMetal", v3(x, y - 0.004, z), 0.008, 0.13, 0.13, 24, {
+    keepUVs: true,
+  });
+  b.cylinder("lightPanel", v3(x, y - 0.009, z), 0.004, 0.085, 0.085, 24, {
+    keepUVs: true,
+  });
+  return fixture(x, y - 0.05, z, { kind: "down", intensity });
+}
+
+/**
+ * Grid of recessed light panels (legacy). Kept for callers that still want
+ * panels; new rooms use pendants + downlights.
+ */
 export function ceilingPanels(
   b: MeshBatcher,
   x0: number,
@@ -263,18 +500,25 @@ export function ceilingPanels(
       const x = x0 + ((i + 0.5) * (x1 - x0)) / count.x;
       const z = z0 + ((j + 0.5) * (z1 - z0)) / count.z;
       b.box(
-        "aluminium",
-        v3(x, y - 0.006, z),
-        v3(panel.w + 0.05, 0.012, panel.d + 0.05),
+        "shadowGap",
+        v3(x, y - 0.004, z),
+        v3(panel.w + 0.03, 0.008, panel.d + 0.03),
       );
-      b.box(mat, v3(x, y - 0.014, z), v3(panel.w, 0.01, panel.d));
-      pts.push(new Vector3(x, y - 0.3, z));
+      b.box(mat, v3(x, y - 0.01, z), v3(panel.w, 0.006, panel.d), {
+        keepUVs: true,
+      });
+      pts.push(
+        fixture(x, y - 0.1, z, {
+          kind: "down",
+          size: { w: panel.w, d: panel.d },
+        }),
+      );
     }
   return pts;
 }
 
 // ---------------------------------------------------------------------------
-// Textures: signage + exterior
+// Textures: signage
 // ---------------------------------------------------------------------------
 
 export const FONT_STACK =
@@ -347,7 +591,7 @@ export function texturedPlane(
   return plane;
 }
 
-function roundRect(
+export function roundRect(
   ctx: Ctx2D,
   x: number,
   y: number,
@@ -396,13 +640,13 @@ export function drawSpark(
   ctx.restore();
 }
 
-/** Lobby logo: spark + "Claude Office" wordmark, white on transparent. */
+/** Lobby logo: orange spark + warm-white "Claude Office" wordmark on transparent. */
 export function drawLogo(ctx: Ctx2D, w: number, h: number): void {
   const r = h * 0.36;
-  drawSpark(ctx, r + h * 0.08, h / 2, r, "#FFFFFF");
-  ctx.fillStyle = "#FFFFFF";
+  drawSpark(ctx, r + h * 0.08, h / 2, r, "#E8875F");
+  ctx.fillStyle = "#FFF6EC";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(h * 0.46)}px ${FONT_STACK}`;
+  ctx.font = `500 ${Math.round(h * 0.44)}px ${FONT_STACK}`;
   ctx.fillText(
     "Claude Office",
     r * 2 + h * 0.3,
@@ -411,7 +655,29 @@ export function drawLogo(ctx: Ctx2D, w: number, h: number): void {
   );
 }
 
-/** Wayfinding sign (charcoal plate, light text, optional arrow). */
+/**
+ * Halo behind stand-off letters (the light they throw onto the wall):
+ * soft warm glow shaped like the logo, used on an additive emissive plane.
+ */
+export function drawLogoHalo(ctx: Ctx2D, w: number, h: number): void {
+  ctx.clearRect(0, 0, w, h);
+  ctx.filter = `blur(${Math.round(h * 0.06)}px)`;
+  const r = h * 0.3;
+  const pad = h * 0.18;
+  drawSpark(ctx, pad + r + h * 0.08, h / 2, r * 1.1, "rgba(217,119,87,0.95)");
+  ctx.fillStyle = "rgba(255,214,180,0.55)";
+  ctx.textBaseline = "middle";
+  ctx.font = `600 ${Math.round(h * 0.37)}px ${FONT_STACK}`;
+  ctx.fillText(
+    "Claude Office",
+    pad + r * 2 + h * 0.3,
+    h / 2,
+    w - r * 2 - pad * 2,
+  );
+  ctx.filter = "none";
+}
+
+/** Wayfinding sign (black plate, light text, optional arrow). */
 export function drawWayfinding(
   ctx: Ctx2D,
   w: number,
@@ -420,28 +686,28 @@ export function drawWayfinding(
   sub: string,
   arrow: string,
 ): void {
-  ctx.fillStyle = "#24262A";
-  roundRect(ctx, 0, 0, w, h, h * 0.08);
+  ctx.fillStyle = "#151618";
+  roundRect(ctx, 0, 0, w, h, h * 0.06);
   ctx.fill();
   ctx.fillStyle = "#D97757";
-  ctx.fillRect(h * 0.18, h * 0.22, h * 0.05, h * 0.56);
+  ctx.fillRect(h * 0.18, h * 0.24, h * 0.04, h * 0.52);
   ctx.fillStyle = "#F2EFEA";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(h * 0.34)}px ${FONT_STACK}`;
+  ctx.font = `500 ${Math.round(h * 0.32)}px ${FONT_STACK}`;
   ctx.fillText(title, h * 0.4, h * 0.4, w * 0.7);
-  ctx.fillStyle = "#A9A59F";
-  ctx.font = `400 ${Math.round(h * 0.18)}px ${FONT_STACK}`;
-  ctx.fillText(sub, h * 0.4, h * 0.73, w * 0.7);
+  ctx.fillStyle = "#9A968F";
+  ctx.font = `400 ${Math.round(h * 0.17)}px ${FONT_STACK}`;
+  ctx.fillText(sub, h * 0.4, h * 0.72, w * 0.7);
   if (arrow) {
     ctx.fillStyle = "#F2EFEA";
-    ctx.font = `500 ${Math.round(h * 0.5)}px ${FONT_STACK}`;
+    ctx.font = `300 ${Math.round(h * 0.5)}px ${FONT_STACK}`;
     ctx.textAlign = "right";
     ctx.fillText(arrow, w - h * 0.25, h * 0.5);
     ctx.textAlign = "left";
   }
 }
 
-/** Room nameplate: label + "SESSION" caption, status accent bar. */
+/** Room nameplate: label + "ROOM 0N" caption, status accent bar. */
 export function drawNameplate(
   ctx: Ctx2D,
   w: number,
@@ -452,15 +718,15 @@ export function drawNameplate(
   selected: boolean,
 ): void {
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#1F2124";
-  roundRect(ctx, 0, 0, w, h, h * 0.1);
+  ctx.fillStyle = "#151618";
+  roundRect(ctx, 0, 0, w, h, h * 0.08);
   ctx.fill();
   ctx.fillStyle = accent;
-  ctx.fillRect(0, h - h * 0.07, w, h * 0.07);
+  ctx.fillRect(0, h - h * 0.06, w, h * 0.06);
   if (selected) {
     ctx.strokeStyle = "#D97757";
-    ctx.lineWidth = h * 0.05;
-    roundRect(ctx, h * 0.03, h * 0.03, w - h * 0.06, h - h * 0.06, h * 0.08);
+    ctx.lineWidth = h * 0.04;
+    roundRect(ctx, h * 0.03, h * 0.03, w - h * 0.06, h - h * 0.06, h * 0.07);
     ctx.stroke();
   }
   ctx.fillStyle = "#8E8A84";
@@ -469,82 +735,14 @@ export function drawNameplate(
   ctx.fillText(
     `ROOM ${String(index + 1).padStart(2, "0")}`,
     h * 0.16,
-    h * 0.26,
+    h * 0.28,
   );
   ctx.fillStyle = "#F4F1EC";
-  let size = Math.round(h * 0.36);
-  ctx.font = `600 ${size}px ${FONT_STACK}`;
+  let size = Math.round(h * 0.34);
+  ctx.font = `500 ${size}px ${FONT_STACK}`;
   while (ctx.measureText(label).width > w - h * 0.32 && size > 12) {
     size -= 2;
-    ctx.font = `600 ${size}px ${FONT_STACK}`;
+    ctx.font = `500 ${size}px ${FONT_STACK}`;
   }
-  ctx.fillText(label, h * 0.16, h * 0.6);
-}
-
-/** Bright daylight sky with a hazy skyline; drawn once, shared by all backdrops. */
-export function drawSkyline(ctx: Ctx2D, w: number, h: number, seed = 1): void {
-  const sky = ctx.createLinearGradient(0, 0, 0, h);
-  sky.addColorStop(0, "#9DB9D6");
-  sky.addColorStop(0.45, "#CFDDE8");
-  sky.addColorStop(0.62, "#F2EDE4");
-  sky.addColorStop(1, "#EAE4DA");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-  let s = seed * 9301 + 49297;
-  const rnd = () => {
-    s = (s * 9301 + 49297) % 233280;
-    return s / 233280;
-  };
-  const horizon = h * 0.64;
-  // Far layer
-  for (let x = 0; x < w;) {
-    const bw = 30 + rnd() * 90;
-    const bh = 30 + rnd() * h * 0.22;
-    ctx.fillStyle = `rgba(150,165,182,${0.55 + rnd() * 0.2})`;
-    ctx.fillRect(x, horizon - bh, bw, bh + 4);
-    x += bw + rnd() * 10;
-  }
-  // Near layer: varied facades (stone, glass, concrete) with soft window grids.
-  const facades = [
-    [185, 178, 166],
-    [143, 163, 181],
-    [167, 169, 171],
-    [125, 134, 145],
-    [204, 196, 182],
-  ];
-  for (let x = 0; x < w;) {
-    const bw = 50 + rnd() * 130;
-    const bh = 50 + rnd() * h * 0.28;
-    const [r, g, bl] = facades[Math.floor(rnd() * facades.length)];
-    const top = horizon - bh + h * 0.03;
-    const grad = ctx.createLinearGradient(0, top, 0, horizon);
-    grad.addColorStop(0, `rgb(${r + 12},${g + 12},${bl + 12})`);
-    grad.addColorStop(1, `rgb(${r - 18},${g - 16},${bl - 12})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(x, top, bw, bh);
-    // Shaded side for volume
-    ctx.fillStyle = "rgba(40,50,60,0.12)";
-    ctx.fillRect(x + bw * 0.72, top, bw * 0.28, bh);
-    const glassy = g > r;
-    ctx.fillStyle = glassy ? "rgba(220,232,242,0.28)" : "rgba(60,70,80,0.22)";
-    const rowH = 9 + Math.floor(rnd() * 4);
-    for (let wy = top + 6; wy < horizon - 4; wy += rowH)
-      for (let wx = x + 5; wx < x + bw - 6; wx += 8)
-        ctx.fillRect(wx, wy, 5, rowH * 0.55);
-    x += bw + 4 + rnd() * 30;
-  }
-  // Ground haze + trees band
-  const haze = ctx.createLinearGradient(0, horizon - h * 0.1, 0, h);
-  haze.addColorStop(0, "rgba(242,237,228,0)");
-  haze.addColorStop(0.35, "rgba(242,237,228,0.55)");
-  haze.addColorStop(1, "rgba(200,196,186,1)");
-  ctx.fillStyle = haze;
-  ctx.fillRect(0, horizon - h * 0.1, w, h);
-  for (let x = 0; x < w; x += 5 + rnd() * 9) {
-    const r = 3 + rnd() * 6;
-    ctx.fillStyle = `rgba(${70 + rnd() * 30},${100 + rnd() * 30},${70 + rnd() * 20},0.9)`;
-    ctx.beginPath();
-    ctx.arc(x, horizon + h * 0.012 + rnd() * 3, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  ctx.fillText(label, h * 0.16, h * 0.62);
 }

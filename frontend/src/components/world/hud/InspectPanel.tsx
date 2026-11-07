@@ -1,20 +1,26 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { Activity, DoorOpen, GitBranch, Terminal } from "lucide-react";
+import { DoorOpen, GitBranch, Terminal } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import { canFocusTerminal, useAttentionStore } from "@/stores/attentionStore";
 import { STATUS_COLORS } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
-import { campusStatus, sessionLabel, sessionSubLabel } from "../sessionMeta";
+import {
+  campusStatus,
+  distinctName,
+  sessionLabel,
+  sessionProject,
+} from "../sessionMeta";
+import { PhasePill, RefChips } from "./GlanceParts";
 import { enterSession } from "../enterSession";
 import { LABEL } from "./glass";
 import {
   sessionBranch,
-  sessionFocus,
-  sessionHeadline,
+  sessionRefs,
+  sessionSummary,
   sessionWorkItems,
 } from "./sessionGlance";
 
@@ -67,7 +73,9 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
   }
 
   const label = session ? sessionLabel(session, cs) : target.roomLabel;
-  const sub = session ? sessionSubLabel(session, cs) : null;
+  const project = sessionProject(session, cs);
+  const summary = cs ? sessionSummary(cs) : null;
+  const name = distinctName(label, project, summary);
   const status = campusStatus(cs);
   const color = STATUS_COLORS[status];
   const todos = cs?.todos ?? [];
@@ -86,10 +94,12 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
           />
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-base font-semibold text-white">
-              {label}
+              {project ?? label}
             </h3>
-            {sub && (
-              <div className="truncate text-[11px] text-slate-500">{sub}</div>
+            {name && project && (
+              <div className="truncate text-[11px] italic text-slate-500">
+                {name}
+              </div>
             )}
           </div>
           <span
@@ -111,18 +121,13 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
                 <span className="truncate">{sessionBranch(cs)}</span>
               </span>
             )}
-            <p className="text-[15px] font-bold leading-snug text-white">
-              {sessionHeadline(cs) ?? t(`hud.status.${status}`)}
-            </p>
-            {cs.objective?.trim() && sessionFocus(cs) && (
-              <p className="flex items-start gap-1.5 text-sm text-slate-300">
-                <Activity
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                  style={{ color }}
-                />
-                <span>{sessionFocus(cs)}</span>
+            {(summary || sessionRefs(cs).length > 0) && (
+              <p className="flex flex-wrap items-center gap-1.5 text-[15px] font-bold leading-snug text-white">
+                {summary}
+                <RefChips refs={sessionRefs(cs)} />
               </p>
             )}
+            <PhasePill cs={cs} size="md" />
             {sessionWorkItems(cs).length > 0 && (
               <ul className="space-y-0.5 pt-1 text-xs text-slate-200">
                 {sessionWorkItems(cs).map((w, i) => (

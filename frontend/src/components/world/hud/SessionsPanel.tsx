@@ -7,13 +7,19 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { STATUS_COLORS } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
-import { campusStatus, sessionLabel, sessionSubLabel } from "../sessionMeta";
+import {
+  campusStatus,
+  distinctName,
+  sessionLabel,
+  sessionProject,
+} from "../sessionMeta";
+import { PhasePill, RefChips, midTruncate } from "./GlanceParts";
 import { enterSession } from "../enterSession";
 import { LABEL } from "./glass";
 import {
   sessionBranch,
-  sessionFocus,
-  sessionHeadline,
+  sessionRefs,
+  sessionSummary,
   sessionWorkItems,
 } from "./sessionGlance";
 
@@ -107,9 +113,10 @@ export function SessionsPanel({
         const status = campusStatus(cs);
         const color = STATUS_COLORS[status];
         const selected = s.id === sessionId;
-        const objective = cs ? sessionHeadline(cs) : null;
-        const focus = cs && cs.objective?.trim() ? sessionFocus(cs) : null;
-        const sub = sessionSubLabel(s, cs);
+        const summary = cs ? sessionSummary(cs) : null;
+        const refs = cs ? sessionRefs(cs) : [];
+        const project = sessionProject(s, cs);
+        const name = distinctName(sessionLabel(s, cs), project, summary);
         const branch = cs ? sessionBranch(cs) : null;
         const items = cs ? sessionWorkItems(cs) : [];
         return (
@@ -150,44 +157,53 @@ export function SessionsPanel({
                   />
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="min-w-0 truncate text-sm font-semibold text-white">
-                      {sessionLabel(s, cs)}
+                    <span className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-300">
+                      {project ?? sessionLabel(s, cs)}
                     </span>
                     {branch && (
                       <span
-                        className="flex max-w-[50%] shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[10px] text-slate-400"
-                        title={t("hud.overview.branch")}
+                        className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[10px] text-slate-400"
+                        title={branch}
                       >
                         <GitBranch className="h-2.5 w-2.5 shrink-0" />
-                        <span className="truncate">{branch}</span>
+                        <span className="truncate">
+                          {midTruncate(branch, 30)}
+                        </span>
                       </span>
                     )}
+                    {name && project && (
+                      <span className="min-w-0 truncate text-[11px] italic text-slate-500">
+                        {name}
+                      </span>
+                    )}
+                    <span
+                      className={`${LABEL} ml-auto shrink-0 !tracking-[0.1em]`}
+                      style={{ color }}
+                    >
+                      {t(`hud.status.${status}`)}
+                    </span>
                   </div>
                 )}
-                {sub && (
-                  <div className="truncate text-[10px] text-slate-500">
-                    {sub}
+                {(summary || refs.length > 0) && (
+                  <div className="mt-0.5 flex items-start gap-1.5">
+                    {summary && (
+                      <span
+                        className="line-clamp-2 min-w-0 text-[13px] font-bold leading-tight text-slate-100"
+                        title={summary}
+                      >
+                        {summary}
+                      </span>
+                    )}
+                    <span className="flex shrink-0 flex-wrap gap-1 pt-px">
+                      <RefChips refs={refs} />
+                    </span>
                   </div>
                 )}
-                {objective && (
-                  <div
-                    className="mt-0.5 truncate text-[13px] font-bold text-slate-100"
-                    title={objective}
-                  >
-                    {objective}
+                {cs && !cs.ended && (
+                  <div className="mt-1">
+                    <PhasePill cs={cs} />
                   </div>
                 )}
-                <div className="mt-0.5 flex items-center gap-2">
-                  <span
-                    className={`${LABEL} !tracking-[0.1em]`}
-                    style={{ color }}
-                  >
-                    {t(`hud.status.${status}`)}
-                  </span>
-                  <span className="truncate text-xs text-slate-400">
-                    {focus ?? ""}
-                  </span>
-                </div>
                 {items.length > 0 && (
                   <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
                     {items.slice(0, 2).map((w, i) => (

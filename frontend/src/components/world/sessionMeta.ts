@@ -3,6 +3,7 @@ import type {
   RoomStatus,
   SessionMeta,
 } from "@/engine/contracts";
+import { stripRefs } from "@/engine/logic/sessionInfo";
 import type { Session } from "@/hooks/useSessions";
 
 /** True for Claude Code's dash-encoded project dirs, e.g. "-home-zio-git-foo". */
@@ -61,6 +62,29 @@ export function sessionSubLabel(s: Session, cs?: CampusSession): string | null {
   const base = projectBasename(s);
   if (!base) return null;
   return base.toLowerCase() === sessionLabel(s, cs).toLowerCase() ? null : base;
+}
+
+/** Project / app name: backend `project`, else the session's project folder. */
+export function sessionProject(s?: Session, cs?: CampusSession): string | null {
+  return usable(cs?.project) ?? (s ? projectBasename(s) : null);
+}
+
+/**
+ * User-chosen name worth a mention next to the project: null when it merely
+ * repeats the project, the summary, or is nothing but ticket refs.
+ */
+export function distinctName(
+  name: string | null | undefined,
+  project: string | null,
+  summary: string | null,
+): string | null {
+  const n = usable(name);
+  if (!n) return null;
+  const low = n.toLowerCase();
+  if (project && low === project.toLowerCase()) return null;
+  if (summary && low === summary.toLowerCase()) return null;
+  if (!stripRefs(n)) return null;
+  return n;
 }
 
 /** id -> label for every known session. */

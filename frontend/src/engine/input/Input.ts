@@ -41,6 +41,8 @@ export class InputController {
   private lobbyHeldMs = 0;
   private lobbyFired = false;
   private enabled = true;
+  private lookScale = 1;
+  private lookSign = 1;
   private locked = false;
   private dragging = false;
   private lockFailed = false;
@@ -79,6 +81,12 @@ export class InputController {
       this.dragging = false;
     });
     on(window, "mousemove", (e) => this.onMouseMove(e));
+  }
+
+  /** Mouse/touch look multiplier (1 = default) and vertical inversion. */
+  setLook(sensitivity: number, invertY: boolean): void {
+    this.lookScale = Math.min(3, Math.max(0.2, sensitivity));
+    this.lookSign = invertY ? -1 : 1;
   }
 
   onEvent(cb: (e: InputEvent) => void): void {
@@ -143,8 +151,9 @@ export class InputController {
   private onMouseMove(e: MouseEvent): void {
     if (!this.enabled) return;
     if (this.locked || this.dragging) {
-      this.lookX += e.movementX * MOUSE_SENSITIVITY;
-      this.lookY += e.movementY * MOUSE_SENSITIVITY;
+      this.lookX += e.movementX * MOUSE_SENSITIVITY * this.lookScale;
+      this.lookY +=
+        e.movementY * MOUSE_SENSITIVITY * this.lookScale * this.lookSign;
     }
   }
 
@@ -222,8 +231,8 @@ export class InputController {
   /** Touch look in CSS pixels. */
   addLook(dx: number, dy: number): void {
     if (!this.enabled) return;
-    this.lookX += dx * TOUCH_SENSITIVITY;
-    this.lookY += dy * TOUCH_SENSITIVITY;
+    this.lookX += dx * TOUCH_SENSITIVITY * this.lookScale;
+    this.lookY += dy * TOUCH_SENSITIVITY * this.lookScale * this.lookSign;
   }
 
   update(dtMs: number): void {

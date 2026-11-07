@@ -102,3 +102,147 @@ describe("shouldCollapse", () => {
     expect(shouldCollapse(7)).toBe(true);
   });
 });
+
+import {
+  extractRefs,
+  formatElapsed,
+  humanizeBranch,
+  sanitizeFocus,
+  sessionPhase,
+  sessionRefs,
+  sessionSummary,
+  stripRefs,
+} from "@/engine/logic/sessionInfo";
+
+describe("refs", () => {
+  it("extracts tickets and PR numbers", () => {
+    expect(
+      extractRefs("CONT-839 fix", "feat/cont-839-sso", "see #412"),
+    ).toEqual(["CONT-839", "#412"]);
+  });
+  it("prefers backend refs", () => {
+    expect(
+      sessionRefs(mk({ sessionId: "x", refs: ["A-1"], gitBranch: "b/z-9" })),
+    ).toEqual(["A-1"]);
+    expect(
+      sessionRefs(mk({ sessionId: "x", sessionName: "cont-839" })),
+    ).toEqual(["CONT-839"]);
+  });
+  it("strips refs", () => {
+    expect(stripRefs("CONT-839")).toBe("");
+    expect(stripRefs("CONT-839: Add SSO (#412)")).toBe("Add SSO");
+  });
+});
+
+describe("humanizeBranch", () => {
+  it("humanizes", () => {
+    expect(humanizeBranch("feat/cont-839-sso-login")).toBe("SSO login");
+    expect(humanizeBranch("zio/fix/retry_webhooks")).toBe("Retry webhooks");
+    expect(humanizeBranch("main")).toBeNull();
+    expect(humanizeBranch("feat/CONT-839")).toBeNull();
+  });
+});
+
+describe("sanitizeFocus", () => {
+  it("drops prompts, tags and shell commands", () => {
+    expect(sanitizeFocus("are we done?")).toBeNull();
+    expect(
+      sanitizeFocus('<agent-message from="x">hi</agent-message>'),
+    ).toBeNull();
+    expect(sanitizeFocus("git status")).toBeNull();
+    expect(sanitizeFocus("pytest -q tests/")).toBeNull();
+    expect(sanitizeFocus("Fixing parallel subagent tracking")).toBe(
+      "Fixing parallel subagent tracking",
+    );
+  });
+});
+
+describe("sessionSummary fallbacks", () => {
+  it("summary > objective > branch > null", () => {
+    expect(
+      sessionSummary(mk({ sessionId: "x", summary: "Do X", objective: "Y" })),
+    ).toBe("Do X");
+    expect(
+      sessionSummary(mk({ sessionId: "x", objective: "CONT-839: Add SSO" })),
+    ).toBe("Add SSO");
+    expect(
+      sessionSummary(
+        mk({
+          sessionId: "x",
+          objective: "CONT-839",
+          gitBranch: "feat/cont-839-sso-login",
+        }),
+      ),
+    ).toBe("SSO login");
+    expect(
+      sessionSummary(mk({ sessionId: "x", objective: "CONT-839" })),
+    ).toBeNull();
+  });
+});
+
+describe("sessionSummary skips ref-only objectives", () => {
+  const branch = "feat/cont-839-sso-login";
+  it.each(["CONT-587 and CONT-635", "#12 + #13", "fix CONT-1"])(
+    "%s falls through to the branch",
+    (objective) => {
+      expect(
+        sessionSummary(mk({ sessionId: "x", objective, gitBranch: branch })),
+      ).toBe("SSO login");
+    },
+  );
+});
+
+describe("sessionPhase fallback", () => {
+  it("uses backend phase when present", () => {
+    const p = { kind: "git", label: "Git" } as const;
+    expect(sessionPhase(mk({ sessionId: "x", phase: p })).kind).toBe("git");
+  });
+  it("derives from boss state and activity", () => {
+    expect(
+      sessionPhase(
+        mk({ sessionId: "x", boss: { state: "waiting_permission" } as never }),
+      ).kind,
+    ).toBe("needs_approval");
+    expect(
+      sessionPhase(mk({ sessionId: "x", boss: { state: "idle" } as never }))
+        .kind,
+    ).toBe("waiting_user");
+    expect(sessionPhase(mk({ sessionId: "x", ended: true })).kind).toBe(
+      "ended",
+    );
+    const act = (summary: string) => ({
+      timestamp: "2026-01-01T00:00:00Z",
+      type: "pre_tool_use",
+      agentId: "main",
+      summary,
+    });
+    expect(
+      sessionPhase(
+        mk({ sessionId: "x", recentActivity: [act("Bash: pytest -q")] }),
+      ).kind,
+    ).toBe("testing");
+    expect(
+      sessionPhase(mk({ sessionId: "x", recentActivity: [act("Edit foo.ts")] }))
+        .kind,
+    ).toBe("coding");
+    expect(
+      sessionPhase(
+        mk({ sessionId: "x", recentActivity: [act("Bash: git push")] }),
+      ).kind,
+    ).toBe("git");
+    const p = sessionPhase(mk({ sessionId: "x", focus: "Fixing tracking" }));
+    expect(p.label).toBe("Working");
+    expect(p.detail).toBe("Fixing tracking");
+  });
+});
+
+describe("formatElapsed", () => {
+  const now = Date.parse("2026-01-01T00:10:00Z");
+  it("formats", () => {
+    expect(formatElapsed("2026-01-01T00:08:00Z", now)).toBe("2m");
+    expect(formatElapsed("2026-01-01T00:09:30Z", now)).toBe("30s");
+    expect(formatElapsed("2025-12-31T22:50:00Z", now)).toBe("1h 20m");
+    expect(formatElapsed(null, now)).toBeNull();
+    expect(formatElapsed("2026-01-02T00:00:00Z", now)).toBeNull();
+  });
+});

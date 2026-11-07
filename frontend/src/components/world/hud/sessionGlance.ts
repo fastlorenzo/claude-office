@@ -9,6 +9,7 @@
 
 import type { CampusSession, RoomStatus } from "@/engine/contracts";
 import { roomStatus } from "@/engine/logic/status";
+import { sanitizeFocus } from "@/engine/logic/sessionInfo";
 import type { Agent } from "@/types";
 
 export const MAX_WORK_ITEMS = 4;
@@ -25,7 +26,7 @@ export function sessionObjective(cs: CampusSession): string | null {
 
 /** Current focus: backend `focus`, else the boss's current task. */
 export function sessionFocus(cs: CampusSession): string | null {
-  return clean(cs.focus) ?? clean(cs.boss?.currentTask);
+  return sanitizeFocus(cs.focus) ?? sanitizeFocus(cs.boss?.currentTask);
 }
 
 /** Work items: backend list, else in-progress todos (activeForm preferred). */
@@ -102,3 +103,19 @@ export function shouldCollapse(count: number): boolean {
 export function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
 }
+
+// ---------------------------------------------------------------------------
+// Human-readable glance data (summary / refs / phase), see engine/logic/sessionInfo
+// ---------------------------------------------------------------------------
+
+export {
+  extractRefs,
+  formatElapsed,
+  humanizeBranch,
+  isPhaseKind,
+  sanitizeFocus,
+  sessionPhase,
+  sessionRefs,
+  sessionSummary,
+  stripRefs,
+} from "@/engine/logic/sessionInfo";

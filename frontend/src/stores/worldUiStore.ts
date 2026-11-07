@@ -37,6 +37,8 @@ export interface WorldStats {
   frameMs: number;
   tier: QualityTier;
   drawCalls: number;
+  effective?: "low" | "medium" | "high" | "ultra";
+  postProcesses?: number;
 }
 
 interface WorldUiState {

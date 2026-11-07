@@ -10,7 +10,7 @@
  * Path conventions (relative to ASSET_BASE = "/assets"):
  *   textures: textures/{id}/{id}_{map}_1k.jpg     map ∈ diff | nor_gl | rough | ao | arm
  *   models:   models/{id}/{id}_1k.gltf            (+ relative includes kept as Poly Haven ships them)
- *   hdri:     hdri/{id}_1k.hdr
+ *   hdri:     hdri/{id}_{res}.hdr          (interior 1k, exterior 2k)
  *   characters (optional, manual drop): characters/{file}.glb
  */
 
@@ -69,10 +69,18 @@ export interface CharacterPackAsset {
   outfitMaterials: string[];
 }
 
+export type HdriRes = "1k" | "2k" | "4k";
+
 export interface AssetManifest {
   textures: TextureAsset[];
   models: ModelAsset[];
+  /** Interior HDRI: image-based lighting + generic interior reflections. */
   hdri: { id: string };
+  /**
+   * Exterior HDRI (urban, daytime): the sky / city seen through every window
+   * (skybox at infinity → parallax-correct) and the reflections on glass.
+   */
+  exteriorHdri: { id: string; res: HdriRes };
   /** Optional, manual drop. Null → procedural mannequins. */
   characters: CharacterPackAsset | null;
 }
@@ -129,21 +137,11 @@ export const ASSET_MANIFEST: AssetManifest = {
       tileMeters: 2,
     },
   ],
+  // Only models that fit the modern art direction are loaded. Sofa, lounge
+  // chair, shelves, coffee point, laptop and the wet-floor sign are built
+  // procedurally (proceduralProps.ts) so the furniture family stays coherent.
   models: [
     { role: "desk", id: "metal_office_desk", collider: "box", scale: 1 },
-    {
-      role: "chair",
-      id: "modern_arm_chair_01",
-      collider: "cylinder",
-      scale: 1,
-    },
-    { role: "sofa", id: "sofa_02", collider: "box", scale: 1 },
-    {
-      role: "shelves",
-      id: "steel_frame_shelves_01",
-      collider: "box",
-      scale: 1,
-    },
     { role: "plant", id: "potted_plant_01", collider: "cylinder", scale: 1 },
     { role: "plantSmall", id: "potted_plant_04", collider: "none", scale: 1 },
     {
@@ -152,8 +150,6 @@ export const ASSET_MANIFEST: AssetManifest = {
       collider: "cylinder",
       scale: 1,
     },
-    { role: "coffeeCart", id: "CoffeeCart_01", collider: "box", scale: 1 },
-    { role: "laptop", id: "classic_laptop", collider: "none", scale: 1 },
     {
       role: "securityCamera",
       id: "security_camera_01",
@@ -168,9 +164,9 @@ export const ASSET_MANIFEST: AssetManifest = {
     },
     { role: "notepads", id: "office_notepads", collider: "none", scale: 1 },
     { role: "fireAlarm", id: "fire_alarm", collider: "none", scale: 1 },
-    { role: "wetFloorSign", id: "WetFloorSign_01", collider: "box", scale: 1 },
   ],
   hdri: { id: "blender_institute" },
+  exteriorHdri: { id: "kloofendal_48d_partly_cloudy_puresky", res: "2k" },
   characters: null,
 };
 
@@ -186,8 +182,12 @@ export function modelPath(id: string, base = ASSET_BASE): string {
   return `${base}/models/${id}/${id}_1k.gltf`;
 }
 
-export function hdriPath(id: string, base = ASSET_BASE): string {
-  return `${base}/hdri/${id}_1k.hdr`;
+export function hdriPath(
+  id: string,
+  base = ASSET_BASE,
+  res: HdriRes = "1k",
+): string {
+  return `${base}/hdri/${id}_${res}.hdr`;
 }
 
 export function characterPath(file: string, base = ASSET_BASE): string {

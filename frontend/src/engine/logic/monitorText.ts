@@ -1,4 +1,5 @@
 import type { CampusSession } from "../contracts";
+import { sessionPhase, sessionSummary } from "./sessionInfo";
 import type { Agent, TodoItem } from "@/types";
 
 export const MONITOR_COLS = 46;
@@ -57,10 +58,19 @@ export function buildMonitorLines(
     clip(`claude@${label} — ${s.boss.state.toUpperCase()}`, MONITOR_COLS),
   );
 
-  const task = s.boss.currentTask
-    ? wrap(s.boss.currentTask, MONITOR_COLS, 2)
-    : ["— idle —"];
-  lines.push(task[0] ?? "", task[1] ?? "");
+  // Header: summary + phase when known, else the boss task (2 lines).
+  const summary = sessionSummary(s);
+  const phase = s.ended ? null : sessionPhase(s);
+  if (summary && phase) {
+    const detail = phase.detail ? ` · ${phase.detail}` : "";
+    lines.push(clip(summary, MONITOR_COLS));
+    lines.push(clip(`▸ ${phase.label}${detail}`, MONITOR_COLS));
+  } else {
+    const task = s.boss.currentTask
+      ? wrap(s.boss.currentTask, MONITOR_COLS, 2)
+      : ["— idle —"];
+    lines.push(task[0] ?? "", task[1] ?? "");
+  }
 
   const acts = s.recentActivity.slice(-8);
   for (const a of acts) {

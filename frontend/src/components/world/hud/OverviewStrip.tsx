@@ -7,20 +7,20 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { Activity, GitBranch } from "lucide-react";
+import { GitBranch } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { STATUS_COLORS, type CampusSession } from "@/engine/contracts";
 import { roomStatus } from "@/engine/logic/status";
 import type { Session } from "@/hooks/useSessions";
-import { labelMap, projectBasename } from "../sessionMeta";
+import { distinctName, labelMap, sessionProject } from "../sessionMeta";
 import { enterSession } from "../enterSession";
 import { GLASS, LABEL } from "./glass";
+import { PhasePill, RefChips, midTruncate } from "./GlanceParts";
 import {
-  activeAgents,
   sessionBranch,
-  sessionFocus,
-  sessionHeadline,
+  sessionRefs,
+  sessionSummary,
   sessionWorkItems,
   shouldCollapse,
   sortSessions,
@@ -134,7 +134,7 @@ function StatusDot({
 interface CardProps {
   cs: CampusSession;
   label: string;
-  sub: string | null;
+  project: string | null;
   portrait: boolean;
   dotsOnly: boolean;
 }
@@ -142,7 +142,7 @@ interface CardProps {
 function SessionCard({
   cs,
   label,
-  sub,
+  project,
   portrait,
   dotsOnly,
 }: CardProps): ReactNode {
@@ -151,15 +151,14 @@ function SessionCard({
   const status = roomStatus(cs);
   const color = STATUS_COLORS[status];
   const needs = status === "needs_you";
-  const headline = sessionHeadline(cs);
-  const hasObjective = !!cs.objective?.trim();
-  const focus = sessionFocus(cs);
+  const summary = sessionSummary(cs);
+  const refs = sessionRefs(cs);
   const branch = sessionBranch(cs);
   const { done, total, pct } = todoProgress(cs);
-  const agents = activeAgents(cs);
   const items = sessionWorkItems(cs);
   const recent = cs.recentActivity.slice(-3).reverse();
-  const title = headline ?? label;
+  const name = distinctName(label, project, summary);
+  const title = summary ?? label;
 
   if (dotsOnly) {
     return (
@@ -196,23 +195,34 @@ function SessionCard({
       }`}
       style={{ borderLeft: `3px solid ${color}` }}
     >
-      <div className="flex items-center gap-2">
-        <StatusDot color={color} pulse={needs} />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-slate-300">
-          {label}
+      <div className="flex items-center gap-1.5">
+        <StatusDot color={color} pulse={needs} size={8} />
+        <span
+          className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-300"
+          title={project ?? label}
+        >
+          {project ?? label}
         </span>
         {branch && (
           <span
-            className="flex max-w-[45%] items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[9px] text-slate-400"
+            className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[9px] text-slate-400"
             title={branch}
           >
             <GitBranch className="h-2.5 w-2.5 shrink-0" />
-            <span className="truncate">{branch}</span>
+            <span className="truncate">{midTruncate(branch)}</span>
+          </span>
+        )}
+        {name && project && (
+          <span
+            className="min-w-0 truncate text-[10px] italic text-slate-500"
+            title={name}
+          >
+            {name}
           </span>
         )}
         {needs && (
           <span
-            className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-slate-950"
+            className="ml-auto shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-slate-950"
             style={{ backgroundColor: color }}
           >
             {t("hud.overview.needsYou")}
@@ -220,60 +230,45 @@ function SessionCard({
         )}
       </div>
 
-      {sub && (
-        <div className="truncate text-[10px] text-slate-500" title={sub}>
-          {sub}
-        </div>
-      )}
-      <div
-        className="mt-1 truncate text-[13px] font-bold leading-tight text-white"
-        title={headline ?? undefined}
-      >
-        {headline ?? t(`hud.status.${status}`)}
-      </div>
-      {hasObjective && focus && (
-        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
-          <Activity className="h-3 w-3 shrink-0" style={{ color }} />
-          <span className="truncate" title={focus}>
-            {focus}
+      {(summary || refs.length > 0) && (
+        <div className="mt-1 flex items-start gap-1.5">
+          {summary && (
+            <span
+              className="line-clamp-2 min-w-0 text-[13px] font-bold leading-tight text-white"
+              title={summary}
+            >
+              {summary}
+            </span>
+          )}
+          <span className="flex shrink-0 flex-wrap items-center gap-1 pt-px">
+            <RefChips refs={refs} />
           </span>
         </div>
       )}
 
-      <div className="mt-1.5 flex items-center gap-2">
-        <div
-          className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10"
-          role="progressbar"
-          aria-label={t("hud.overview.todos")}
-          aria-valuenow={done}
-          aria-valuemax={total}
-        >
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${pct}%`, backgroundColor: color }}
-          />
-        </div>
-        <span className="shrink-0 font-mono text-[10px] text-slate-400">
-          {total ? `${done}/${total}` : "–"}
-        </span>
-        {agents.length > 0 && (
-          <span
-            className="flex shrink-0 items-center gap-0.5"
-            title={`${t("hud.overview.agents")}: ${agents.length}`}
-          >
-            {agents.slice(0, 5).map((a) => (
-              <span
-                key={a.id}
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: a.color }}
-              />
-            ))}
-            <span className="ml-0.5 font-mono text-[10px] text-slate-400">
-              {agents.length}
-            </span>
-          </span>
-        )}
+      <div className="mt-1">
+        <PhasePill cs={cs} />
       </div>
+
+      {total > 0 && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <div
+            className="h-0.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/10"
+            role="progressbar"
+            aria-label={t("hud.overview.todos")}
+            aria-valuenow={done}
+            aria-valuemax={total}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${pct}%`, backgroundColor: color }}
+            />
+          </div>
+          <span className="shrink-0 font-mono text-[9px] text-slate-500">
+            {done}/{total}
+          </span>
+        </div>
+      )}
 
       {hover && (items.length > 0 || recent.length > 0) && (
         <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
@@ -329,16 +324,13 @@ export function OverviewStrip({
   const [hover, setHover] = useState(false);
 
   const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
-  const subs = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const s of sessions) {
-      const base = projectBasename(s);
-      const l = labels.get(s.id);
-      if (base && l && base.toLowerCase() !== l.toLowerCase())
-        out.set(s.id, base);
-    }
+  const projects = useMemo(() => {
+    const byId = new Map(sessions.map((x) => [x.id, x]));
+    const out = new Map<string, string | null>();
+    for (const cs of campus)
+      out.set(cs.sessionId, sessionProject(byId.get(cs.sessionId), cs));
     return out;
-  }, [sessions, labels]);
+  }, [sessions, campus]);
   const sorted = useMemo(() => sortSessions(campus), [campus]);
 
   if (!shown || sorted.length === 0) return null;
@@ -360,7 +352,7 @@ export function OverviewStrip({
           key={cs.sessionId}
           cs={cs}
           label={labels.get(cs.sessionId) ?? cs.sessionId.slice(0, 8)}
-          sub={subs.get(cs.sessionId) ?? null}
+          project={projects.get(cs.sessionId) ?? null}
           portrait={portrait}
           dotsOnly={dotsOnly}
         />
