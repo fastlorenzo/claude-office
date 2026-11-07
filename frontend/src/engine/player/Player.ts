@@ -18,6 +18,13 @@ import {
 } from "@/engine/babylon";
 import type { CameraMode } from "@/engine/contracts";
 import type { InputController } from "@/engine/input/Input";
+import {
+  loadPose,
+  POSE_RETRY_MS,
+  POSE_SAVE_INTERVAL_MS,
+  savePose,
+  type SavedPose,
+} from "@/engine/player/poseMemory";
 import { isStaticCollider } from "@/engine/physics/Colliders";
 import type { PlayerAvatar } from "@/engine/player/Avatar";
 
@@ -69,6 +76,21 @@ export class Player {
   private boom: number = PLAYER.boomLength;
   private avatar: PlayerAvatar | null = null;
   private readonly tmpRay = new Ray(Vector3.Zero(), Vector3.Forward(), 1);
+  /** Saved pose still waiting for a valid layout (applied at most once). */
+  private pending: SavedPose | null = null;
+  private pendingUntil = 0;
+  private pendingOrigin = Vector3.Zero();
+  private zoneOk: ((p: { x: number; y: number; z: number }) => boolean) | null =
+    null;
+  private lastSave = 0;
+  private readonly flush = (): void => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "visible"
+    )
+      return;
+    this.savePoseNow();
+  };
 
   constructor(
     private readonly scene: Scene,
@@ -78,6 +100,10 @@ export class Player {
     this.yaw = opts.yaw;
     this.mode = opts.mode;
     this.headBob = opts.headBob ?? true;
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", this.flush);
+      document.addEventListener("visibilitychange", this.flush);
+    }
 
     const cam = new UniversalCamera(
       "player",
@@ -139,6 +165,77 @@ export class Player {
     return this.avatar?.getMeshes() ?? [];
   }
 
+  /**
+   * Start from the remembered pose when it is fresh, on a walkable zone
+   * (`zoneOk`) and has floor support; otherwise from `spawn`. If the layout
+   * may still grow, an invalid pose is retried (once) for a few seconds
+   * until the player moves.
+   */
+  restoreOr(
+    spawn: { feet: Vector3; yaw: number },
+    zoneOk: (p: { x: number; y: number; z: number }) => boolean,
+  ): void {
+    this.teleport(spawn.feet, spawn.yaw);
+    const saved = loadPose();
+    if (!saved || this.frozen) return;
+    this.zoneOk = zoneOk;
+    if (this.applySaved(saved)) return;
+    this.pending = saved;
+    this.pendingUntil = performance.now() + POSE_RETRY_MS;
+    this.pendingOrigin.copyFrom(this.feet);
+  }
+
+  private applySaved(s: SavedPose): boolean {
+    if (!this.zoneOk) return false;
+    const floorY = this.floorBelow(s.x, s.y, s.z);
+    if (floorY === null || Math.abs(floorY - s.y) > 0.6) return false;
+    if (!this.zoneOk({ x: s.x, y: floorY + PLAYER.eyeHeight, z: s.z }))
+      return false;
+    this.teleport(new Vector3(s.x, floorY + 0.05, s.z), s.yaw);
+    this.pitch = Math.max(
+      -PLAYER.pitchLimit,
+      Math.min(PLAYER.pitchLimit, s.pitch),
+    );
+    this.placeCamera(0);
+    return true;
+  }
+
+  /** Static-collider floor under (x,z), searched from just above `y`. */
+  private floorBelow(x: number, y: number, z: number): number | null {
+    this.tmpRay.origin.set(x, y + 1, z);
+    this.tmpRay.direction.copyFrom(DOWN);
+    this.tmpRay.length = 3;
+    const hit = this.scene.pickWithRay(this.tmpRay, (m) =>
+      isStaticCollider(m.metadata),
+    );
+    return hit?.hit && hit.pickedPoint ? hit.pickedPoint.y : null;
+  }
+
+  private stepPending(): void {
+    const s = this.pending;
+    if (!s) return;
+    const moved =
+      Vector3.DistanceSquared(this.feet, this.pendingOrigin) > 0.04 ||
+      this.speed > 0.1;
+    if (moved || performance.now() > this.pendingUntil) {
+      this.pending = null;
+      return;
+    }
+    if (this.applySaved(s)) this.pending = null;
+  }
+
+  private savePoseNow(): void {
+    if (this.pending || this.frozen) return;
+    savePose({
+      x: this.feet.x,
+      y: this.feet.y,
+      z: this.feet.z,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      mode: this.mode,
+    });
+  }
+
   setMode(mode: CameraMode): void {
     this.mode = mode;
     this.avatar?.setVisible(mode === "tp");
@@ -196,6 +293,14 @@ export class Player {
       this.speed = Math.hypot(this.vel.x, this.vel.z);
     } else {
       this.speed = 0;
+    }
+    this.stepPending();
+    if (!this.frozen && this.speed > 0.05) {
+      const now = performance.now();
+      if (now - this.lastSave >= POSE_SAVE_INTERVAL_MS) {
+        this.lastSave = now;
+        this.savePoseNow();
+      }
     }
     if (this.avatar) {
       this.avatar.root.position.copyFrom(this.feet);
@@ -324,6 +429,10 @@ export class Player {
   }
 
   dispose(): void {
+    if (typeof window !== "undefined") {
+      window.removeEventListener("pagehide", this.flush);
+      document.removeEventListener("visibilitychange", this.flush);
+    }
     this.avatar?.dispose();
     this.avatar = null;
     this.body?.dispose();
