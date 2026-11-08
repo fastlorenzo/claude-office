@@ -6,7 +6,7 @@ import { useTranslation, type TranslationKey } from "@/hooks/useTranslation";
 import { useWorldUiStore, selectPanels } from "@/stores/worldUiStore";
 import { useCampusStore } from "@/stores/campusStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
-import { STATUS_COLORS, type Zone } from "@/engine/contracts";
+import { STATUS_COLORS, type PlayerPose } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
 import { getWorld } from "../worldRef";
@@ -84,7 +84,7 @@ export function InteractionPrompt(): ReactNode {
 // ============================================================================
 
 function zoneLabel(
-  zone: Zone,
+  zone: PlayerPose["zone"],
   labels: Map<string, string>,
   t: (k: TranslationKey) => string,
 ): string | null {
@@ -97,6 +97,14 @@ function zoneLabel(
       return t("world.zone.control");
     case "room":
       return labels.get(zone.sessionId) ?? zone.sessionId.slice(0, 8);
+    case "factory":
+      return t("hud.minimap.factory");
+    case "cell":
+      return t("hud.minimap.cell");
+    case "dock":
+      return t("hud.minimap.dock");
+    case "stair":
+      return t("hud.minimap.stairs");
     default:
       return t("world.zone.outside");
   }

@@ -28,6 +28,7 @@ import { ArtBatcher } from "@/engine/art/geometry";
 import { FixturePoint, type Lighting } from "@/engine/fx/Lighting";
 import type { Materials } from "@/engine/materials/Materials";
 import { v3 } from "@/engine/util/MeshBatcher";
+import { CELL_STAIR } from "@/engine/world/factory/FactoryHall";
 import {
   DOOR_H,
   downlight,
@@ -117,7 +118,13 @@ function bayArchitecture(b: ArtBatcher, door: boolean): FixturePoint[] {
   const bx0 = d + OUTER_WALL_T;
   const bx1 = d + BALCONY_D;
   b.box("floorOak", v3((bx0 + bx1) / 2, -0.04, 0), v3(bx1 - bx0, 0.08, w));
-  glassBalustrade(b, null, "roomShell", "z", bx1 - 0.035, -w / 2, w / 2);
+  if (door) {
+    // Entry bay: gap at the balcony-door end onto the factory stair landing.
+    const g0 = w / 2 - CELL_STAIR.top.z1;
+    const g1 = w / 2 - CELL_STAIR.top.z0;
+    glassBalustrade(b, null, "roomShell", "z", bx1 - 0.035, -w / 2, g0);
+    glassBalustrade(b, null, "roomShell", "z", bx1 - 0.035, g1, w / 2);
+  } else glassBalustrade(b, null, "roomShell", "z", bx1 - 0.035, -w / 2, w / 2);
   const fx: FixturePoint[] = [];
   for (const z of [-1.2, 1.2]) fx.push(downlight(b, C / 2, z, H, 0.7));
   if (!door) {

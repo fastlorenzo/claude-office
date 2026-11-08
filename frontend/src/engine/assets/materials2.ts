@@ -29,7 +29,10 @@ export type MaterialRole =
   | "woodFurniture"
   | "fabricUpholstery"
   | "leather"
-  | "rubberMat";
+  | "rubberMat"
+  // software factory (plant shell under the offices)
+  | "floorEpoxy"
+  | "concreteSoffit";
 
 export interface PbrMaterialAsset {
   role: MaterialRole;
@@ -254,6 +257,19 @@ export const MATERIAL_CANDIDATES: Record<MaterialRole, PbrMaterialAsset[]> = {
   rubberMat: [
     m("rubberMat", "Rubber004", 0.8, { notes: "dark fine rubber" }),
     m("rubberMat", "Rubber001", 0.8, { notes: "black speckle rubber" }),
+  ],
+  // ---- Software factory: reuse the downloaded set, graded per surface. ----
+  floorEpoxy: [
+    m("floorEpoxy", "Concrete019", 3, {
+      notes: "smooth pale concrete under a grey epoxy coat (tinted + glossed)",
+    }),
+    m("floorEpoxy", "Concrete046", 3, { notes: "off-white smooth concrete" }),
+  ],
+  concreteSoffit: [
+    m("concreteSoffit", "Concrete046", 2.5, {
+      notes: "off-white smooth concrete, greyed for slab soffits / plinths",
+    }),
+    m("concreteSoffit", "Concrete019", 2.5, { notes: "cool pale grey" }),
   ],
 };
 

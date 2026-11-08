@@ -30,9 +30,9 @@ import {
   type RoomSlot,
   type SyncInput,
   type SyncOp,
+  type TeleportTarget,
   type WorldEvents,
   type WorldOptions,
-  type Zone,
 } from "@/engine/contracts";
 import { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import type { PropRole } from "@/engine/assets/proceduralProps";
@@ -54,8 +54,14 @@ import {
   allocateSlots,
   generateLayout,
   projectOfSession,
-  roomAt,
 } from "@/engine/layout/buildingLayout";
+import {
+  buildFactoryLayout,
+  FACTORY_Y,
+  zoneAt3,
+  type FactoryLayout,
+  type Zone3,
+} from "@/engine/layout/factoryLayout";
 import { groupSessions, type ProjectGroup } from "@/engine/logic/projectGroups";
 import {
   applyToModel,
@@ -79,6 +85,9 @@ import { StaticOccluders } from "@/engine/screens/labelOcclusion";
 import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
+import { Factory } from "@/engine/world/factory/Factory";
+import { cellStairFoot } from "@/engine/world/factory/FactoryHall";
+import { computeCellVisibility } from "@/engine/world/factoryVisibility";
 import { ControlRoom } from "@/engine/world/ControlRoom";
 import { ProjectRoom } from "@/engine/world/ProjectRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
@@ -96,6 +105,15 @@ export interface WorldDebugOptions {
   preserveDrawingBuffer?: boolean;
   /** Disable head bob. */
   headBob?: boolean;
+  /**
+   * Scripted walk (stair / passage verification): teleport the player to
+   * `start`, then steer it through `points` with the real character
+   * controller. Progress lands in `__worldStats.walk`.
+   */
+  walk?: {
+    start: { x: number; y: number; z: number; yaw: number };
+    points: { x: number; z: number }[];
+  };
 }
 
 const POSE_MS = 100;
@@ -145,9 +163,24 @@ function defaultDetail(): DetailSettings {
   };
 }
 
-function zoneKey(z: Zone): string {
-  return z.kind === "room" ? `room:${z.sessionId}` : z.kind;
+function zoneKey(z: Zone3): string {
+  if (z.kind === "room") return `room:${z.sessionId}`;
+  if (z.kind === "cell" || z.kind === "balcony")
+    return `${z.kind}:${z.projectId}`;
+  if (z.kind === "stair") return `stair:${z.id}`;
+  return z.kind;
 }
+
+const p3 = (v: { x: number; y: number; z: number }) =>
+  `${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`;
+
+/** Scripted debug walk: sub-steps per frame, step, give-up time. */
+const WALK_SUBSTEPS = 4;
+const WALK_DT = 0.05;
+const WALK_TIMEOUT_S = 40;
+
+/** Factory visibility tick (matches Visibility's VISIBILITY_HZ). */
+const FACTORY_VIS_MS = 200;
 
 class World implements IWorld {
   private readonly events = new Emitter<WorldEvents>();
@@ -164,6 +197,11 @@ class World implements IWorld {
   private fx: PostFx | null = null;
   private interaction: Interaction | null = null;
   private building: Building | null = null;
+  /** Software-factory level under the offices (shell + machine pools). */
+  private factory: Factory | null = null;
+  private factoryLayout: FactoryLayout;
+  private lastFactoryVisAt = 0;
+  private readonly zonePt = new Vector3();
   private feeds: FeedScheduler | null = null;
   private controlRoom: ControlRoom | null = null;
   private readonly rooms = new Map<string, Room>();
@@ -269,6 +307,7 @@ class World implements IWorld {
     );
 
     this.layout = generateLayout(this.slots);
+    this.factoryLayout = buildFactoryLayout(this.layout);
     this.sceneInstr = new SceneInstrumentation(scene);
     this.engineInstr = new EngineInstrumentation(this.engine);
     this.engineInstr.captureGPUFrameTime = false;
@@ -344,6 +383,10 @@ class World implements IWorld {
         const c = this.debug.camera;
         this.player.setDebugCamera(new Vector3(c.x, c.y, c.z), c.yaw, c.pitch);
       }
+      if (this.debug.walk) {
+        const w = this.debug.walk.start;
+        this.player.teleport(new Vector3(w.x, w.y + 0.05, w.z), w.yaw);
+      }
 
       this.fx = new PostFx(this.scene, this.player.camera);
       this.interaction = new Interaction(
@@ -381,6 +424,13 @@ class World implements IWorld {
       });
       this.building.build(this.layout);
       if (this.branding) this.building.setBranding(this.branding);
+      this.factory = new Factory({
+        scene: this.scene,
+        materials: this.materials,
+        colliders: this.colliders,
+        lighting: this.lighting,
+      });
+      this.factory.setLayout(this.factoryLayout, this.layout);
       this.feeds = new FeedScheduler(this.scene);
       this.buildControlRoom();
       this.updateFixtures();
@@ -423,6 +473,7 @@ class World implements IWorld {
     this.projectRooms.clear();
     this.controlRoom?.dispose();
     this.feeds?.dispose();
+    this.factory?.dispose();
     this.building?.dispose();
     this.interaction?.dispose();
     this.fx?.dispose();
@@ -478,9 +529,15 @@ class World implements IWorld {
       this.layout = layout;
       this.podSlots = new Map(layout.rooms.map((r) => [r.sessionId, r.slot]));
       this.building?.build(layout);
+      // The factory floor follows the rooms (cells under them); the shell
+      // rebuilds only when the set of rooms changes.
+      this.factoryLayout = buildFactoryLayout(layout);
+      const factoryRebuilt =
+        this.factory?.setLayout(this.factoryLayout, layout) ?? false;
       if (baysChanged && this.feeds) this.buildControlRoom();
       else this.controlRoom?.setLayout(layout);
       this.syncProjectRooms();
+      if (factoryRebuilt) this.updateFixtures();
       this.events.emit("layout", layout);
     }
 
@@ -507,6 +564,9 @@ class World implements IWorld {
     }
     this.building?.setCampus(input.campus, groups.length); // control-room LED panel counts
     this.pushControlRoom();
+    // Factory seam (P2.5): build the FactoryModel from input.projects +
+    // sessions (lanesFor from this.factoryLayout, prev = last model) and hand
+    // it to `this.factory.sync(model)`; pools plug in via `factory.attach`.
   }
 
   /** Create / rebuild / drop project rooms to match the layout (+ feeds). */
@@ -670,7 +730,10 @@ class World implements IWorld {
   }
 
   private updateFixtures(): void {
-    const pts = [...(this.building?.fixtures ?? [])];
+    const pts = [
+      ...(this.building?.fixtures ?? []),
+      ...(this.factory?.fixtures ?? []),
+    ];
     for (const r of this.projectRooms.values()) pts.push(...r.getFixtures());
     for (const r of this.rooms.values()) pts.push(...r.getFixtures());
     this.lighting.setFixtures(pts);
@@ -690,8 +753,17 @@ class World implements IWorld {
     const dt = Math.min(dtMs / 1000, 0.05);
     this.gfx.update(dtMs);
 
-    this.input.update(dtMs);
-    this.player.update(dt, this.inputEnabled ? this.input : null);
+    if (this.debug.walk) {
+      // Scripted walk: fixed 50 ms sub-steps, independent of the frame rate.
+      for (let i = 0; i < WALK_SUBSTEPS; i++) {
+        this.stepWalk(WALK_DT);
+        this.input.update(WALK_DT * 1000);
+        this.player.update(WALK_DT, this.input);
+      }
+    } else {
+      this.input.update(dtMs);
+      this.player.update(dt, this.inputEnabled ? this.input : null);
+    }
     const eye = this.player.camera.globalPosition;
     this.assets.flush();
     for (const r of this.rooms.values()) r.update(dt, eye);
@@ -703,10 +775,14 @@ class World implements IWorld {
     if (this.gfx.dynamicLights) this.lighting.update(dt, focus);
     this.interaction?.update(now);
 
-    const zone = roomAt(this.layout, focus);
+    // y-aware zone at the player's eye (office, balcony or factory floor).
+    const feet = focus;
+    this.zonePt.set(feet.x, feet.y + (flying ? 0 : PLAYER.eyeHeight), feet.z);
+    const zone = zoneAt3(this.factoryLayout, this.layout, this.zonePt);
+    this.factory?.update(dt, eye, zone);
     const nearControl =
       zone.kind === "control" ||
-      this.player.position.z > this.layout.hall.length - 6;
+      (feet.y > FACTORY_Y && feet.z > this.layout.hall.length - 6);
     if (this.feeds) {
       this.feeds.setActive(nearControl);
       this.feeds.update();
@@ -750,6 +826,49 @@ class World implements IWorld {
       this.frames = 0;
       this.frameMsAcc = 0;
     }
+  }
+
+  private walkIdx = 0;
+  private walkT = 0;
+  private walkLogAt = 0;
+  private readonly walkLog: string[] = [];
+  private walkDone = false;
+
+  /** Debug: steer the player through `debug.walk.points`. */
+  private stepWalk(dt: number): void {
+    const w = this.debug.walk;
+    if (!w || !this.player) return;
+    const p = this.player.position;
+    this.walkT += dt;
+    if (this.walkT - this.walkLogAt >= 0.5 && this.walkLog.length < 120) {
+      this.walkLogAt = this.walkT;
+      this.walkLog.push(
+        `${p.x.toFixed(2)},${p.y.toFixed(2)},${p.z.toFixed(2)}`,
+      );
+    }
+    if (this.walkIdx >= w.points.length || this.walkT > WALK_TIMEOUT_S) {
+      this.input.setVirtualMove(0, 0);
+      if (!this.walkDone) {
+        this.walkDone = true;
+        this.walkLog.push(`end ${p3(p)}`);
+        // shot.sh waits for this (screenshot right after the walk).
+        // (after the next __worldStats refresh, which runs every 500 ms).
+        setTimeout(() => {
+          (globalThis as { __worldShotReady?: boolean }).__worldShotReady =
+            true;
+        }, 800);
+      }
+      return;
+    }
+    const t = w.points[this.walkIdx];
+    const dx = t.x - p.x;
+    const dz = t.z - p.z;
+    if (Math.hypot(dx, dz) < 0.25) {
+      this.walkIdx += 1;
+      return;
+    }
+    this.player.yaw = Math.atan2(dx, dz);
+    this.input.setVirtualMove(0, 1);
   }
 
   // -------------------------------------------------------------------------
@@ -872,7 +991,7 @@ class World implements IWorld {
     );
   }
 
-  private updateLod(now: number, zone: Zone): void {
+  private updateLod(now: number, zone: Zone3): void {
     if (!this.player || !this.visibility || !this.actorHub || !this.screenHub)
       return;
     const off = !!(globalThis as { __lodOff?: boolean }).__lodOff;
@@ -907,6 +1026,19 @@ class World implements IWorld {
         },
         feedMode,
       );
+    if (!off && this.factory && now - this.lastFactoryVisAt >= FACTORY_VIS_MS) {
+      this.lastFactoryVisAt = now;
+      this.factory.applyVisibility(
+        computeCellVisibility(
+          this.factoryLayout,
+          this.layout,
+          { x: eye.x, y: eye.y, z: eye.z },
+          { x: Math.sin(yaw), z: Math.cos(yaw) },
+          zone,
+        ),
+        now,
+      );
+    }
     if (this.screenHub.needsUpdate || now - this.lastScreensAt >= 200) {
       this.lastScreensAt = now;
       this.screenHub.update(eye);
@@ -926,6 +1058,18 @@ class World implements IWorld {
         actors: this.actorHub.stats(),
         zone: zone.kind,
         kinds: this.activeKinds(),
+        ...(this.debug.walk
+          ? {
+              walk: {
+                done: this.walkDone,
+                reached: this.walkIdx,
+                of: this.debug.walk.points.length,
+                t: Math.round(this.walkT * 10) / 10,
+                feet: [p3(this.player.position)],
+                log: this.walkLog,
+              },
+            }
+          : {}),
       };
     }
   }
@@ -976,11 +1120,31 @@ class World implements IWorld {
     if (this.interaction) this.interaction.enabled = enabled;
   }
 
-  teleport(
-    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
-  ): void {
+  teleport(to: TeleportTarget): void {
     if (!this.player) return;
     this.player.frozen = false;
+    const fl = this.factoryLayout;
+    if (to === "floor") {
+      // Just inside the entrance building's factory door, facing the plant.
+      const z = fl.bounds.min.z + 1.5;
+      this.player.teleport(new Vector3(0, fl.floorY + 0.05, z), 0);
+      return;
+    }
+    if (typeof to === "object" && "factoryCell" in to) {
+      const c = fl.cells.find((x) => x.projectId === to.factoryCell);
+      if (!c) return;
+      // Just off the cell stair's last flight, facing out along the lanes.
+      const f = cellStairFoot(c.side, c.z0, c.stair.top.z);
+      const yaw = c.side === "east" ? Math.PI / 2 : -Math.PI / 2;
+      this.player.teleport(new Vector3(f.x, fl.floorY + 0.05, f.z), yaw);
+      return;
+    }
+    if (typeof to === "object" && "factoryDock" in to) {
+      // Dock floor just past the main line's end, facing the doors (+z).
+      const d = fl.dock;
+      this.player.teleport(new Vector3(3, fl.floorY + 0.05, d.z0 + 2), 0);
+      return;
+    }
     if (to === "lobby") {
       const s = this.layout.lobby.spawn;
       this.player.teleport(

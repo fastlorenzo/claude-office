@@ -35,8 +35,14 @@ export interface ColliderSink {
     center: Vector3,
     size: Vector3,
     yaw?: number,
-    opts?: { seeThrough?: boolean },
+    opts?: ColliderBoxOpts,
   ): unknown;
+}
+
+export interface ColliderBoxOpts {
+  seeThrough?: boolean;
+  /** Tilt about the box's local X axis after yaw (ramps): + lowers its +Z end. */
+  pitch?: number;
 }
 
 /** Wraps a sink so boxes are given in a local frame (origin + yaw). */
@@ -87,7 +93,7 @@ export class Colliders implements ColliderSink {
     center: Vector3,
     size: Vector3,
     yaw = 0,
-    opts: { seeThrough?: boolean } = {},
+    opts: ColliderBoxOpts = {},
   ): Mesh {
     const sx = Math.max(0.02, size.x);
     const sy = Math.max(0.02, size.y);
@@ -99,6 +105,7 @@ export class Colliders implements ColliderSink {
     );
     mesh.position.copyFrom(center);
     mesh.rotation.y = yaw;
+    mesh.rotation.x = opts.pitch ?? 0;
     this.finish(group, mesh, opts, () => {
       const key = `b:${sx.toFixed(3)}:${sy.toFixed(3)}:${sz.toFixed(3)}`;
       let shape = this.shapes.get(key);

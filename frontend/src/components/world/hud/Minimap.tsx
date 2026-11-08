@@ -78,10 +78,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
     close("minimap");
   };
   const travelFactory = (to: FactoryTeleport): void => {
-    // Same teleport entry point as the office targets (World widens its union).
-    (
-      getWorld() as unknown as { teleport(t: FactoryTeleport): void } | null
-    )?.teleport(to);
+    getWorld()?.teleport(to);
     close("minimap");
   };
 

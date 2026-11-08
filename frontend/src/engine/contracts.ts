@@ -24,6 +24,7 @@ import type {
 // (generated name collision); the real model is `Boss1` in generated.ts.
 import type { Boss1 as Boss } from "@/types/generated";
 import type { GraphicsSettings } from "@/engine/fx/graphicsSettings";
+import type { FactoryZone } from "@/engine/layout/factoryLayout";
 
 export type { GraphicsSettings };
 
@@ -685,7 +686,6 @@ export interface InteractionTarget {
   url?: string;
 }
 
-
 /** Read-only today; write actions (answer_permission, send_message) are added here later. */
 export type InteractionActionId = "inspect" | "enter" | "popup" | "github";
 
@@ -715,11 +715,21 @@ export type CameraMode = "fp" | "tp";
 export type QualitySetting = "auto" | "high" | "low";
 export type QualityTier = "high" | "low";
 
+export type TeleportTarget =
+  | { sessionId: string }
+  | { projectId: string }
+  | "lobby"
+  | "control"
+  | "floor"
+  | { factoryCell: string }
+  | { factoryDock: true };
+
 export interface PlayerPose {
   x: number;
   z: number;
   yaw: number;
-  zone: Zone;
+  /** y-aware: office zones, or factory-level zones (factory / cell / dock / stair / balcony). */
+  zone: Zone | FactoryZone;
 }
 
 export interface WorldEvents {
@@ -786,10 +796,12 @@ export interface IWorld {
   setBranding?(opts: BrandingOptions): void;
   /** Disable game input (HUD panel open) — releases pointer lock. */
   setInputEnabled(enabled: boolean): void;
-  /** Teleport the player to a project room's door (minimap fast travel) or "lobby" / "control". */
-  teleport(
-    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
-  ): void;
+  /**
+   * Teleport the player (minimap fast travel): a project room's door,
+   * "lobby" / "control", the factory floor ("floor" = inside the factory door),
+   * a production cell (its stair landing) or the dock.
+   */
+  teleport(to: TeleportTarget): void;
   /** Touch controls feed these. */
   setVirtualMove(x: number, y: number): void;
   addLook(dx: number, dy: number): void;

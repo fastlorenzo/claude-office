@@ -826,6 +826,7 @@ export class Building {
     // Rails on the open sides (the room fronts close the outer side).
     for (const h of stairHoles)
       railOpening(b, colliders, g, h, [
+        "z0", // the factory's flight starts on this edge
         ...(Math.abs(h.x1 - hallHalf) < 0.01 ? (["x1"] as const) : []),
         ...(Math.abs(h.x0 + hallHalf) < 0.01 ? (["x0"] as const) : []),
       ]);

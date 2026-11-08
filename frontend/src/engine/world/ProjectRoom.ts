@@ -41,6 +41,7 @@ import type { Materials } from "@/engine/materials/Materials";
 import type { Colliders } from "@/engine/physics/Colliders";
 import { ProjectInfoScreen } from "@/engine/screens/ProjectInfoScreen";
 import { DOOR_H, partitionColliders } from "@/engine/world/architecture";
+import { cellStairGap } from "@/engine/world/factory/FactoryHall";
 import { LedPanel } from "@/engine/world/LedPanel";
 import {
   frameMatrix,
@@ -141,13 +142,20 @@ export class ProjectRoom {
     flat(gf.x0, gf.x1, true);
     flat(bal.x0, bal.x1, false);
     const railH = 1.1;
-    colliders.addBox(
-      g,
-      new Vector3(bal.x1 - sx * 0.035, railH / 2, (z0 + z1) / 2),
-      new Vector3(0.1, railH, z1 - z0),
-      0,
-      { seeThrough: true },
-    );
+    // Outer balustrade, open onto the factory stair's top landing.
+    const gap = cellStairGap(z0, bal.door.z);
+    for (const [a0, a1] of [
+      [z0, gap.z0],
+      [gap.z1, z1],
+    ])
+      if (a1 - a0 > 0.05)
+        colliders.addBox(
+          g,
+          new Vector3(bal.x1 - sx * 0.035, railH / 2, (a0 + a1) / 2),
+          new Vector3(0.1, railH, a1 - a0),
+          0,
+          { seeThrough: true },
+        );
     for (const z of [z0 + 0.05, z1 - 0.05])
       colliders.addBox(
         g,

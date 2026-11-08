@@ -17,6 +17,9 @@
  *   frames=40                frames to wait before "ready" when shot=1
  *   t=20000                  demo clock (ms) used when shot=1 (frozen)
  *   ops=1                    show the DOM Ops dashboard (control room) over the world
+ *   walk=x,y,z,yawDeg;x,z;…  scripted walk with the real player collider from
+ *                            the start pose through the waypoints (stairs);
+ *                            progress in __worldStats.walk
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -59,6 +62,23 @@ function parseParams() {
         pitch: ((pitch || 0) * Math.PI) / 180,
       };
     }
+  }
+  let walk:
+    | {
+        start: { x: number; y: number; z: number; yaw: number };
+        points: { x: number; z: number }[];
+      }
+    | undefined;
+  const walkRaw = q.get("walk");
+  if (walkRaw) {
+    const [head, ...rest] = walkRaw.split(";");
+    const [x, y, z, yaw] = head.split(",").map(Number);
+    const points = rest
+      .map((p) => p.split(",").map(Number))
+      .filter(([px, pz]) => Number.isFinite(px) && Number.isFinite(pz))
+      .map(([px, pz]) => ({ x: px, z: pz }));
+    if ([x, y, z].every(Number.isFinite))
+      walk = { start: { x, y, z, yaw: ((yaw || 0) * Math.PI) / 180 }, points };
   }
   const gfxRaw = q.get("gfx");
   let graphics: GraphicsSettings | undefined;
@@ -109,6 +129,7 @@ function parseParams() {
     quality,
     cameraMode,
     camera,
+    walk,
     shot: q.get("shot") === "1",
     frames: Number(q.get("frames") ?? 40) || 40,
     t: q.get("t") ? Number(q.get("t")) : undefined,
@@ -151,7 +172,12 @@ export default function WorldDebugPage() {
           isMobile: false,
           assetBase: "/assets",
         },
-        { camera: p.camera, preserveDrawingBuffer: p.shot, headBob: !p.camera },
+        {
+          camera: p.camera,
+          walk: p.walk,
+          preserveDrawingBuffer: p.shot,
+          headBob: !p.camera && !p.walk,
+        },
       );
       if (p.brand) world.setBranding?.(p.brand);
       offs.push(world.on("stats", (s) => setStats(s)));

@@ -134,7 +134,12 @@ export type SurfaceKey =
   | "ledBlue"
   | "ledWarm" // warm cove / toe-kick LED
   | "ledClaude" // orange logo halo
-  | "nocGloss"; // control-room console / screen surround
+  | "nocGloss" // control-room console / screen surround
+  // software factory (plant shell)
+  | "floorEpoxy" // satin grey epoxy floor coat
+  | "galvanised" // galvanised steel (treads, trays, decks, roof deck)
+  | "steelPainted" // RAL 7016 painted steel (columns, trusses, stringers)
+  | "concreteSoffit"; // fair-faced concrete (slab soffits, wall plinth)
 
 interface SurfaceSpec {
   color: string;
@@ -502,6 +507,37 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     color: "#000000",
     roughness: 1,
     emissive: { color: "#D97757", intensity: 2.6 },
+  },
+  // ---- software factory ----
+  floorEpoxy: {
+    color: "#8E9294",
+    roughness: 0.3,
+    role: "floorEpoxy",
+    tint: [1.43, 1.37, 1.53],
+    roughFactor: 0.42, // satin coat: soft streaks under the LED strips
+    bumpLevel: 0.08,
+    detail: 8,
+  },
+  galvanised: {
+    // Satin galvanised steel, flat (no brushed map): treads, trays, decks.
+    color: "#A3A9AE",
+    roughness: 0.42,
+    metallic: 0.85,
+  },
+  steelPainted: {
+    // RAL 7016 anthracite paint, satin.
+    color: "#383E42",
+    roughness: 0.5,
+    metallic: 0.1,
+  },
+  concreteSoffit: {
+    color: "#A6A49F",
+    roughness: 0.9,
+    role: "concreteSoffit",
+    tint: [0.63, 0.6, 0.71],
+    roughFactor: 1.25,
+    bumpLevel: 0.45,
+    detail: 7,
   },
 };
 
@@ -952,6 +988,8 @@ const MEAN_ALBEDO: Record<string, [number, number, number]> = {
   Metal029: [0.013, 0.016, 0.015],
   Leather026: [0.01, 0.01, 0.009],
   Rubber004: [0.023, 0.025, 0.031],
+  Concrete019: [0.187, 0.209, 0.193],
+  Concrete046: [0.609, 0.617, 0.487],
 };
 
 async function urlExists(url: string): Promise<boolean> {
