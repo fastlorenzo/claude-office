@@ -27,13 +27,27 @@
  *   setAnisotropy(n)          anisotropic filtering of every tiled texture (1–16)
  *   setTextureQuality(q)      "low" | "medium" | "high" → max texture edge
  *                             256 / 512 / native (512–1024 by tile size,
- *                             `textureEdge`); reloads the maps in place.
+ *                             `textureEdge`); reloads the maps in place
+ *                             (the shown map stays until the new one lands).
  *                             glTF model / character textures loaded later
  *                             are capped at 512 / 512 / 1024 (textureCap)
+ *
+ * Texture loading (robust by construction): every tiled map is a stable
+ * `Texture` bound to the materials that starts on a neutral 1x1 internal
+ * texture (mean albedo / flat normal / neutral ORM), so the material is ready
+ * at once and a surface can never vanish while a map loads, fails, is
+ * swapped for another quality or is re-uploaded after a WebGL context loss.
+ * Loads retry with backoff (textureLoader.ts); a final failure is reported
+ * (readiness.ts: console.warn once, `__worldStats.texFail`) and the neutral
+ * map stays. Babylon's own context-restore path re-fetches URL textures and,
+ * when that fetch fails, leaves them not ready forever (every mesh using them
+ * is skipped): the maps here re-upload a neutral pixel instead and reload
+ * through the retrying loader.
  * ---------------------------------------------------------------------------
  */
 import {
   Color3,
+  Constants,
   Mesh,
   PBRMaterial,
   Scene,
@@ -41,7 +55,16 @@ import {
   Vector3,
   VertexBuffer,
   type BaseTexture,
+  type InternalTexture,
+  type Observer,
 } from "@/engine/babylon";
+import {
+  fetchImage,
+  neutralPixel,
+  type FetchImageOptions,
+  type MapKind,
+} from "./textureLoader";
+import { noteTextureFailure, noteTextureRecovered } from "./readiness";
 import {
   MATERIALS2,
   material2Path,
@@ -642,15 +665,24 @@ const MAX_SIZE: Record<TextureQuality, number> = {
   high: 4096,
 };
 
-type MapKind = "albedo" | "normal" | "orm";
-
 interface TexSlot {
+  /** Stable texture bound to the materials; its internal texture is swapped. */
   tex: Texture;
   file: string;
+  kind: MapKind;
   srgb: boolean;
   scale: number;
   /** Shipped edge of the file (px). */
   native: number;
+  /** Neutral pixel shown until (and whenever) the real map is missing. */
+  neutral: Uint8Array;
+  /** Load generation: only the latest request may install its result. */
+  gen: number;
+  /** Edge of the internal texture shown (0 = neutral). */
+  edge: number;
+  /** Edge requested by the latest load. */
+  want: number;
+  pending: Promise<void> | null;
 }
 
 export class Materials {
@@ -665,6 +697,10 @@ export class Materials {
   }
 
   private readonly cache = new Map<string, PBRMaterial>();
+  private disposed = false;
+  private restoreObs: Observer<unknown> | null = null;
+  /** Test hook: retry delays of the texture loader. */
+  loaderOptions: Pick<FetchImageOptions, "delays"> = {};
   /** Derived specs (tinted / vertex-coloured) re-textured on load. */
   private readonly derived = new Map<string, SurfaceSpec>();
   private grime: BaseTexture | null = null;
@@ -676,7 +712,6 @@ export class Materials {
   private exteriorEnv: BaseTexture | null = null;
   private anisotropy = 16;
   private quality: TextureQuality = "high";
-  private loadedQuality: TextureQuality | null = null;
   private detail: BaseTexture | null = null;
   private available: Set<string> | null = null;
 
@@ -689,6 +724,13 @@ export class Materials {
     this.uncap = capTextureUploads(scene.getEngine(), (url, label) =>
       modelTextureCap(url, label, this.quality),
     );
+    // After a context restore every map re-uploaded a neutral pixel (see
+    // `trackInternal`): reload them through the retrying loader.
+    this.restoreObs = scene
+      .getEngine()
+      .onContextRestoredObservable.add(() =>
+        this.reloadAll(true),
+      ) as Observer<unknown>;
   }
 
   private readonly uncap: () => void;
@@ -970,11 +1012,13 @@ export class Materials {
     const ok = await Promise.all(
       [...ids].map(async (id) => ({
         id,
-        ok: await urlExists(this.url(`${id}/albedo.webp`)),
+        ok: await urlExists(
+          this.url(`${id}/albedo.webp`),
+          this.loaderOptions.delays,
+        ),
       })),
     );
     this.available = new Set(ok.filter((r) => r.ok).map((r) => r.id));
-    this.loadedQuality = this.quality;
     for (const key of Object.keys(SURFACES) as SurfaceKey[]) {
       const spec = SURFACES[key];
       if (!spec.role) {
@@ -1015,13 +1059,17 @@ export class Materials {
       const t = spec.tint ?? [1, 1, 1];
       mat.albedoColor = new Color3(t[0], t[1], t[2]);
     }
+    // Per-material bump level: a slot per (map, scale, level), never a clone
+    // (a clone of a map that is still loading never becomes ready).
+    const level = spec.bumpLevel ?? 1;
     let bump: Texture;
     if (spec.normal === "sandwichPanel") {
       bump = this.sandwichNormal().clone();
       bump.uScale = scale;
       bump.vScale = scale;
+      bump.level = level;
       this.ownedTextures.push(bump);
-    } else bump = this.tex(asset, "normal", false, scale);
+    } else bump = this.tex(asset, "normal", false, scale, level);
     mat.bumpTexture = bump;
     // ambientCG ships OpenGL (+Y) normal maps; Babylon's left-handed frame wants DirectX.
     mat.invertNormalMapY = true;
@@ -1031,15 +1079,6 @@ export class Materials {
     mat.useMetallnessFromMetallicTextureBlue = true;
     mat.roughness = spec.roughFactor ?? 1;
     mat.metallic = spec.metalFactor ?? spec.metallic ?? 0;
-    // Per-material bump level lives on a per-material texture clone only when
-    // it differs from 1 (textures are shared across materials).
-    const level = spec.bumpLevel ?? 1;
-    if (Math.abs(level - 1) > 1e-3) {
-      const b = bump.clone();
-      b.level = level;
-      this.textures.push(b);
-      mat.bumpTexture = b;
-    }
     if (spec.detail || spec.grime) this.applyDetail(mat, spec);
     if (frozen) mat.freeze();
   }
@@ -1066,71 +1105,234 @@ export class Materials {
     kind: MapKind,
     srgb: boolean,
     scale: number,
+    level = 1,
   ): Texture {
     const file = asset.files[kind];
-    const key = `${file}@${scale.toFixed(4)}`;
+    const lv = Math.abs(level - 1) > 1e-3 ? level : 1;
+    const key = `${file}@${scale.toFixed(4)}@${lv.toFixed(3)}`;
     const hit = this.slots.get(key);
     if (hit) return hit.tex;
-    const native = textureEdge(asset, kind);
-    const tex = this.createTexture(file, srgb, kind, native);
-    tex.uScale = scale;
-    tex.vScale = scale;
-    tex.anisotropicFilteringLevel = this.anisotropy;
-    tex.wrapU = Texture.WRAP_ADDRESSMODE;
-    tex.wrapV = Texture.WRAP_ADDRESSMODE;
-    this.textures.push(tex);
-    this.slots.set(key, { tex, file, srgb, scale, native });
-    return tex;
-  }
-
-  private createTexture(
-    file: string,
-    srgb: boolean,
-    kind: MapKind,
-    native: number,
-  ): Texture {
-    const url = this.url(file);
-    const cap = MAX_SIZE[this.quality];
-    const max = kind === "orm" ? Math.max(128, cap / 2) : cap;
-    const opts = {
+    const neutral = neutralPixel(
+      kind,
+      MEAN_ALBEDO[asset.id] ?? null,
+      !!asset.forceMetal || /^Metal011/.test(asset.id),
+    );
+    const tex = new Texture(null, this.scene, {
       noMipmap: false,
       invertY: true,
       samplingMode: Texture.TRILINEAR_SAMPLINGMODE,
       gammaSpace: srgb,
+      internalTexture: this.neutralInternal(neutral),
+    });
+    tex.name = `mat2:${file}`;
+    tex.uScale = scale;
+    tex.vScale = scale;
+    tex.level = lv;
+    tex.anisotropicFilteringLevel = this.anisotropy;
+    tex.wrapU = Texture.WRAP_ADDRESSMODE;
+    tex.wrapV = Texture.WRAP_ADDRESSMODE;
+    this.textures.push(tex);
+    const slot: TexSlot = {
+      tex,
+      file,
+      kind,
+      srgb,
+      scale,
+      native: textureEdge(asset, kind),
+      neutral,
+      gen: 0,
+      edge: 0,
+      want: 0,
+      pending: null,
     };
-    if (max >= native || typeof createImageBitmap === "undefined")
-      return new Texture(url, this.scene, opts);
-    // Downscale on the CPU (ImageBitmap resize) for low / medium texture quality.
-    const tex = new Texture(null, this.scene, opts);
-    void fetch(url)
-      .then((r) => r.blob())
-      .then((blob) =>
-        createImageBitmap(blob, {
-          resizeWidth: max,
-          resizeHeight: max,
-          resizeQuality: "high",
-          imageOrientation: "flipY",
-        }),
-      )
-      .then((bmp) => {
-        if (this.scene.isDisposed) return;
-        tex.updateURL(url, bmp);
-      })
-      .catch(() => undefined);
+    this.slots.set(key, slot);
+    this.load(slot);
     return tex;
   }
 
-  private whenTexturesReady(): Promise<void> {
-    return new Promise((resolve) => {
-      const pending = this.textures.filter((t) => !t.isReady());
-      if (pending.length === 0) return resolve();
-      let left = pending.length;
-      const done = () => {
-        left -= 1;
-        if (left <= 0) resolve();
+  /** A 1x1 internal texture holding `px` (ready at once, rebuilt from data). */
+  private neutralInternal(px: Uint8Array): InternalTexture {
+    const it = this.scene
+      .getEngine()
+      .createRawTexture(
+        px,
+        1,
+        1,
+        Constants.TEXTUREFORMAT_RGBA,
+        false,
+        false,
+        Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
+      );
+    it.isReady = true; // NullEngine leaves raw textures unflagged
+    return it;
+  }
+
+  /** Edge (px) the current quality wants for a slot's map. */
+  private edgeFor(slot: TexSlot): number {
+    const cap = MAX_SIZE[this.quality];
+    const max = slot.kind === "orm" ? Math.max(128, cap / 2) : cap;
+    return Math.min(max, slot.native);
+  }
+
+  /**
+   * Load the slot's map at the current quality and install it in place. The
+   * texture keeps showing what it has (neutral or the previous quality) until
+   * the new map is uploaded; a final failure keeps it and is reported.
+   */
+  private load(slot: TexSlot): Promise<void> {
+    const gen = ++slot.gen;
+    const edge = this.edgeFor(slot);
+    slot.want = edge;
+    const url = this.url(slot.file);
+    const full = edge >= slot.native;
+    // Distinct cache keys per edge: Babylon shares internal textures by URL.
+    const key = full ? url : `${url}#${edge}`;
+    const stale = () => this.disposed || gen !== slot.gen;
+    const p = this.decode(url, key, full ? undefined : edge)
+      .then((bmp) => (stale() ? undefined : this.upload(slot, key, bmp, gen)))
+      .then(
+        () => {
+          if (!stale()) noteTextureRecovered(url);
+        },
+        (err: unknown) => {
+          if (!stale()) noteTextureFailure(url, err);
+        },
+      )
+      .finally(() => {
+        if (slot.pending === p) slot.pending = null;
+      });
+    slot.pending = p;
+    return p;
+  }
+
+  /** One fetch + decode per (url, edge) in flight, shared by its slots. */
+  private readonly decoding = new Map<string, Promise<ImageBitmap>>();
+
+  private decode(
+    url: string,
+    key: string,
+    edge: number | undefined,
+  ): Promise<ImageBitmap> {
+    const hit = this.decoding.get(key);
+    if (hit) return hit;
+    // Shared by every slot of this (url, edge): only disposal cancels it.
+    const p: Promise<ImageBitmap> = fetchImage(url, {
+      edge,
+      delays: this.loaderOptions.delays,
+      cancelled: () => this.disposed,
+    }).finally(() => {
+      // Keep the entry until the slots of this tick have taken the bitmap.
+      setTimeout(() => {
+        if (this.decoding.get(key) === p) this.decoding.delete(key);
+      }, 0);
+    });
+    this.decoding.set(key, p);
+    return p;
+  }
+
+  /** Upload a decoded map and swap it into the slot's texture. */
+  private upload(
+    slot: TexSlot,
+    key: string,
+    bmp: ImageBitmap,
+    gen: number,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      // Babylon may call onLoad / onError synchronously from the constructor
+      // (an ImageBitmap upload is immediate): record, then settle once the
+      // probe exists.
+      let probe: Texture | null = null;
+      let loaded = false;
+      let error: string | null = null;
+      let settled = false;
+      const settle = () => {
+        if (settled || !probe || (!loaded && error === null)) return;
+        settled = true;
+        clearTimeout(timer);
+        if (loaded) {
+          this.install(slot, probe, gen);
+          resolve();
+        } else {
+          probe.dispose();
+          reject(new Error(error ?? "upload failed"));
+        }
       };
-      for (const t of pending) t.onLoadObservable.addOnce(done);
-      // Never block the world on a stuck texture.
+      const timer = setTimeout(() => {
+        error = "upload timed out";
+        settle();
+      }, 20000);
+      probe = new Texture(key, this.scene, {
+        noMipmap: false,
+        invertY: true,
+        samplingMode: Texture.TRILINEAR_SAMPLINGMODE,
+        gammaSpace: slot.srgb,
+        buffer: bmp,
+        onLoad: () => {
+          loaded = true;
+          settle();
+        },
+        onError: (message?: string) => {
+          error = message || "upload failed";
+          settle();
+        },
+      });
+      settle();
+    });
+  }
+
+  private install(slot: TexSlot, probe: Texture, gen: number): void {
+    const internal = probe.getInternalTexture();
+    if (!internal || this.disposed || gen !== slot.gen) {
+      probe.dispose();
+      return;
+    }
+    this.trackInternal(internal, slot.neutral);
+    const prev = slot.tex._texture;
+    // Hand the probe's reference to the slot texture (no refcount change).
+    slot.tex._texture = internal;
+    probe._texture = null;
+    probe.dispose();
+    // Drops the slot's old reference (when the cache handed back the same
+    // internal texture, this drops the probe's extra reference instead).
+    prev?.dispose();
+    slot.edge = slot.want;
+  }
+
+  /**
+   * Context loss: Babylon rebuilds a URL texture by fetching it again and,
+   * when that fetch fails, never flags it ready again (the materials, and
+   * every mesh using them, are then skipped). Rebuild with the neutral pixel
+   * instead (ready at once; the URL is retired so no later load reuses it)
+   * and let `onContextRestored` reload the real maps through the loader.
+   */
+  private trackInternal(it: InternalTexture, neutral: Uint8Array): void {
+    // Decoded bitmaps are not kept for a rebuild (memory): the loader reloads.
+    it._buffer = null;
+    it.onRebuildCallback = () => {
+      it.url = `${it.url}#lost`;
+      return {
+        proxy: this.neutralInternal(neutral),
+        isReady: true,
+        isAsync: false,
+      };
+    };
+  }
+
+  /** Reload every map (quality change: only those whose edge changes). */
+  private reloadAll(force: boolean): void {
+    if (this.disposed) return;
+    for (const slot of this.slots.values())
+      if (force || this.edgeFor(slot) !== slot.want) this.load(slot);
+  }
+
+  private whenTexturesReady(): Promise<void> {
+    const pending = [...this.slots.values()]
+      .map((s) => s.pending)
+      .filter((p): p is Promise<void> => !!p);
+    if (pending.length === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      void Promise.allSettled(pending).then(() => resolve());
+      // Never block the world on a slow texture (the neutral map shows).
       setTimeout(resolve, 8000);
     });
   }
@@ -1141,33 +1343,25 @@ export class Materials {
     for (const t of this.textures) t.anisotropicFilteringLevel = level;
   }
 
-  /** Max texture edge: low 512, medium 1024, high 2048. Reloads maps in place. */
+  /**
+   * Max texture edge (see MAX_SIZE). Reloads the maps whose edge changes in
+   * place; each keeps showing its current map until the new one is uploaded.
+   */
   setTextureQuality(q: TextureQuality): void {
     if (q === this.quality) return;
     this.quality = q;
-    if (!this.loadedQuality || this.loadedQuality === q) return;
-    this.loadedQuality = q;
-    for (const slot of this.slots.values()) {
-      const kind: MapKind = slot.file.endsWith("orm.webp")
-        ? "orm"
-        : slot.file.endsWith("normal.webp")
-          ? "normal"
-          : "albedo";
-      const fresh = this.createTexture(slot.file, slot.srgb, kind, slot.native);
-      const old = slot.tex;
-      const swap = () => {
-        // Copy the new GPU texture into the existing object (keeps every
-        // material / clone binding valid, no material rebuild).
-        const internal = fresh.getInternalTexture();
-        if (!internal) return;
-        old._texture?.dispose();
-        old._texture = internal;
-        fresh._texture = null;
-        fresh.dispose();
-      };
-      if (fresh.isReady()) swap();
-      else fresh.onLoadObservable.addOnce(swap);
+    this.reloadAll(false);
+  }
+
+  /** Diagnostics: slots still loading / showing the neutral map. */
+  textureStats(): { slots: number; loading: number; neutral: number } {
+    let loading = 0;
+    let neutral = 0;
+    for (const s of this.slots.values()) {
+      if (s.pending) loading += 1;
+      if (s.edge === 0) neutral += 1;
     }
+    return { slots: this.slots.size, loading, neutral };
   }
 
   /**
@@ -1180,6 +1374,13 @@ export class Materials {
   }
 
   dispose(): void {
+    this.disposed = true;
+    if (this.restoreObs)
+      this.scene
+        .getEngine()
+        .onContextRestoredObservable.remove(this.restoreObs);
+    this.restoreObs = null;
+    this.decoding.clear();
     this.uncap();
     for (const m of this.cache.values()) m.dispose(false, false);
     for (const t of this.textures) t.dispose();
@@ -1220,13 +1421,28 @@ const MEAN_ALBEDO: Record<string, [number, number, number]> = {
   Rubber004: [0.023, 0.025, 0.031],
 };
 
-async function urlExists(url: string): Promise<boolean> {
-  try {
-    const r = await fetch(url, { method: "HEAD" });
-    return r.ok;
-  } catch {
-    return false;
+/**
+ * HEAD probe with the loader's retries: a 404 is a definite "missing" (flat
+ * colour stays); network / server errors are retried, then reported.
+ */
+async function urlExists(
+  url: string,
+  delays: readonly number[] = [400, 1200],
+): Promise<boolean> {
+  let last: unknown = null;
+  for (let i = 0; i <= delays.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, delays[i - 1]));
+    try {
+      const r = await fetch(url, { method: "HEAD" });
+      if (r.ok) return true;
+      if (r.status === 404) return false;
+      last = new Error(`HTTP ${r.status}`);
+    } catch (err) {
+      last = err;
+    }
   }
+  noteTextureFailure(url, last);
+  return false;
 }
 
 // ---------------------------------------------------------------------------

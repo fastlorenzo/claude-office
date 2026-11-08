@@ -108,6 +108,11 @@ import { ProjectRoom } from "@/engine/world/ProjectRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
 import { claimCanvas, type ClaimedCanvas } from "@/engine/world/ownCanvas";
 import {
+  ReadinessMonitor,
+  activeDrawList,
+  failedTextureUrls,
+} from "@/engine/materials/readiness";
+import {
   halfFovFor,
   VISIBILITY_HZ,
   VisibilityController,
@@ -1062,6 +1067,12 @@ class World implements IWorld {
     this.gfx.beginInspect(1.6);
   }
 
+  /** Debug (world-debug ?texq=): swap the tiled-material texture quality in place. */
+  debugTextureQuality(q: string): void {
+    if (q === "low" || q === "medium" || q === "high")
+      this.materials.setTextureQuality(q);
+  }
+
   setGraphics(settings: GraphicsSettings): void {
     this.gfx.set(settings);
   }
@@ -1176,6 +1187,9 @@ class World implements IWorld {
         .slice(0, 16),
     );
   }
+
+  private readonly readiness = new ReadinessMonitor();
+  private lastReadyScanAt = 0;
 
   private readonly buildingGate = new BuildingGate();
   private lastGateAt = -Infinity;
@@ -1321,6 +1335,12 @@ class World implements IWorld {
         tier !== "high" && d > DEEP_FAR_M,
       );
     }
+    // Meshes that would draw but cannot (material not ready > 3 s): 1 Hz,
+    // always on so the console warns even without the stats overlay.
+    if (now - this.lastReadyScanAt >= 1000) {
+      this.lastReadyScanAt = now;
+      this.readiness.scan(this.scene, now, activeDrawList(this.scene));
+    }
     if (this.statsOn && now - this.lastDbgAt >= 500) {
       const dbgDt = now - this.lastDbgAt;
       this.lastDbgAt = now;
@@ -1343,6 +1363,12 @@ class World implements IWorld {
         kinds: this.activeKinds(),
         factory: this.factoryLines?.stats(),
         bld: this.buildingDiag(),
+        /** Enabled meshes whose material has not been ready for > 3 s. */
+        notReady: this.readiness.last,
+        /** Texture URLs that failed after their retries (neutral fallback). */
+        texFail: failedTextureUrls(),
+        /** Tiled-material maps: total / loading / still neutral. */
+        tex2: this.materials.textureStats(),
         ...(this.debug.drawBreakdown
           ? {
               passes: this.passDraws,

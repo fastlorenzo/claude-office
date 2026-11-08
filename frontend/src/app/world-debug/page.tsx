@@ -16,6 +16,7 @@
  *   brand=Name brandTag=Tagline brandColor=cyan|#rrggbb brandFlicker=1  lobby sign
  *   shot=1                   set document.title = "ready" ~N frames after ready
  *   frames=40                frames to wait before "ready" when shot=1
+ *   shotMs=ms                with shot=1: also wait this many ms after ready
  *   t=20000                  demo clock (ms) used when shot=1 (frozen)
  *   ops=1                    show the DOM Ops dashboard (control room) over the world
  *   live=1                   feed the live backend campus (/ws/campus) instead of
@@ -27,6 +28,13 @@
  *   walk=x,y,z,yawDeg;x,z;…  scripted walk with the real player collider from
  *                            the start pose through the waypoints (stairs);
  *                            progress in __worldStats.walk
+ *   ctxloss=ms[,restoreMs]   lose the WebGL context this many ms after ready
+ *                            and restore it restoreMs (default 1500) later
+ *   texfail=regex[@n]        texture loads whose URL matches fail (404): the
+ *                            materials loader and Babylon's own URL loads (e.g.
+ *                            the context-restore re-fetch); first n attempts
+ *   texfailAt=ms             arm texfail this many ms after ready (default: at once)
+ *   texq=q@ms,…              texture-quality swaps after ready (low|medium|high)
  *
  * `window.__worldStats` (refreshed every 500 ms; read by shot.sh and by
  * `make perf-gate` / `make walk-gate`, see scripts/perf-gate.sh, walk-gate.sh):
@@ -37,6 +45,10 @@
  *   postProcesses    (WS4) post-process pass count; gate: <= 12 high, <= 6 medium
  *   screenUploads    (WS4) screen canvas uploads per second; gate: <= 2 while idle
  *   textureMB        (WS5) estimated GPU texture memory in MB
+ *   notReady         { n, meshes, textures, ms }: enabled meshes whose
+ *                    material has not been ready for > 3 s (Babylon skips them)
+ *   texFail          texture URLs that failed after retries (neutral fallback)
+ *   tex2             tiled-material maps { slots, loading, neutral }
  *   walk             only with ?walk=: { done, reached, of, t, feet:["x,y,z"], log }
  * The gates print "-" for fields the build does not report yet.
  */
@@ -54,6 +66,12 @@ import {
   type GraphicsSettings,
 } from "@/engine/fx/graphicsSettings";
 import { normalizeBranding } from "@/engine/world/brandLayout";
+import { Tools } from "@/engine/babylon";
+import {
+  armTextureFailures,
+  injectedTextureFailure,
+  setTextureFailuresActive,
+} from "@/engine/materials/readiness";
 import type {
   CameraMode,
   CampusSession,
@@ -157,6 +175,7 @@ function parseParams() {
     walk,
     shot: q.get("shot") === "1",
     frames: Number(q.get("frames") ?? 40) || 40,
+    shotMs: Number(q.get("shotMs") ?? 0) || 0,
     t: q.get("t") ? Number(q.get("t")) : undefined,
     ops: q.get("ops") === "1",
     live: q.get("live") === "1",
@@ -171,6 +190,20 @@ function parseParams() {
       .map((x) => x.split("@").map(Number))
       .filter(([c, ms]) => c >= 0 && c <= 32 && ms >= 0)
       .map(([c, ms]) => ({ n: c, ms })),
+    ctxLoss: (q.get("ctxloss") ?? "")
+      .split(",")
+      .map(Number)
+      .filter((x) => x > 0),
+    texQ: (q.get("texq") ?? "")
+      .split(",")
+      .map((x) => x.split("@"))
+      .filter(
+        (x): x is ["low" | "medium" | "high", string] =>
+          x.length === 2 &&
+          (x[0] === "low" || x[0] === "medium" || x[0] === "high") &&
+          Number(x[1]) >= 0,
+      )
+      .map(([tq, ms]) => ({ q: tq, ms: Number(ms) })),
     tierSteps: (q.get("tierStep") ?? "")
       .split(",")
       .map((x) => x.split("@"))
@@ -198,6 +231,16 @@ export default function WorldDebugPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const p = parseParams();
+    // Dev-only failure injection for texture loads (see texfail above).
+    const sq = new URLSearchParams(window.location.search);
+    const texFail = sq.get("texfail");
+    const texFailAt = Number(sq.get("texfailAt") ?? 0) || 0;
+    if (texFail) {
+      const [re, n] = texFail.split("@");
+      armTextureFailures(new RegExp(re), n ? Number(n) : Infinity, !texFailAt);
+      Tools.PreprocessUrl = (url: string) =>
+        injectedTextureFailure(url) ? `${url}.injected-404` : url;
+    }
     let world: IWorld | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -267,6 +310,38 @@ export default function WorldDebugPage() {
         world.on("ready", () => {
           setStatus("ready");
           useWorldUiStore.getState().setReady(true);
+          if (texFail && texFailAt)
+            setTimeout(() => {
+              console.warn("[world-debug] texture failures armed");
+              setTextureFailuresActive(true);
+            }, texFailAt);
+          if (p.ctxLoss.length) {
+            // Context loss + restore (GPU reset / too many contexts).
+            const [at, restore = 1500] = p.ctxLoss;
+            const el = document.querySelector<HTMLCanvasElement>(
+              "canvas[data-world-canvas]",
+            );
+            const gl = el?.getContext("webgl2") ?? el?.getContext("webgl");
+            const ext = gl?.getExtension("WEBGL_lose_context");
+            setTimeout(() => {
+              if (cancelled || !ext) return;
+              console.warn("[world-debug] losing the WebGL context");
+              ext.loseContext();
+              setTimeout(() => {
+                if (cancelled) return;
+                console.warn("[world-debug] restoring the WebGL context");
+                ext.restoreContext();
+              }, restore);
+            }, at);
+          }
+          for (const st of p.texQ)
+            setTimeout(() => {
+              if (cancelled) return;
+              const w = world as unknown as {
+                debugTextureQuality?: (q: string) => void;
+              };
+              w.debugTextureQuality?.(st.q);
+            }, st.ms);
           if (p.inspect) {
             const w = world as unknown as { debugInspect?: () => void };
             w.debugInspect?.();
@@ -294,9 +369,11 @@ export default function WorldDebugPage() {
           }
           if (p.shot) {
             let left = p.frames;
+            const until = performance.now() + p.shotMs;
             const tick = () => {
               left -= 1;
-              if (left <= 0) document.title = "ready";
+              if (left <= 0 && performance.now() >= until)
+                document.title = "ready";
               else requestAnimationFrame(tick);
             };
             requestAnimationFrame(tick);

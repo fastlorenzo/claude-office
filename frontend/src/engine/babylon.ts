@@ -95,6 +95,7 @@ export { PBRMetallicRoughnessMaterial } from "@babylonjs/core/Materials/PBR/pbrM
 export { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 export { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 export { Texture } from "@babylonjs/core/Materials/Textures/texture";
+export type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
 export { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 export { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 export { HDRCubeTexture } from "@babylonjs/core/Materials/Textures/hdrCubeTexture";
