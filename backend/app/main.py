@@ -16,7 +16,7 @@ from rich.logging import RichHandler
 from sqlalchemy import delete, select, update
 
 from app.api.middleware import ApiKeyMiddleware, LocalhostOnlyMiddleware
-from app.api.routes import ci, events, floors, preferences, sessions, telemetry, websockets
+from app.api.routes import ci, console, events, floors, preferences, sessions, telemetry, websockets
 from app.api.routes.ci import load_pinned_repos
 from app.config import get_settings
 from app.core.ci_poller import get_ci_poller
@@ -248,6 +248,7 @@ app.include_router(ci.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(preferences.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(telemetry.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(sessions.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(console.router, prefix=f"{settings.API_V1_STR}")
 # WebSocket routes (no prefix). Registered before the SERVE_STATIC catch-all
 # ``@app.get("/{path:path}")`` block so WS handshakes aren't shadowed. Within
 # the router, ``/ws/overview`` is declared before ``/ws/{session_id}`` so the

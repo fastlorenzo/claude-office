@@ -152,39 +152,44 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
         return
 
     await get_manager().connect(websocket, session_id)
-
-    current_state = await get_event_processor().get_current_state(session_id)
-    if current_state:
-        await get_manager().send_personal_message(
-            {
-                "type": "state_update",
-                "timestamp": current_state.last_updated.isoformat(),
-                "state": current_state.model_dump(mode="json", by_alias=True),
-            },
-            websocket,
-        )
-
-    project_root = await get_event_processor().get_project_root(session_id)
-    if project_root:
-        git_service.configure(session_id=session_id, project_root=project_root)
-
-    git_status = git_service.get_status(session_id=session_id)
-    if git_status:
-        await get_manager().send_personal_message(
-            {
-                "type": "git_status",
-                "timestamp": git_status.last_updated.isoformat(),
-                "gitStatus": git_status.model_dump(mode="json"),
-            },
-            websocket,
-        )
+    # Ref-counted: the console opens a second socket per session, and closing
+    # either must not stop git updates for the other.
+    git_service.retain(session_id)
 
     try:
+        current_state = await get_event_processor().get_current_state(session_id)
+        if current_state:
+            await get_manager().send_personal_message(
+                {
+                    "type": "state_update",
+                    "timestamp": current_state.last_updated.isoformat(),
+                    "state": current_state.model_dump(mode="json", by_alias=True),
+                },
+                websocket,
+            )
+
+        project_root = await get_event_processor().get_project_root(session_id)
+        if project_root:
+            git_service.configure(session_id=session_id, project_root=project_root)
+
+        git_status = git_service.get_status(session_id=session_id)
+        if git_status:
+            await get_manager().send_personal_message(
+                {
+                    "type": "git_status",
+                    "timestamp": git_status.last_updated.isoformat(),
+                    "gitStatus": git_status.model_dump(mode="json"),
+                },
+                websocket,
+            )
+
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
+        pass
+    finally:
         await get_manager().disconnect(websocket, session_id)
-        git_service.remove_session(session_id)
+        git_service.release(session_id)
 
 
 @router.websocket("/ws/room/{room_id}")

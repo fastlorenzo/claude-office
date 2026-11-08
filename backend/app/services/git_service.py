@@ -39,6 +39,10 @@ class GitService:
         # overwrite each other's change-detection baseline.
         self._last_status: dict[str, GitStatus] = {}
         self._sessions: dict[str, str | None] = {}
+        # Socket ref-counts per session: a second WebSocket for the same session
+        # (the Session Console opens one) must not stop git updates for the first
+        # when it closes. See retain()/release().
+        self._refs: dict[str, int] = {}
         # Guards _sessions and _last_status. get_status() may run in an executor
         # thread (see _poll_loop) while configure()/remove_session() mutate from
         # the event loop, so a real lock is required, not just asyncio cooperation.
@@ -335,10 +339,32 @@ class GitService:
             self._sessions.pop(session_id, None)
         logger.info(f"GitService removed session: {session_id}")
 
+    def retain(self, session_id: str) -> int:
+        """Register one more WebSocket holder of *session_id*; returns the new count."""
+        with self._lock:
+            count = self._refs.get(session_id, 0) + 1
+            self._refs[session_id] = count
+            return count
+
+    def release(self, session_id: str) -> int:
+        """Drop one holder of *session_id*; the session is removed only at zero.
+
+        Returns the remaining holder count (0 means it was removed).
+        """
+        with self._lock:
+            count = self._refs.get(session_id, 0) - 1
+            if count > 0:
+                self._refs[session_id] = count
+                return count
+            self._refs.pop(session_id, None)
+        self.remove_session(session_id)
+        return 0
+
     def clear(self) -> None:
         """Clear all cached state to prevent stale data."""
         with self._lock:
             self._sessions.clear()
+            self._refs.clear()
             self._last_status.clear()
         logger.info("GitService cache cleared")
 
