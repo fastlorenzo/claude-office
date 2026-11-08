@@ -17,6 +17,7 @@
  *  - Exterior: plaza paving; the sky / city is the exterior HDRI skybox
  *    (Lighting), visible through every window at infinity.
  */
+import { enforceEnabled, type GateHandle } from "@/engine/world/gating";
 import {
   CreateTorus,
   Mesh,
@@ -186,20 +187,21 @@ export class Building {
     return this.entranceHall;
   }
 
-  /** Static parts that sightline gating can switch off (buildingVisibility). */
-  get gateParts(): Record<
-    "lobby" | "entrance" | "exterior",
-    { setEnabled(v: boolean): void }
-  > {
-    const of = (get: () => readonly AbstractMesh[]) => ({
-      setEnabled: (v: boolean) => {
-        for (const m of get()) if (!m.isDisposed()) m.setEnabled(v);
-      },
+  /**
+   * Static parts that sightline gating can switch off (buildingVisibility).
+   * Idempotent (called every gate tick): returns the meshes it switched.
+   */
+  get gateParts(): Record<"lobby" | "entrance" | "exterior", GateHandle> {
+    const of = (
+      part: string,
+      get: () => readonly AbstractMesh[],
+    ): GateHandle => ({
+      setEnabled: (v: boolean) => enforceEnabled(`building:${part}`, get(), v),
     });
     return {
-      lobby: of(() => this.lobby?.meshes ?? []),
-      entrance: of(() => this.entranceHall?.meshes ?? []),
-      exterior: of(() => this.skyline?.meshes ?? []),
+      lobby: of("lobby", () => this.lobby?.meshes ?? []),
+      entrance: of("entrance", () => this.entranceHall?.meshes ?? []),
+      exterior: of("exterior", () => this.skyline?.meshes ?? []),
     };
   }
 

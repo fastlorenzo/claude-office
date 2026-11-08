@@ -204,6 +204,26 @@ function parseParams() {
           Number(x[1]) >= 0,
       )
       .map(([tq, ms]) => ({ q: tq, ms: Number(ms) })),
+    /**
+     * Live single-setting changes (gfxStep=areaLights:false@60,maxDynamicLights:0@90:
+     * key:value@frame) applied to the current graphics settings.
+     */
+    gfxSteps: (q.get("gfxStep") ?? "")
+      .split(",")
+      .map((x) => x.split("@"))
+      .filter((x) => x.length === 2 && x[0].includes(":") && Number(x[1]) >= 0)
+      .map(([kv, f]) => {
+        const [k, v] = kv.split(":");
+        const val: unknown =
+          v === "true"
+            ? true
+            : v === "false"
+              ? false
+              : isNaN(Number(v))
+                ? v
+                : Number(v);
+        return { key: k, value: val, frame: Number(f) };
+      }),
     tierSteps: (q.get("tierStep") ?? "")
       .split(",")
       .map((x) => x.split("@"))
@@ -362,6 +382,27 @@ export default function WorldDebugPage() {
               while (steps.length && n >= steps[0].frame) {
                 const st = steps.shift();
                 if (st) world?.setQuality(st.quality);
+              }
+              if (steps.length) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+          }
+          if (p.gfxSteps.length) {
+            // Deterministic live graphics-menu changes (one setting each).
+            let n = 0;
+            let cur: GraphicsSettings = {
+              ...(p.graphics ?? applyPreset("high", defaultGraphicsSettings())),
+            };
+            const steps = [...p.gfxSteps];
+            const tick = () => {
+              if (cancelled) return;
+              n += 1;
+              while (steps.length && n >= steps[0].frame) {
+                const st = steps.shift();
+                if (!st) break;
+                cur = { ...cur, [st.key]: st.value, preset: "custom" };
+                console.warn(`[world-debug] gfx ${st.key}=${String(st.value)}`);
+                world?.setGraphics(cur);
               }
               if (steps.length) requestAnimationFrame(tick);
             };

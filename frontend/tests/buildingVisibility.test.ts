@@ -62,22 +62,53 @@ describe("computeBuildingVisibility", () => {
 });
 
 describe("BuildingGate", () => {
-  it("hides only after the grace period", () => {
+  /** A part over one fake node: idempotent, returns the nodes it switched. */
+  const part = (node: { on: boolean }, calls: boolean[] = []) => ({
+    setEnabled: (v: boolean) => {
+      calls.push(v);
+      if (node.on === v) return 0;
+      node.on = v;
+      return 1;
+    },
+  });
+  const off = {
+    lobby: false,
+    entrance: false,
+    factory: false,
+    exterior: false,
+  };
+
+  it("hides only after the grace period, enforcing every tick", () => {
+    const node = { on: true };
     const calls: boolean[] = [];
     const g = new BuildingGate();
-    const parts = { lobby: { setEnabled: (v: boolean) => calls.push(v) } };
-    const off = {
-      lobby: false,
-      entrance: false,
-      factory: false,
-      exterior: false,
-    };
+    const parts = { lobby: part(node, calls) };
     g.apply(0, { ...off, lobby: true }, parts);
     g.apply(100, off, parts);
-    expect(calls).toEqual([true]);
+    expect(node.on).toBe(true); // grace
     g.apply(2000, off, parts);
-    expect(calls).toEqual([true, false]);
+    expect(node.on).toBe(false);
     g.reset(parts);
-    expect(calls).toEqual([true, false, true]);
+    expect(node.on).toBe(true);
+    expect(calls).toEqual([true, true, false, true]);
+  });
+
+  it("re-enables a part another system switched off (no change-only cache)", () => {
+    const node = { on: true };
+    const g = new BuildingGate();
+    const parts = { factory: part(node) };
+    g.apply(0, { ...off, factory: true }, parts);
+    node.on = false; // a second system toggles the shared node
+    g.apply(200, { ...off, factory: true }, parts);
+    expect(node.on).toBe(true);
+    expect(g.drift.last).toBe(1);
+    expect(g.drift.total).toBe(1);
+  });
+
+  it("reset re-enables parts it never hid itself", () => {
+    const node = { on: false };
+    const g = new BuildingGate();
+    g.reset({ exterior: part(node) });
+    expect(node.on).toBe(true);
   });
 });

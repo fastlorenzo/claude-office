@@ -25,7 +25,7 @@
  * with a short grace period before hiding, so quick turns never pop.
  */
 
-import type { TransformNode } from "@/engine/babylon";
+import { GateDrift } from "@/engine/world/gating";
 import type { Zone3 } from "@/engine/layout/factoryLayout";
 import type { ActorHub } from "@/engine/characters/ActorHub";
 import type { RoomDetail, ScreenHub } from "@/engine/screens/ScreenHub";
@@ -192,8 +192,12 @@ export function halfFovFor(
 }
 
 export interface VisRoomHandle {
-  /** What gets disabled when the room is hidden (a node or a composite). */
-  readonly root: Pick<TransformNode, "setEnabled">;
+  /**
+   * What gets disabled when the room is hidden (a node or a composite).
+   * Called every tick with the decision: it must be idempotent and may
+   * return how many nodes it actually switched (drift accounting).
+   */
+  readonly root: { setEnabled(v: boolean): number | void };
   /** Session ids whose screens / actors follow this room (default: [id]). */
   readonly members?: readonly string[];
   /** Pod footprints of the members (per-pod impostor distance). */
@@ -218,6 +222,8 @@ export class VisibilityController {
   private last = -Infinity;
   private readonly applied = new Map<string, RoomDetail>();
   private readonly lastSeen = new Map<string, number>();
+  /** Room roots found off while already decided visible (see gating.ts). */
+  readonly drift = new GateDrift();
 
   constructor(private readonly deps: VisibilityDeps) {}
 
@@ -258,15 +264,22 @@ export class VisibilityController {
         this.lastSeen.delete(id);
       }
     const liveMembers = new Set<string>();
+    this.drift.begin();
     for (const [id, handle] of rooms) {
       let want = result.get(id) ?? "full";
       if (want !== "hidden") this.lastSeen.set(id, nowMs);
       else if (nowMs - (this.lastSeen.get(id) ?? -Infinity) < HIDE_GRACE_MS)
         want = this.applied.get(id) ?? "full";
-      if (this.applied.get(id) !== want) {
-        this.applied.set(id, want);
-        handle.root.setEnabled(want !== "hidden");
-      }
+      const prev = this.applied.get(id);
+      this.applied.set(id, want);
+      // Enforced every tick (idempotent handle), not only on change: a root
+      // switched off elsewhere, a pod that moved into this room while its
+      // old room was hidden, or a rebuilt root all converge here.
+      this.drift.note(
+        prev === undefined ? undefined : prev !== "hidden",
+        want !== "hidden",
+        handle.root.setEnabled(want !== "hidden"),
+      );
       for (const m of handle.members ?? [id]) {
         liveMembers.add(m);
         const b = handle.memberBounds?.get(m);

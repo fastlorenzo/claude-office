@@ -75,6 +75,10 @@ import {
 } from "@/engine/babylon";
 import { ASSET_MANIFEST, hdriPath } from "@/engine/assets/manifest";
 import { lin } from "@/engine/materials/Materials";
+import { refreezeStale } from "@/engine/materials/staleEffects";
+
+/** Safety-net period of the stale frozen-effect scan (ms). */
+const STALE_SCAN_MS = 2000;
 
 export type ShadowQuality = "off" | "low" | "medium" | "high" | "ultra";
 
@@ -201,6 +205,13 @@ export class Lighting {
   private readonly areaLights: { node: TransformNode; light: RectAreaLight }[] =
     [];
   private readonly beforeRender: Observer<Scene> | null;
+  /** Lights were added / removed / toggled since the last frame. */
+  private lightsChanged = false;
+  private lastStaleScanAt = 0;
+  private readonly lightObservers: (() => void)[] = [];
+  /** Frozen materials thawed because their effect no longer matched the lights. */
+  staleRefreezes = 0;
+  private staleWarned = false;
 
   constructor(private readonly scene: Scene) {
     // Daylight: low-ish warm sun from the south-east (enters the lobby facade
@@ -237,13 +248,76 @@ export class Lighting {
     this.fill.specular = Color3.Black();
 
     this.initFixtureLights();
+    this.watchLights();
     this.beforeRender = scene.onBeforeRenderObservable.add(() => {
       const now = performance.now();
+      // Frozen materials keep the effect of the light set they compiled
+      // with: after any light change, thaw the stale ones before drawing
+      // (else WebGL rejects their draws: the vanishing shell). A 2 s scan
+      // catches any change that bypassed the observers.
+      if (this.lightsChanged || now - this.lastStaleScanAt > STALE_SCAN_MS) {
+        const expected = this.lightsChanged;
+        this.lightsChanged = false;
+        this.lastStaleScanAt = now;
+        let example = "";
+        const n = refreezeStale(scene, false, (mesh, mat, why) => {
+          if (!example && !why.includes("ignored"))
+            example = `"${mesh.name}" (${why})`;
+        });
+        this.staleRefreezes += n;
+        // After an observed light change this is the expected fix-up. Found
+        // by the safety scan, some path changed lights unseen: say so once.
+        if (n && example && !expected && !this.staleWarned) {
+          this.staleWarned = true;
+          console.warn(
+            `[lighting] ${n} frozen material(s) kept a stale effect after an unobserved light change, e.g. ${example}: thawed`,
+          );
+        }
+      }
       if (this.staticDirty) this.maybeRenderStatic(now);
       else if (this.skippedStatic.length && now - this.skippedAt > 500)
         this.checkSkipped(now);
       if (this.probesDirty && now - this.probesAt > 1500) this.flushProbes();
     });
+  }
+
+  /**
+   * Any light added, removed or toggled (area lights on a tier step, the
+   * fixture pool, zone lights, the sun with shadows off) and a restored
+   * WebGL context (effects recompiled) flag the frozen-material check.
+   */
+  private watchLights(): void {
+    const scene = this.scene;
+    const flag = () => {
+      this.lightsChanged = true;
+    };
+    const watch = (l: Light) => {
+      const o = l.onEnabledStateChangedObservable.add(flag);
+      l.onDisposeObservable.addOnce(() =>
+        l.onEnabledStateChangedObservable.remove(o),
+      );
+    };
+    for (const l of scene.lights) watch(l);
+    const added = scene.onNewLightAddedObservable.add((l) => {
+      watch(l);
+      flag();
+    });
+    const removed = scene.onLightRemovedObservable.add(flag);
+    const engine = scene.getEngine();
+    // Context restored: effects were recompiled (frozen materials must
+    // re-check them) and the render-once targets came back empty (the sun's
+    // static map, the zone probes): render them again.
+    const restored = engine.onContextRestoredObservable.add(() => {
+      this.refreezeMaterials();
+      this.markStaticDirty();
+      this.staticRenderedAt = -Infinity;
+      this.refreshProbes();
+    });
+    this.lightObservers.push(
+      () => scene.onNewLightAddedObservable.remove(added),
+      () => scene.onLightRemovedObservable.remove(removed),
+      () => engine.onContextRestoredObservable.remove(restored),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -688,6 +762,8 @@ export class Lighting {
       l.includedOnlyMeshes = [...meshes];
       this.zoneLights.push(l);
     });
+    // Excluded / included lists changed the zone meshes' light sources.
+    this.lightsChanged = true;
   }
 
   // -------------------------------------------------------------------------
@@ -1085,6 +1161,7 @@ export class Lighting {
   dispose(): void {
     if (this.beforeRender)
       this.scene.onBeforeRenderObservable.remove(this.beforeRender);
+    for (const off of this.lightObservers.splice(0)) off();
     this.csm?.dispose();
     this.sunShadow?.dispose();
     this.csm = null;

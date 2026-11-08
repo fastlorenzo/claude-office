@@ -16,6 +16,7 @@
  */
 import { FACTORY_EYE_Y, HIDE_GRACE_MS, MAX_VIEW_M } from "./Visibility";
 import type { VisInput } from "./Visibility";
+import { GateDrift, type GateHandle } from "./gating";
 
 export interface BuildingVis {
   lobby: boolean;
@@ -113,36 +114,46 @@ export function computeBuildingVisibility(inp: BuildingGateInput): BuildingVis {
   };
 }
 
-interface PartHandle {
-  setEnabled(v: boolean): void;
-}
-
 /** Applies `computeBuildingVisibility` with the rooms' hide grace period. */
 export class BuildingGate {
+  /** Decision per part after the last tick (drives the grace period). */
   private readonly applied = new Map<BuildingPart, boolean>();
   private readonly lastSeen = new Map<BuildingPart, number>();
+  readonly drift = new GateDrift();
 
+  /**
+   * Enforce the decision on every call (handles are idempotent: they switch
+   * only the nodes whose state differs). A part switched off behind the
+   * gate's back comes back on at the next tick and counts as drift.
+   */
   apply(
     nowMs: number,
     want: BuildingVis,
-    parts: Partial<Record<BuildingPart, PartHandle>>,
+    parts: Partial<Record<BuildingPart, GateHandle>>,
   ): void {
+    this.drift.begin();
     for (const k of Object.keys(want) as BuildingPart[]) {
       const h = parts[k];
       if (!h) continue;
+      const prev = this.applied.get(k);
       let on = want[k];
       if (on) this.lastSeen.set(k, nowMs);
       else if (nowMs - (this.lastSeen.get(k) ?? -Infinity) < HIDE_GRACE_MS)
-        on = this.applied.get(k) ?? true;
-      if (this.applied.get(k) === on) continue;
+        on = prev ?? true;
       this.applied.set(k, on);
-      h.setEnabled(on);
+      this.drift.note(prev, on, h.setEnabled(on));
     }
   }
 
-  /** Re-enable everything (feed mode, LOD bypass). */
-  reset(parts: Partial<Record<BuildingPart, PartHandle>>): void {
-    for (const [k, on] of this.applied) if (!on) parts[k]?.setEnabled(true);
+  /** Everything on (feed mode, LOD bypass): every part, not only the ones it hid. */
+  reset(parts: Partial<Record<BuildingPart, GateHandle>>): void {
+    for (const k of Object.keys(parts) as BuildingPart[])
+      parts[k]?.setEnabled(true);
     this.applied.clear();
+  }
+
+  /** Decision currently applied to a part (debug / the drift counter). */
+  decision(k: BuildingPart): boolean {
+    return this.applied.get(k) ?? true;
   }
 }

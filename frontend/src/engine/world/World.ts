@@ -19,6 +19,7 @@ import {
   Scene,
   SceneInstrumentation,
   Vector3,
+  type AbstractMesh,
 } from "@/engine/babylon";
 import {
   type BrandingOptions,
@@ -85,6 +86,14 @@ import {
   setCharacterCast,
 } from "@/engine/characters/characterPacks";
 import { FLY } from "@/engine/player/FlyCamera";
+import { enforceEnabled, type GateHandle } from "@/engine/world/gating";
+import { flyZoneAt } from "@/engine/world/flyZone";
+import {
+  installEnableTracking,
+  vanishReport,
+  vanishSummary,
+  type VanishReport,
+} from "@/engine/world/vanishDiag";
 import { Player, PLAYER } from "@/engine/player/Player";
 import { FeedScheduler } from "@/engine/screens/FeedScheduler";
 import { LabelLayer } from "@/engine/screens/LabelLayer";
@@ -408,6 +417,11 @@ class World implements IWorld {
 
     if (this.debug.drawBreakdown) this.hookDrawBreakdown();
 
+    // "Why is the building not drawn?" — always available, costs nothing
+    // until called (setEnabled attribution is one WeakMap write per call).
+    installEnableTracking();
+    this.exposeDebug();
+
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       if (canvas.parentElement)
@@ -591,6 +605,7 @@ class World implements IWorld {
     if (this.disposed) return;
     this.disposed = true;
     this.engine.stopRenderLoop();
+    for (const d of this.disposers.splice(0)) d();
     this.resizeObserver?.disconnect();
     this.input.dispose();
     for (const r of this.rooms.values()) r.dispose();
@@ -917,7 +932,11 @@ class World implements IWorld {
     // y-aware zone at the player's eye (office, balcony or factory floor).
     const feet = focus;
     this.zonePt.set(feet.x, feet.y + (flying ? 0 : PLAYER.eyeHeight), feet.z);
-    const zone = zoneAt3(this.factoryLayout, this.layout, this.zonePt);
+    // Flying above the office ceilings is the factory volume / outside, not
+    // the room under the camera (flyZone.ts).
+    const zone = flying
+      ? flyZoneAt(this.factoryLayout, this.layout, this.zonePt)
+      : zoneAt3(this.factoryLayout, this.layout, this.zonePt);
     this.factory?.update(dt, eye, zone);
     const nearControl =
       zone.kind === "control" ||
@@ -1077,6 +1096,95 @@ class World implements IWorld {
     this.gfx.set(settings);
   }
 
+  /**
+   * Diagnostic: every main-shell / control-room / dock mesh with what it
+   * needs to draw (enabled, visible, active, material + lights ready, thin
+   * instances, bounds, last gate toggle). `__worldDebug.vanish()`.
+   */
+  vanish(): VanishReport {
+    return vanishReport(this.scene, (m) =>
+      this.offWhileGateOn(m) ? ["offWhileGateOn"] : [],
+    );
+  }
+
+  /**
+   * A main-shell mesh switched off although its gate wants it visible (or
+   * it has no gate at all): the "stays off forever" class of bug.
+   */
+  private offWhileGateOn(m: AbstractMesh): boolean {
+    if (m.isEnabled(true)) return false;
+    const part = /^(lobby|entrance|factory):/.exec(m.name)?.[1] as
+      BuildingPart | undefined;
+    if (part) return this.buildingGate.decision(part);
+    return /^(shell|outer|empty|projEntry|projBay|projEnd|projDivider|podZone):/.test(
+      m.name,
+    );
+  }
+
+  private exposeDebug(): void {
+    if (typeof window === "undefined") return;
+    const g = window as unknown as {
+      __worldDebug?: { vanish?: () => VanishReport; world?: unknown };
+    };
+    g.__worldDebug = {
+      ...(g.__worldDebug ?? {}),
+      vanish: () => {
+        const r = this.vanish();
+        logVanish(r);
+        return r;
+      },
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.code === "KeyV") {
+        e.preventDefault();
+        logVanish(this.vanish());
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    this.disposers.push(() => {
+      window.removeEventListener("keydown", onKey);
+      if (g.__worldDebug?.vanish) delete g.__worldDebug.vanish;
+    });
+  }
+
+  private readonly disposers: (() => void)[] = [];
+
+  /** __worldStats fields: vanish summary + the first faulty rows. */
+  private vanishStats(): Record<string, unknown> {
+    const r = this.vanish();
+    return {
+      vanish: vanishSummary(r),
+      /** Main-shell meshes off while their gate says visible (must be 0). */
+      shellOffWhileVisible: r.all.filter((x) =>
+        x.why.includes("offWhileGateOn"),
+      ).length,
+      /** Nodes the gates found switched against their decision (healed). */
+      gateDrift: {
+        building: this.buildingGate.drift.total,
+        rooms: this.visibility?.drift.total ?? 0,
+      },
+      /** Frozen materials thawed because their effect missed a light change. */
+      staleRefreezes: this.lighting.staleRefreezes,
+      vanishBad: r.rows
+        .filter((x) => x.why.some((w) => w !== "notActive" && w !== "off"))
+        .slice(0, 12)
+        .map((x) => `${x.name}: ${x.why.join(" ")} | ${x.lights.join(",")}`),
+      vanishLights: Object.fromEntries(
+        (["main", "control", "dock"] as const).map((grp) => [
+          grp,
+          [
+            ...new Set(
+              r.all
+                .filter((x) => x.group === grp && x.lights.length)
+                .map((x) => x.lights.join(",")),
+            ),
+          ],
+        ]),
+      ),
+      ...(r.errors.length ? { vanishErrors: r.errors } : {}),
+    };
+  }
+
   private branding: BrandingOptions | null = null;
   setBranding(opts: BrandingOptions): void {
     this.branding = opts;
@@ -1198,15 +1306,15 @@ class World implements IWorld {
   private gateBuilding(now: number, vi: VisInput, feedMode: boolean): void {
     if (!this.building || now - this.lastGateAt < 1000 / VISIBILITY_HZ) return;
     this.lastGateAt = now;
-    const parts: Partial<
-      Record<BuildingPart, { setEnabled(v: boolean): void }>
-    > = {
+    const parts: Partial<Record<BuildingPart, GateHandle>> = {
       ...this.building.gateParts,
       factory: {
-        setEnabled: (v) => {
-          for (const m of this.factory?.hall.staticMeshes ?? [])
-            m.setEnabled(v);
-        },
+        setEnabled: (v) =>
+          enforceEnabled(
+            "building:factory",
+            this.factory?.hall.staticMeshes ?? [],
+            v,
+          ),
       },
     };
     if (feedMode) {
@@ -1285,7 +1393,9 @@ class World implements IWorld {
       Math.hypot(dir.x, dir.z) > 0.2
         ? Math.atan2(dir.x, dir.z)
         : this.player.yaw;
-    if (!off) {
+    {
+      // Always gated (LOD off = everything enabled, as in feed mode): a
+      // bypass must not leave parts the gates had hidden switched off.
       // Reused input object; the room list only changes with the layout.
       if (this.visRoomsOf !== this.layout) {
         this.visRoomsOf = this.layout;
@@ -1298,8 +1408,8 @@ class World implements IWorld {
       vi.zone = zone;
       vi.hallLength = this.layout.hall.length;
       vi.hallHalfWidth = this.layout.hall.width / 2;
-      this.visibility.update(now, this.visHandles(), vi, feedMode);
-      this.gateBuilding(now, vi, feedMode);
+      this.visibility.update(now, this.visHandles(), vi, feedMode || off);
+      this.gateBuilding(now, vi, feedMode || off);
     }
     if (!off && this.factory && now - this.lastFactoryVisAt >= FACTORY_VIS_MS) {
       this.lastFactoryVisAt = now;
@@ -1369,6 +1479,8 @@ class World implements IWorld {
         texFail: failedTextureUrls(),
         /** Tiled-material maps: total / loading / still neutral. */
         tex2: this.materials.textureStats(),
+        /** Shell parts that cannot draw, per group (see vanishDiag.ts). */
+        ...this.vanishStats(),
         ...(this.debug.drawBreakdown
           ? {
               passes: this.passDraws,
@@ -1419,16 +1531,20 @@ class World implements IWorld {
     const out = new Map<string, VisRoomHandle>();
     this.visCache = out;
     for (const p of this.layout.projects) {
-      const pr = this.projectRooms.get(p.projectId);
-      const pods = p.pods
-        .map((d) => this.rooms.get(d.sessionId))
-        .filter((r): r is Room => !!r);
+      const sessionIds = p.pods.map((d) => d.sessionId);
       out.set(p.projectId, {
+        // Resolved at call time (a rebuilt room / pod is never missed) and
+        // idempotent (enforced every visibility tick).
         root: {
-          setEnabled: (v: boolean) => {
-            pr?.root.setEnabled(v);
-            for (const r of pods) r.root.setEnabled(v);
-          },
+          setEnabled: (v: boolean) =>
+            enforceEnabled(
+              "rooms",
+              [
+                this.projectRooms.get(p.projectId)?.root,
+                ...sessionIds.map((id) => this.rooms.get(id)?.root),
+              ],
+              v,
+            ),
         },
         members: p.pods.map((d) => d.sessionId),
         memberBounds: new Map(
@@ -1564,4 +1680,22 @@ export function createWorld(
     if (g.__claudeOfficeWorld === world) g.__claudeOfficeWorld = null;
   };
   return world;
+}
+
+/** Console dump of a vanish report (Ctrl+Shift+V / __worldDebug.vanish()). */
+function logVanish(r: VanishReport): void {
+  console.warn("[vanish]", JSON.stringify(vanishSummary(r)), r.camera);
+  if (r.errors.length) console.warn("[vanish] compile errors", r.errors);
+  if (typeof console.table === "function")
+    console.table(
+      r.rows.map((x) => ({
+        name: x.name,
+        why: x.why.join(" "),
+        last: x.last,
+        lights: x.lights.join(","),
+        mat: `${x.material}${x.frozen ? "*" : ""}`,
+        thin: x.thin,
+        bbox: x.bbox.join(","),
+      })),
+    );
 }
