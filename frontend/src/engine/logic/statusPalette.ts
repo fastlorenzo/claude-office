@@ -15,14 +15,16 @@ import {
 export const SESSION_COLORS: Readonly<Record<RoomStatus, string>> =
   STATUS_COLORS;
 
-/** CI colours: pass green, fail red, running blue, queued amber, cancelled slate. */
+/** Queued CI: neutral grey (amber is reserved for "needs you"). */
+export const NEUTRAL_GREY = "#94a3b8";
+export const QUEUED_GREY = NEUTRAL_GREY;
+
+/** CI colours: pass green, fail red, running blue, queued grey, cancelled slate. */
 export const CI_COLORS: Readonly<Record<CheckState, string>> = {
   success: CHECK_COLORS.done,
   failure: CHECK_COLORS.failure,
   running: CHECK_COLORS.working,
-  // Still amber like the 3D beacons; flipping it to grey needs the beacon
-  // tests (factoryAnim / factoryPools) updated together (deferred, WS4/WS9).
-  queued: CHECK_COLORS.needs_you,
+  queued: QUEUED_GREY,
   cancelled: CHECK_COLORS.ended,
   none: CHECK_COLORS.ended,
 };
@@ -39,3 +41,16 @@ export const CI_MARKS: Readonly<Record<CheckState, string>> = {
 
 /** Muted foreground used for "ended" / secondary text on signs. */
 export const MUTED_GREY = "#64748B";
+
+/** Gauge / health tone colours (rate limits, ops health). */
+export const TONE_COLORS = {
+  ok: "#38BDF8",
+  warn: SESSION_COLORS.needs_you,
+  bad: CHECK_COLORS.failure,
+} as const;
+
+/** Dim "no data" fill for inactive plan elements. */
+export const INACTIVE_SLATE = SESSION_COLORS.ended;
+
+/** Merged PR purple. */
+export const MERGED_COLOR = CHECK_COLORS.merged;

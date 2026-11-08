@@ -65,6 +65,7 @@ import {
   type ResolvedPiece,
   type Vec3,
 } from "./workpiecePlacement";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
 export type { PieceInstance, PieceSize, Vec3 } from "./workpiecePlacement";
 
@@ -325,7 +326,7 @@ void main() {
 function drawRobot(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.save();
   ctx.translate(x, y);
-  ctx.fillStyle = "#3b82f6";
+  ctx.fillStyle = SESSION_COLORS.working;
   roundRect(ctx, 0, 8, 34, 26, 6);
   ctx.fill();
   ctx.fillStyle = "#0b1220";
@@ -334,7 +335,7 @@ function drawRobot(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.fillStyle = "#7dd3fc";
   ctx.fillRect(10, 18, 5, 5);
   ctx.fillRect(20, 18, 5, 5);
-  ctx.fillStyle = "#3b82f6";
+  ctx.fillStyle = SESSION_COLORS.working;
   ctx.fillRect(15.5, 1, 3, 8);
   ctx.beginPath();
   ctx.arc(17, 2, 3, 0, Math.PI * 2);

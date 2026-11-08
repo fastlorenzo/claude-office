@@ -11,7 +11,7 @@
  * the room goes away. Mesh metadata carries `interact: { kind: "screen", ... }`.
  */
 
-import { MUTED_GREY } from "@/engine/logic/statusPalette";
+import { fmtTokens, fmtUsd } from "../logic/opsModel";
 import {
   Color3,
   CreateBox,
@@ -37,6 +37,7 @@ import {
   wrapText,
   type Ctx2D,
 } from "./canvasKit";
+import { MUTED_GREY, NEUTRAL_GREY } from "../logic/statusPalette";
 
 export interface DoorSignOptions {
   position: Vec3;
@@ -56,6 +57,9 @@ export interface DoorSignData {
   todoDone: number;
   todoTotal: number;
   gitBranch?: string | null;
+  /** Session cost (USD) and context tokens from the status-line telemetry. */
+  costUsd?: number | null;
+  tokens?: number | null;
 }
 
 const STATUS_TEXT: Record<RoomStatus, string> = {
@@ -73,6 +77,8 @@ const EMPTY: DoorSignData = {
   todoDone: 0,
   todoTotal: 0,
   gitBranch: null,
+  costUsd: null,
+  tokens: null,
 };
 
 function dataKey(d: DoorSignData): string {
@@ -84,6 +90,8 @@ function dataKey(d: DoorSignData): string {
     d.todoDone,
     d.todoTotal,
     d.gitBranch ?? "",
+    d.costUsd ?? "",
+    d.tokens ?? "",
   ].join("\u0001");
 }
 
@@ -175,15 +183,7 @@ export class DoorSign {
     });
   }
 
-  update(data: {
-    label: string;
-    status: RoomStatus;
-    objective: string | null;
-    focus: string | null;
-    todoDone: number;
-    todoTotal: number;
-    gitBranch?: string | null;
-  }): void {
+  update(data: DoorSignData): void {
     if (this.disposed) return;
     const key = dataKey(data);
     if (key === this.key) return;
@@ -337,7 +337,7 @@ export function drawDoorSign(
   ctx.fillStyle = accent;
   ctx.fillText("▸", pad, focusY);
   const arrowW = ctx.measureText("▸ ").width;
-  ctx.fillStyle = "#94A3B8";
+  ctx.fillStyle = NEUTRAL_GREY;
   ctx.fillText(
     fitText(ctx, d.focus?.trim() || "Idle", textW - arrowW),
     pad + arrowW,
@@ -355,10 +355,29 @@ export function drawDoorSign(
   const textY = barY - footFont * 0.85;
   ctx.fillStyle = MUTED_GREY;
   ctx.fillText(counts, pad, textY);
+  // Cost + tokens, right-aligned on the same line.
+  const spend = [
+    d.costUsd != null ? fmtUsd(d.costUsd) : null,
+    d.tokens != null ? `${fmtTokens(d.tokens)} tok` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  let spendW = 0;
+  if (spend) {
+    spendW = ctx.measureText(spend).width;
+    ctx.fillStyle = withAlpha(accent, 0.9);
+    ctx.textAlign = "right";
+    ctx.fillText(spend, W - pad, textY);
+    ctx.textAlign = "left";
+  }
   if (branch) {
-    ctx.fillStyle = "#94A3B8";
+    ctx.fillStyle = NEUTRAL_GREY;
     ctx.fillText(
-      fitText(ctx, `⎇ ${branch}`, textW - countsW - pad * 0.6),
+      fitText(
+        ctx,
+        `⎇ ${branch}`,
+        textW - countsW - spendW - pad * (spendW ? 1.2 : 0.6),
+      ),
       pad + countsW + pad * 0.6,
       textY,
     );

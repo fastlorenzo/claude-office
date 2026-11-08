@@ -12,6 +12,7 @@
  * No React, no Babylon.
  */
 
+import { MUTED_GREY } from "./statusPalette";
 import {
   STATUS_COLORS,
   type CampusSession,
@@ -34,18 +35,45 @@ import {
 
 const DASH = "—";
 
-function trimZero(s: string): string {
-  return s.replace(/\.0$/, "");
+let numLocale = "en-US";
+const mkNum = (tag: string) =>
+  new Intl.NumberFormat(tag, { maximumFractionDigits: 1 });
+const mkUsd = (tag: string) =>
+  new Intl.NumberFormat(tag, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+  });
+const mkClock = (tag: string) =>
+  new Intl.DateTimeFormat(tag, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+let nf1 = mkNum(numLocale);
+let usd = mkUsd(numLocale);
+let clock = mkClock(numLocale);
+
+/** @public BCP-47 tag for every number/time format below (UI language). */
+export function setNumberLocale(tag: string): void {
+  if (tag === numLocale) return;
+  numLocale = tag;
+  nf1 = mkNum(tag);
+  usd = mkUsd(tag);
+  clock = mkClock(tag);
 }
+
+/** One-decimal number in the UI locale ("9.5"; "1" for 1.0). */
+const dec1 = (v: number): string => nf1.format(v);
 
 /** Token counts: 950 → "950", 9_500 → "9.5k", 191_000 → "191k", 1_000_000 → "1M". */
 export function fmtTokens(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return DASH;
   const v = Math.max(0, n);
   if (v < 1000) return String(Math.round(v));
-  if (v < 10_000) return `${trimZero((v / 1000).toFixed(1))}k`;
+  if (v < 10_000) return `${dec1(v / 1000)}k`;
   if (v < 999_500) return `${Math.round(v / 1000)}k`;
-  if (v < 10_000_000) return `${trimZero((v / 1e6).toFixed(1))}M`;
+  if (v < 10_000_000) return `${dec1(v / 1e6)}M`;
   return `${Math.round(v / 1e6)}M`;
 }
 
@@ -55,9 +83,9 @@ export function fmtCount(n: number | null | undefined): string {
   const v = Math.abs(n);
   const sign = n < 0 ? "-" : "";
   if (v < 1000) return `${sign}${Math.round(v)}`;
-  if (v < 100_000) return `${sign}${trimZero((v / 1000).toFixed(1))}k`;
+  if (v < 100_000) return `${sign}${dec1(v / 1000)}k`;
   if (v < 1e6) return `${sign}${Math.round(v / 1000)}k`;
-  return `${sign}${trimZero((v / 1e6).toFixed(1))}M`;
+  return `${sign}${dec1(v / 1e6)}M`;
 }
 
 /** Durations: 45s · 12m · 3h24m · 3d2h (status-line style, no spaces). */
@@ -76,8 +104,9 @@ export function fmtSpan(ms: number | null | undefined): string {
 /** Currency: "$0.42", "$100.20", "$1.2k". */
 export function fmtUsd(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return DASH;
-  if (Math.abs(n) >= 10_000) return `$${trimZero((n / 1000).toFixed(1))}k`;
-  return `$${n.toFixed(2)}`;
+  if (Math.abs(n) >= 10_000)
+    return `${usd.formatToParts(0).find((x) => x.type === "currency")?.value ?? "$"}${dec1(n / 1000)}k`;
+  return usd.format(n);
 }
 
 export function fmtPct(n: number | null | undefined): string {
@@ -90,8 +119,7 @@ export function fmtClock(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
-  const d = new Date(t);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return clock.format(new Date(t));
 }
 
 function ms(iso: string | null | undefined): number | null {
@@ -372,7 +400,8 @@ export function projectWindow(
   let projected = num(w.projectedPct);
   if (projected == null && resetsInMs != null) {
     const elapsed = windowMs - resetsInMs;
-    if (elapsed >= windowMs * MIN_PACE_ELAPSED) projected = (used * windowMs) / elapsed;
+    if (elapsed >= windowMs * MIN_PACE_ELAPSED)
+      projected = (used * windowMs) / elapsed;
   }
   return {
     usedPct: used,
@@ -710,12 +739,6 @@ export function limitTone(w: OpsWindow | null): "ok" | "warn" | "bad" {
   return p >= 80 ? "warn" : "ok";
 }
 
-export const TONE_COLORS = {
-  ok: "#38BDF8",
-  warn: "#F59E0B",
-  bad: "#EF4444",
-} as const;
-
 /** Coarse tool-mix palette (by phase kind). */
 export const KIND_COLORS: Partial<Record<SessionPhaseKind, string>> = {
   coding: "#60A5FA",
@@ -727,17 +750,17 @@ export const KIND_COLORS: Partial<Record<SessionPhaseKind, string>> = {
   researching: "#22D3EE",
   delegating: "#FBBF24",
   planning: "#C084FC",
-  compacting: "#64748B",
+  compacting: MUTED_GREY,
 };
 
 export function kindColor(k: SessionPhaseKind): string {
-  return KIND_COLORS[k] ?? "#64748B";
+  return KIND_COLORS[k] ?? MUTED_GREY;
 }
 
 const PHASE_TONE: Partial<Record<SessionPhaseKind, string>> = {
   needs_approval: STATUS_COLORS.needs_you,
   waiting_user: STATUS_COLORS.done,
-  idle: "#64748B",
+  idle: MUTED_GREY,
   ended: STATUS_COLORS.ended,
 };
 

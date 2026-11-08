@@ -304,9 +304,9 @@ describe("beacon patterns by state / time", () => {
       beaconLevel("queued", 1.8),
       9,
     );
-    // amber: red > green > blue
+    // neutral grey: no amber cast (red does not dominate blue)
     const c = rgba("queued", 0.4);
-    expect(c[0]).toBeGreaterThan(c[2]);
+    expect(c[0]).toBeLessThanOrEqual(c[2]);
   });
 
   it("running pulses blue, faster than queued", () => {

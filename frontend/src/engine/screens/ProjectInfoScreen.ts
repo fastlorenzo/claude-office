@@ -37,6 +37,7 @@ import {
   withAlpha,
   type Ctx2D,
 } from "./canvasKit";
+import { NEUTRAL_GREY, SESSION_COLORS } from "../logic/statusPalette";
 
 export class ProjectInfoScreen {
   readonly pivot: TransformNode;
@@ -276,7 +277,12 @@ function drawRow(
   ctx.fill();
   if (r.ctxPct != null) {
     const pct = r.ctxPct / 100;
-    const c = pct >= 0.8 ? "#F59E0B" : pct >= 0.6 ? "#EAB308" : "#38BDF8";
+    const c =
+      pct >= 0.8
+        ? SESSION_COLORS.needs_you
+        : pct >= 0.6
+          ? "#EAB308"
+          : "#38BDF8";
     roundRect(
       ctx,
       ix,
@@ -290,13 +296,13 @@ function drawRow(
   }
   const ctxText =
     r.ctxPct != null ? `${Math.round(r.ctxPct)}% · ${r.tokens}` : DASH;
-  ctx.fillStyle = "#94A3B8";
+  ctx.fillStyle = NEUTRAL_GREY;
   ctx.fillText(ctxText, ix + barW + w * 0.015, l3);
   ctx.textAlign = "right";
   ctx.fillStyle = r.cost === DASH ? "#5B6472" : "#E2E8F0";
   const costW = ctx.measureText(r.cost).width;
   ctx.fillText(r.cost, right, l3);
-  ctx.fillStyle = "#94A3B8";
+  ctx.fillStyle = NEUTRAL_GREY;
   ctx.fillText(fitText(ctx, r.model, w * 0.3), right - costW - w * 0.03, l3);
   ctx.textAlign = "left";
 }

@@ -8,6 +8,7 @@ import type {
   PipelineRun,
   ReleaseInfo,
 } from "@/engine/contracts";
+import { CI_COLORS, SESSION_COLORS } from "@/engine/logic/statusPalette";
 import {
   layoutBrand,
   type BrandLayout,
@@ -113,14 +114,9 @@ export const BOARD_NAME_CHARS = 16;
 export const BOARD_REF_CHARS = 12;
 
 export const STATE_COLORS: Record<string, string> = {
-  success: "#3ddc97",
-  running: "#ffb224",
-  failure: "#ff5c57",
-  queued: "#7aa7ff",
-  cancelled: "#8b93a1",
-  none: "#8b93a1",
-  shipped: "#3ddc97",
-  prerelease: "#ffb224",
+  ...CI_COLORS,
+  shipped: CI_COLORS.success,
+  prerelease: SESSION_COLORS.needs_you,
 };
 
 const DEPLOY_LABEL: Record<CheckState, string> = {

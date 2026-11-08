@@ -13,6 +13,7 @@
  */
 
 import { STATUS_COLORS, type CheckState, type RoomStatus } from "../contracts";
+import { CI_COLORS, NEUTRAL_GREY, TONE_COLORS } from "../logic/statusPalette";
 import type { MapGroup, ProjectMapLayout } from "../logic/projectMap";
 import {
   alertText,
@@ -25,7 +26,6 @@ import {
   kindColor,
   limitTone,
   phaseColor,
-  TONE_COLORS,
   type OpsModel,
   type OpsRow,
   type OpsWindow,
@@ -89,8 +89,8 @@ export const OPS_THEME = {
   muted: "#6B7A90",
   accent: "#38BDF8",
   amber: STATUS_COLORS.needs_you,
-  red: "#EF4444",
-  green: "#22C55E",
+  red: CI_COLORS.failure,
+  green: CI_COLORS.success,
   add: "#4ADE80",
   del: "#F87171",
   track: "rgba(148,163,184,0.16)",
@@ -477,7 +477,7 @@ function drawRow(
   for (const ref of r.refs) {
     const cw = measure(ctx, ref, 4.4 * u, 600, true) + 4.4 * u * 0.9;
     if (rx + cw > p.x + p.w - 2 * u) break;
-    chip(ctx, ref, rx, l1, 4.4 * u, "#94A3B8");
+    chip(ctx, ref, rx, l1, 4.4 * u, NEUTRAL_GREY);
     rx += cw + 1.2 * u;
   }
   if (!compact)
@@ -1193,7 +1193,7 @@ export function drawSessionCard(
   });
   let rx = pad + pw + 2 * u;
   for (const ref of r.refs) {
-    const cw = chip(ctx, ref, rx, hy, 4.6 * u, "#94A3B8");
+    const cw = chip(ctx, ref, rx, hy, 4.6 * u, NEUTRAL_GREY);
     rx += cw + 1.2 * u;
   }
   text(ctx, `${extra.index + 1}/${extra.total}`, W - pad, hy, {
@@ -1347,15 +1347,6 @@ export function drawSessionCard(
 // ============================================================================
 // PROJECT MAP (transit schematic; the moving subagent dots are 3D / SVG)
 // ============================================================================
-
-const CI_COLORS: Record<CheckState, string> = {
-  success: "#22C55E",
-  failure: "#EF4444",
-  running: "#F59E0B",
-  queued: "#94A3B8",
-  cancelled: "#64748B",
-  none: "#64748B",
-};
 
 const ciLabel = (s: CheckState): string =>
   s === "queued"

@@ -14,6 +14,7 @@ import {
   type BoardLine,
   type ShelfSlot,
 } from "@/engine/world/factory/dockModel";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
 type Ctx2D = CanvasRenderingContext2D;
 
@@ -390,7 +391,7 @@ export function drawLabelAtlas(
     const { x, y } = labelCell(i);
     ctx.fillStyle = "#12171d";
     ctx.fillRect(x, y, LABEL_CELL_W, LABEL_CELL_H);
-    ctx.fillStyle = s.prerelease ? "#ffb224" : accent;
+    ctx.fillStyle = s.prerelease ? SESSION_COLORS.needs_you : accent;
     ctx.fillRect(x, y + LABEL_CELL_H - 8, LABEL_CELL_W, 8);
     ctx.font = `700 40px ${mono}`;
     ctx.textAlign = "center";

@@ -69,6 +69,7 @@ import {
   windowUnit,
   type Opening,
 } from "@/engine/world/architecture";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
 export interface BuildingContext {
   scene: Scene;
@@ -1268,11 +1269,15 @@ function controlLedContent(c: {
     if (counts.length) counts.push(sep);
     counts.push({ text: `${n} ${word}`, color });
   };
-  add(c.working, "WORKING", "#5B9DFF");
-  add(c.needs, "NEEDS YOU", "#F5A524");
+  add(c.working, "WORKING", SESSION_COLORS.working);
+  add(c.needs, "NEEDS YOU", SESSION_COLORS.needs_you);
   add(c.idle, "IDLE", "#34D399");
   if (!counts.length) counts.push({ text: "NO SESSIONS", color: "#7C7A76" });
-  const dot = c.needs ? "#F5A524" : c.working ? "#5B9DFF" : "#34D399";
+  const dot = c.needs
+    ? SESSION_COLORS.needs_you
+    : c.working
+      ? SESSION_COLORS.working
+      : "#34D399";
   return {
     dot,
     line: [

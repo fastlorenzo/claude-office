@@ -24,6 +24,11 @@ import {
   type Station,
   type Workpiece,
 } from "@/engine/logic/factoryModel";
+import {
+  CI_COLORS,
+  NEUTRAL_GREY,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 
 // ---------------------------------------------------------------------------
 // Formatting
@@ -63,10 +68,10 @@ export function agoParts(
 export type Tone = "good" | "bad" | "warn" | "muted";
 
 export const TONE_COLOR: Record<Tone, string> = {
-  good: "#22c55e",
-  bad: "#ef4444",
-  warn: "#f59e0b",
-  muted: "#94a3b8",
+  good: SESSION_COLORS.done,
+  bad: CI_COLORS.failure,
+  warn: SESSION_COLORS.needs_you,
+  muted: NEUTRAL_GREY,
 };
 
 export function reviewTone(d: PullRequestInfo["reviewDecision"]): Tone {

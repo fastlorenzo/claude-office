@@ -11,7 +11,7 @@
  *            failure (stop pose); only visible / in-LOD arms are written,
  *            `setArmPose` still overrides one station
  *   beacon   lens, instance colour = `stateColor` (CHECK_COLORS) in HDR so
- *            the pipeline bloom picks it up; queued blinks amber, running
+ *            the pipeline bloom picks it up; queued blinks grey, running
  *            pulses blue, failure strobes red (+ hood flash), success steady
  *   glyph    per-CheckKind "kind drum" on both faces of the sensor box
  *            (one atlas, face chosen by the instance rotation)

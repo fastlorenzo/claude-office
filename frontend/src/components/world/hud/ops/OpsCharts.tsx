@@ -4,10 +4,10 @@ import type { ReactNode } from "react";
 import {
   kindColor,
   limitTone,
-  TONE_COLORS,
   type OpsToolSlice,
   type OpsWindow,
 } from "@/engine/logic/opsModel";
+import { CI_COLORS, TONE_COLORS } from "@/engine/logic/statusPalette";
 
 /** Line + soft-fill sparkline (oldest left), scales to its box. */
 export function Sparkline({
@@ -117,7 +117,7 @@ export function Gauge({
   return (
     <div className="flex min-w-0 flex-col items-center">
       <svg
-        viewBox="0 0 100 92"
+        viewBox="0 0 100 80"
         className="w-full max-w-[200px]"
         role="img"
         aria-label={`${label} ${w ? Math.round(w.usedPct) : "—"}%`}
@@ -154,18 +154,10 @@ export function Gauge({
             y1={pt(proj, r - 8)[1]}
             x2={pt(proj, r + 8)[0]}
             y2={pt(proj, r + 8)[1]}
-            stroke={over ? "#EF4444" : "#EAF0F8"}
+            stroke={over ? CI_COLORS.failure : "#EAF0F8"}
             strokeWidth={1.6}
           />
         )}
-        <text
-          x={50}
-          y={34}
-          textAnchor="middle"
-          className="fill-slate-500 text-[7px] font-semibold uppercase tracking-widest"
-        >
-          {label}
-        </text>
         <text
           x={50}
           y={58}
@@ -174,23 +166,19 @@ export function Gauge({
         >
           {w ? `${Math.round(w.usedPct)}%` : "—"}
         </text>
-        <text
-          x={50}
-          y={74}
-          textAnchor="middle"
-          className={`text-[7.5px] font-semibold ${over ? "fill-red-400" : "fill-slate-300"}`}
-        >
-          {paceLabel}
-        </text>
-        <text
-          x={50}
-          y={88}
-          textAnchor="middle"
-          className="fill-slate-500 font-mono text-[6.5px]"
-        >
-          {resetLabel}
-        </text>
       </svg>
+      {/* Captions are HTML (>= 12 px); SVG text scales with the gauge. */}
+      <div className="-mt-1 text-center text-xs font-semibold uppercase tracking-widest text-slate-400">
+        {label}
+      </div>
+      <div
+        className={`text-center text-xs font-semibold ${over ? "text-red-400" : "text-slate-300"}`}
+      >
+        {paceLabel}
+      </div>
+      <div className="text-center font-mono text-xs text-slate-500">
+        {resetLabel}
+      </div>
     </div>
   );
 }

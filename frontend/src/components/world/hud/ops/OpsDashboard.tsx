@@ -15,6 +15,7 @@ import {
   type CampusSession,
   type CampusStats,
 } from "@/engine/contracts";
+import { SESSION_COLORS, TONE_COLORS } from "@/engine/logic/statusPalette";
 import {
   buildOpsModel,
   contextTone,
@@ -26,7 +27,6 @@ import {
   fmtUsd,
   kindColor,
   phaseColor,
-  TONE_COLORS,
   type OpsAlert,
   type OpsModel,
   type OpsRow,
@@ -518,7 +518,7 @@ function UsageCard({ m, t }: { m: OpsModel; t: T }): ReactNode {
           }
           color={
             u.burnUsdPerHour != null && u.burnUsdPerHour > 30
-              ? "#F59E0B"
+              ? SESSION_COLORS.needs_you
               : undefined
           }
         />
@@ -645,7 +645,7 @@ function ActivityCard({ m, t }: { m: OpsModel; t: T }): ReactNode {
         <Kpi
           label={t("ops.errors")}
           value={a.errors != null ? String(a.errors) : "—"}
-          color={(a.errors ?? 0) > 0 ? "#F59E0B" : undefined}
+          color={(a.errors ?? 0) > 0 ? SESSION_COLORS.needs_you : undefined}
         />
         <Kpi
           label={t("ops.toolCalls")}
@@ -664,8 +664,8 @@ function ActivityCard({ m, t }: { m: OpsModel; t: T }): ReactNode {
 function Ticker({ m, t }: { m: OpsModel; t: T }): ReactNode {
   return (
     <footer className="flex shrink-0 items-center gap-3 overflow-hidden border-t border-white/[0.06] bg-[#05080D]/90 px-4 py-2 text-[12px]">
-      <span className="shrink-0 rounded bg-red-500 px-1.5 py-px font-mono text-xs font-bold text-white">
-        LIVE
+      <span className="shrink-0 rounded bg-red-500 px-1.5 py-px font-mono text-xs font-bold uppercase text-white">
+        {t("ops.c.liveTag")}
       </span>
       <div className="flex min-w-0 flex-1 gap-5 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
         {m.ticker.length === 0 && (

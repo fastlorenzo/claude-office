@@ -7,6 +7,7 @@ import { deployView, type DeployView } from "./factoryPanelModel";
 import { PipelineList } from "./LinePanel";
 import { AgoText, Chip, Empty, Section, StateChip } from "./parts";
 import { useFactoryData } from "./useFactoryData";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
 export const DeployPanelView = memo(function DeployPanelView({
   v,
@@ -29,7 +30,9 @@ export const DeployPanelView = memo(function DeployPanelView({
             {v.name}
           </h3>
           {v.deploying ? (
-            <Chip color="#3b82f6">{t("factory.deploy.deploying")}</Chip>
+            <Chip color={SESSION_COLORS.working}>
+              {t("factory.deploy.deploying")}
+            </Chip>
           ) : (
             <StateChip state={v.state} />
           )}
@@ -68,7 +71,9 @@ export const DeployPanelView = memo(function DeployPanelView({
               >
                 <span className="font-mono font-semibold">{r.tag}</span>
                 {r.prerelease && (
-                  <Chip color="#f59e0b">{t("factory.deploy.prerelease")}</Chip>
+                  <Chip color={SESSION_COLORS.needs_you}>
+                    {t("factory.deploy.prerelease")}
+                  </Chip>
                 )}
                 <span className="min-w-0 flex-1 truncate text-slate-400">
                   {r.name}

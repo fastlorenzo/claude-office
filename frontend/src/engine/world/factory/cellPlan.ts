@@ -15,7 +15,12 @@
  * lane (local +X = toward the outer wall, local Z flips with the side's yaw), so
  * east and west cells are exact 180 deg rotations of each other.
  */
-import { CHECK_COLORS } from "@/engine/contracts";
+import {
+  CI_COLORS,
+  INACTIVE_SLATE,
+  MERGED_COLOR,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 import type { CellLayout, LaneLayout } from "@/engine/layout/factoryLayout";
 import type { LineModel } from "@/engine/logic/factoryModel";
 import { stateColor } from "@/engine/logic/factoryModel";
@@ -87,11 +92,11 @@ export interface Item {
 export type GateState = "idle" | "review" | "pending" | "open" | "blocked";
 
 export const GATE_HEX: Record<GateState, string> = {
-  idle: "#475569",
-  review: CHECK_COLORS.needs_you,
-  pending: CHECK_COLORS.working,
-  open: CHECK_COLORS.done,
-  blocked: CHECK_COLORS.failure,
+  idle: INACTIVE_SLATE,
+  review: SESSION_COLORS.needs_you,
+  pending: SESSION_COLORS.working,
+  open: SESSION_COLORS.done,
+  blocked: CI_COLORS.failure,
 };
 
 export function gateColor(state: GateState): string {
@@ -150,14 +155,14 @@ const SEP = " · ";
  * Header board content: `LineModel.header` (project · main health · PRs ·
  * failing · stale) followed by `LANES busy/max` and `n queued` for CI lines.
  */
-export function boardLine(model: LineModel): BoardLine {
+export function boardLine(model: LineModel, demo = false): BoardLine {
   const segments: BoardSegment[] = [];
   const parts = model.header.split(SEP);
   parts.forEach((p, i) => {
     let color = "#E6E8EB";
     if (i === 0) color = "#FFFFFF";
-    else if (/failing/.test(p)) color = CHECK_COLORS.failure;
-    else if (p === "STALE") color = CHECK_COLORS.needs_you;
+    else if (/failing/.test(p)) color = CI_COLORS.failure;
+    else if (p === "STALE") color = SESSION_COLORS.needs_you;
     else if (/^LOCAL$|no CI/.test(p)) color = "#8E959C";
     segments.push({ text: i === 0 ? p : SEP + p, color });
   });
@@ -170,13 +175,15 @@ export function boardLine(model: LineModel): BoardLine {
     if (model.queued > 0)
       segments.push({
         text: `${SEP}${model.queued} queued`,
-        color: CHECK_COLORS.needs_you,
+        color: CI_COLORS.queued,
       });
   }
+  // Demo data (not the user's repositories): chip at the end of the line.
+  if (demo) segments.push({ text: `${SEP}DEMO`, color: MERGED_COLOR });
   return {
     text: segments.map((s) => s.text).join(""),
     segments,
-    dot: model.mode === "ci" ? stateColor(model.trunk.health) : "#475569",
+    dot: model.mode === "ci" ? stateColor(model.trunk.health) : INACTIVE_SLATE,
   };
 }
 
@@ -642,7 +649,7 @@ function laneFurniture(
       },
     );
     const lit = model?.laneBusy[lane.index] ?? false;
-    const dc = lit ? hex("#5EEAD4", 1.6) : hex("#64748B", 0.8);
+    const dc = lit ? hex("#5EEAD4", 1.6) : hex(INACTIVE_SLATE, 0.8);
     const segs = DIGIT_SEGMENTS[lane.index + 1] ?? "g";
     const H = 0.13;
     const W = 0.062;
@@ -774,7 +781,7 @@ function scrapBin(b: Builder, f: Frame, count: number): void {
     "scrapBin",
     [-0.525, 0.55, 0],
     [0.012, 0.08, 0.3],
-    count > 0 ? hex(CHECK_COLORS.failure, 1.4) : hex("#475569", 0.5),
+    count > 0 ? hex(CI_COLORS.failure, 1.4) : hex(INACTIVE_SLATE, 0.5),
   );
 }
 
@@ -799,10 +806,10 @@ function bench(
   b.add(f, "box", "bench", [0, 0.25, 0], [0.7, 0.03, w - 0.1], hex(C.dim));
   b.add(f, "box", "bench", [0.4, 1.45, 0], [0.04, 1.0, w], hex(C.graphite));
   const lamp = bm?.failing
-    ? hex(CHECK_COLORS.failure, 1.5)
+    ? hex(CI_COLORS.failure, 1.5)
     : bm?.active
-      ? hex(CHECK_COLORS.working, 1.4)
-      : hex("#475569", 0.5);
+      ? hex(SESSION_COLORS.working, 1.4)
+      : hex(INACTIVE_SLATE, 0.5);
   b.add(
     f,
     "glow",

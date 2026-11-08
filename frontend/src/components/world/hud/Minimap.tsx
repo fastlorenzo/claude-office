@@ -15,6 +15,12 @@ import { campusStatus, labelMap } from "../sessionMeta";
 import { getWorld } from "../worldRef";
 import { CiLegend } from "./factory/parts";
 import { clip, sessionHeadline } from "./sessionGlance";
+import {
+  CI_COLORS,
+  MUTED_GREY,
+  NEUTRAL_GREY,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 
 type Level = "office" | "factory";
 
@@ -49,6 +55,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
   const layout = useWorldUiStore((s) => s.layout);
   const pose = useWorldUiStore((s) => s.pose);
   const campus = useCampusStore((s) => s.sessions);
+  const projects = useCampusStore((s) => s.projects);
   const close = useWorldUiStore((s) => s.close);
 
   const [pick, setPick] = useState<Level | null>(null);
@@ -60,6 +67,17 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
   const auto: Level =
     pose && FACTORY_ZONES.has(pose.zone.kind) ? "factory" : "office";
   const level: Level = pick ?? auto;
+
+  // Rolled-up CI state per project (main health, else the newest CI run).
+  const ciByProject = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of projects ?? []) {
+      const st =
+        p.mainHealth ?? p.pipelines?.find((x) => x.kind === "ci")?.state;
+      if (st && st !== "none") m.set(p.id, CI_COLORS[st]);
+    }
+    return m;
+  }, [projects]);
 
   const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
   const objectives = useMemo(
@@ -170,6 +188,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
             const name =
               layout.projects.find((p) => p.projectId === c.projectId)?.name ??
               c.projectId;
+            const tint = ciByProject.get(c.projectId);
             return (
               <g
                 key={c.projectId}
@@ -181,8 +200,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
                 <title>{name}</title>
                 <rect
                   {...rect(c.rect)}
-                  fill="#3b82f61a"
-                  stroke="#60a5fa"
+                  fill={tint ? `${tint}33` : "#3b82f61a"}
+                  stroke={tint ?? "#60a5fa"}
                   strokeWidth={0.14}
                   rx={0.3}
                 />
@@ -193,7 +212,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
                     x2={ln.gateX}
                     y1={-ln.z}
                     y2={-ln.z}
-                    stroke="#94a3b8"
+                    stroke={NEUTRAL_GREY}
                     strokeWidth={0.2}
                     strokeLinecap="round"
                   />
@@ -203,7 +222,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
                   x2={c.trunk.x}
                   y1={-c.trunk.z0}
                   y2={-c.trunk.z1}
-                  stroke="#64748b"
+                  stroke={MUTED_GREY}
                   strokeWidth={0.3}
                 />
                 <text
@@ -225,7 +244,7 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
             x2={ml.x}
             y1={-ml.z0}
             y2={-ml.z1}
-            stroke="#f59e0b"
+            stroke={SESSION_COLORS.needs_you}
             strokeWidth={0.5}
             strokeLinecap="round"
           >

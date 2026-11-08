@@ -7,6 +7,13 @@ import type { TranslationKey } from "@/i18n/en";
 import { lineView, type LineView, type PipelineRow } from "./factoryPanelModel";
 import { AgoText, Chip, Empty, Section, Stat, StateDot } from "./parts";
 import { useFactoryData } from "./useFactoryData";
+import {
+  CI_COLORS,
+  MERGED_COLOR,
+  MUTED_GREY,
+  NEUTRAL_GREY,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 
 export function PipelineList({ rows }: { rows: PipelineRow[] }): ReactNode {
   return (
@@ -59,7 +66,7 @@ export const LinePanelView = memo(function LinePanelView({
               </div>
             )}
           </div>
-          <Chip color="#94a3b8">
+          <Chip color={NEUTRAL_GREY}>
             {t(`factory.line.mode.${v.mode}` as TranslationKey)}
           </Chip>
         </div>
@@ -77,23 +84,27 @@ export const LinePanelView = memo(function LinePanelView({
           <Stat label={t("factory.line.throughput")} value={v.merged24h} />
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <Chip color="#64748b">
+          <Chip color={MUTED_GREY}>
             {t("factory.line.open")} {v.open}
           </Chip>
-          <Chip color="#3b82f6">
+          <Chip color={SESSION_COLORS.working}>
             {t("factory.line.running")} {v.running}
           </Chip>
-          <Chip color="#ef4444">
+          <Chip color={CI_COLORS.failure}>
             {t("factory.line.failing")} {v.failing}
           </Chip>
           {v.demo && (
             <span title={t("factory.line.demoHint")}>
-              <Chip color="#a855f7">{t("factory.line.demo")}</Chip>
+              <Chip color={MERGED_COLOR}>{t("factory.line.demo")}</Chip>
             </span>
           )}
-          {v.stale && <Chip color="#f59e0b">{t("factory.line.stale")}</Chip>}
+          {v.stale && (
+            <Chip color={SESSION_COLORS.needs_you}>
+              {t("factory.line.stale")}
+            </Chip>
+          )}
           {v.fetched && (
-            <Chip color="#64748b">
+            <Chip color={MUTED_GREY}>
               {t("factory.line.fetched")} <AgoText ago={v.fetched} />
             </Chip>
           )}

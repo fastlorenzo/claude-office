@@ -1,6 +1,10 @@
 "use client";
 
-import { CI_COLORS, CI_MARKS } from "@/engine/logic/statusPalette";
+import {
+  CI_COLORS,
+  CI_MARKS,
+  NEUTRAL_GREY,
+} from "@/engine/logic/statusPalette";
 import type { ReactNode } from "react";
 import { DoorOpen, ExternalLink } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -48,7 +52,7 @@ export function StateDot({
 
 export function Chip({
   children,
-  color = "#94a3b8",
+  color = NEUTRAL_GREY,
   title,
 }: {
   children: ReactNode;

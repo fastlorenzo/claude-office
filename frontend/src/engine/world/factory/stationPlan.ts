@@ -113,14 +113,14 @@ const BEACON_LEVEL: Record<CheckState, number> = {
   none: 1,
 };
 
-/** Slow amber blink period (s). */
+/** Slow queued blink period (s). */
 export const QUEUED_PERIOD = 1.6;
 /** Blue running beacon: sweeps per second of the "rotating" highlight. */
 export const RUNNING_HZ = 1.25;
 
 /**
  * Beacon intensity at time `t` (s):
- *   queued   slow soft-square amber blink (1.6 s period)
+ *   queued   slow soft-square grey blink (1.6 s period)
  *   running  rotating-beacon pulse (a sharp highlight sweeping at 1.25 Hz)
  *   failure  red double-flash strobe (1 Hz)
  *   others   steady (success green; cancelled / none are grey, see below)

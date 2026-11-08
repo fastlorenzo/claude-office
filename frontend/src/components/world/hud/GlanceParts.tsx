@@ -22,6 +22,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import type { CampusSession, SessionPhaseKind } from "@/engine/contracts";
 import { formatElapsed, isPhaseKind, sessionPhase } from "./sessionGlance";
 import { activeAgents } from "./sessionGlance";
+import {
+  MUTED_GREY,
+  NEUTRAL_GREY,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 
 // One shared 15 s ticker for every card (not one interval per card).
 const TICK_MS = 15_000;
@@ -60,20 +65,20 @@ const PHASE_STYLE: Record<
   SessionPhaseKind,
   { color: string; Icon: LucideIcon }
 > = {
-  needs_approval: { color: "#F59E0B", Icon: Hand },
+  needs_approval: { color: SESSION_COLORS.needs_you, Icon: Hand },
   waiting_user: { color: "#60A5FA", Icon: MessageCircleQuestion },
   planning: { color: "#A78BFA", Icon: Sparkles },
   researching: { color: "#38BDF8", Icon: Search },
-  exploring: { color: "#94A3B8", Icon: Compass },
+  exploring: { color: NEUTRAL_GREY, Icon: Compass },
   coding: { color: "#4ADE80", Icon: Code2 },
   testing: { color: "#A78BFA", Icon: FlaskConical },
   building: { color: "#A78BFA", Icon: Hammer },
-  running: { color: "#94A3B8", Icon: Terminal },
+  running: { color: NEUTRAL_GREY, Icon: Terminal },
   git: { color: "#2DD4BF", Icon: GitCommitHorizontal },
   delegating: { color: "#4ADE80", Icon: Bot },
-  compacting: { color: "#94A3B8", Icon: Minimize2 },
-  idle: { color: "#94A3B8", Icon: Moon },
-  ended: { color: "#64748B", Icon: Hourglass },
+  compacting: { color: NEUTRAL_GREY, Icon: Minimize2 },
+  idle: { color: NEUTRAL_GREY, Icon: Moon },
+  ended: { color: MUTED_GREY, Icon: Hourglass },
 };
 
 /** Phase pill: icon + label (coloured by kind) + muted detail + elapsed. */

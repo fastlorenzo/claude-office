@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CHECK_COLORS } from "@/engine/contracts";
+import { CI_COLORS } from "@/engine/logic/statusPalette";
 import type { CheckState } from "@/engine/contracts";
 import {
   CONVEYOR,
@@ -313,7 +314,7 @@ describe("station colours", () => {
     expect(beaconBase("failure")).toEqual(hexToLinear(CHECK_COLORS.failure));
     expect(beaconBase("success")).toEqual(hexToLinear(CHECK_COLORS.done));
     expect(beaconBase("running")).toEqual(hexToLinear(CHECK_COLORS.working));
-    expect(beaconBase("queued")).toEqual(hexToLinear(CHECK_COLORS.needs_you));
+    expect(beaconBase("queued")).toEqual(hexToLinear(CI_COLORS.queued));
   });
 
   it("lit beacons are HDR (bloom), unlit lenses are a neutral grey", () => {

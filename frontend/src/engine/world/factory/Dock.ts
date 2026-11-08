@@ -7,7 +7,7 @@
  * main line arrives along x = 0 from -z). Doors sit at x = -9, 0, 9.
  *
  * Draw budget: 7 dock draws (matte, metal, led, doors, board, boxes, labels)
- * + 2 truck draws. No GlowLayer. Every DynamicTexture is drawn on change only.
+ * + 3 truck draws (body, livery, wheels). No GlowLayer. Every DynamicTexture is drawn on change only.
  */
 import {
   Color3,
@@ -80,7 +80,7 @@ export const DOCK = {
   bumperZ: 0.16,
   /** Door index the truck is parked at. */
   truckDoor: 1,
-  /** Draws contributed by the dock itself (truck adds 2 more). */
+  /** Draws contributed by the dock itself (truck adds 3 more). */
   draws: 7,
 } as const;
 

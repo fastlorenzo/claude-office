@@ -24,6 +24,11 @@ import {
   ToneChip,
 } from "./parts";
 import { useFactoryData } from "./useFactoryData";
+import {
+  MUTED_GREY,
+  NEUTRAL_GREY,
+  SESSION_COLORS,
+} from "@/engine/logic/statusPalette";
 
 export const PrPanelView = memo(function PrPanelView({
   v,
@@ -74,7 +79,7 @@ export const PrPanelView = memo(function PrPanelView({
           </Chip>
           {v.draft && <Chip>{t("factory.draft")}</Chip>}
           {v.bot && (
-            <Chip color="#3b82f6">
+            <Chip color={SESSION_COLORS.working}>
               <Bot className="mr-0.5 inline h-3 w-3" />
               {t("factory.bot")}
             </Chip>
@@ -87,7 +92,7 @@ export const PrPanelView = memo(function PrPanelView({
               {t(`factory.merge.${v.mergeable}` as TranslationKey)}
             </ToneChip>
           )}
-          <Chip color="#94a3b8" title={t("factory.size")}>
+          <Chip color={NEUTRAL_GREY} title={t("factory.size")}>
             {v.sizeClass}
           </Chip>
           {v.lane !== null ? (
@@ -132,7 +137,7 @@ export const PrPanelView = memo(function PrPanelView({
         {v.labels.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {v.labels.map((l) => (
-              <Chip key={l.name} color={l.color ?? "#64748b"}>
+              <Chip key={l.name} color={l.color ?? MUTED_GREY}>
                 {l.name}
               </Chip>
             ))}

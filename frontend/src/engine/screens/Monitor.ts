@@ -21,6 +21,7 @@ import {
   type DynamicTexture,
 } from "../babylon";
 import { STATUS_COLORS, type Vec3 } from "../contracts";
+import { CI_COLORS, TONE_COLORS } from "../logic/statusPalette";
 import type { Lod } from "../characters/types";
 import {
   createEmissiveMaterial,
@@ -422,13 +423,17 @@ export function drawBossTerminal(
     "TODOS",
     `${m.todoDone}/${m.todoTotal}`,
     todoFrac,
-    "#22C55E",
+    CI_COLORS.success,
     F.sans,
     F.mono,
   );
   const ctxFrac = m.ctxPct / 100;
   const ctxColor =
-    ctxFrac > 0.85 ? "#EF4444" : ctxFrac > 0.65 ? "#F59E0B" : "#3B82F6";
+    ctxFrac > 0.85
+      ? TONE_COLORS.bad
+      : ctxFrac > 0.65
+        ? TONE_COLORS.warn
+        : STATUS_COLORS.working;
   drawBar(
     ctx,
     PX + bw + 30,
@@ -503,7 +508,7 @@ function drawPlainLines(
 
 export class AgentMonitor extends ScreenBase {
   private lines: string[] = [];
-  private color = "#3B82F6";
+  private color: string = STATUS_COLORS.working;
   private active = true;
 
   constructor(scene: Scene, opts: MonitorOptions) {

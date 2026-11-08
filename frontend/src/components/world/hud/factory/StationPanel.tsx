@@ -20,6 +20,7 @@ import {
   StateDot,
 } from "./parts";
 import { useFactoryData } from "./useFactoryData";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
 function RunRow({ r }: { r: StationRun }): ReactNode {
   const { t } = useTranslation();
@@ -76,7 +77,7 @@ export const StationPanelView = memo(function StationPanelView({
         </div>
         {v.flaky && (
           <div className="mt-3">
-            <Chip color="#f59e0b">
+            <Chip color={SESSION_COLORS.needs_you}>
               <TriangleAlert className="mr-0.5 inline h-3 w-3" />
               {t("factory.station.flaky")}
             </Chip>
