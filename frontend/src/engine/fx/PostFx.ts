@@ -32,6 +32,7 @@ import {
   SSAO2RenderingPipeline,
   SSRRenderingPipeline,
   TAARenderingPipeline,
+  Vector3,
   Scene,
   type AbstractMesh,
   type Camera,
@@ -72,8 +73,35 @@ function makeColorCurves(): ColorCurves {
   return c;
 }
 
+/** Extra half-angle (rad) around the target's cone for highlight occluders. */
+const HL_CONE_MARGIN = 0.05;
+/** Merged meshes larger than this (bounding radius, m) never occlude the target. */
+const HL_MAX_OCCLUDER_R = 12.5;
+/** Glow halo range (m). */
+const GLOW_MAX_M = 12;
+
+/** Base-geometry radius of a thin-instanced mesh around its instance origin. */
+const thinRadii = new WeakMap<Mesh, number>();
+function thinRadius(m: Mesh): number {
+  const hit = thinRadii.get(m);
+  if (hit !== undefined) return hit;
+  const pos = m.geometry?.getVerticesData("position");
+  let r2 = 0;
+  if (pos)
+    for (let i = 0; i < pos.length; i += 3)
+      r2 = Math.max(r2, pos[i] ** 2 + pos[i + 1] ** 2 + pos[i + 2] ** 2);
+  const r = pos ? Math.sqrt(r2) : 1e3;
+  thinRadii.set(m, r);
+  return r;
+}
+
+/** Distinct RTT names so the draw breakdown can tell the effect layers apart. */
+function nameMainTexture(layer: unknown, name: string): void {
+  const t = (layer as { _mainTexture?: { name: string } | null })._mainTexture;
+  if (t) t.name = name;
+}
+
 export class PostFx {
-  readonly highlight: HighlightLayer;
   private glow: GlowLayer | null = null;
   private readonly glowMeshes = new Set<Mesh>();
   private plan: FxPlan | null = null;
@@ -102,7 +130,187 @@ export class PostFx {
     this.highlight.outerGlow = true;
     // An enabled effect layer re-renders every active mesh; keep it off until needed.
     this.highlight.isEnabled = false;
+    nameMainTexture(this.highlight, "highlightRTT");
+    this.limitHighlightOccluders();
   }
+
+  /**
+   * The highlight layer draws every active mesh into its mask (the others as
+   * black occluders): a full extra scene pass (~120 draws in a team room)
+   * whenever a character is targeted. Only meshes inside the cone from the
+   * eye to the target, and nearer than its far side, can hide part of it:
+   * keep those (thin instances tested per instance) plus the target.
+   */
+  private limitHighlightOccluders(): void {
+    const thin = (
+      this.highlight as unknown as {
+        _thinEffectLayer?: { _shouldRenderMesh(m: AbstractMesh): boolean };
+      }
+    )._thinEffectLayer;
+    if (!thin || typeof thin._shouldRenderMesh !== "function") return;
+    const base = thin._shouldRenderMesh.bind(thin);
+    thin._shouldRenderMesh = (m: AbstractMesh): boolean => {
+      if (!base(m)) return false;
+      if (this.highlighted.has(m)) return true;
+      // Glass and other blended surfaces do not hide the target.
+      const mat = m.material;
+      if (mat && mat.needAlphaBlendingForMesh(m)) return false;
+      if (m.infiniteDistance) return false; // sky
+      this.updateCone();
+      const eye = this.camera.globalPosition;
+      const bi = m.getBoundingInfo();
+      const bs = bi.boundingSphere;
+      // Building-scale merged shells (façade, factory hall, hall shell): the
+      // target is within interaction reach (3.5 m) and was hit by an
+      // occlusion-tested ray; such batches practically never sit between.
+      if (!(m as Mesh).hasThinInstances && bs.radiusWorld > HL_MAX_OCCLUDER_R)
+        return false;
+      const ok = (m as Mesh).hasThinInstances
+        ? this.thinInCone(m as Mesh, eye)
+        : this.inCone(bs.centerWorld, bs.radiusWorld, eye) &&
+          this.boxOnSegment(
+            bi.boundingBox.minimumWorld,
+            bi.boundingBox.maximumWorld,
+            eye,
+          );
+      if (ok && this.debugOccluders) {
+        const k = m.name.replace(/[_:.\d].*$/, "");
+        this.occluderKinds[k] = (this.occluderKinds[k] ?? 0) + 1;
+      }
+      return ok;
+    };
+  }
+
+  private updateCone(): void {
+    const frame = this.scene.getFrameId();
+    if (frame === this.hlFrame) return;
+    this.hlFrame = frame;
+    const eye = this.camera.globalPosition;
+    let cx = 0,
+      cy = 0,
+      cz = 0,
+      n = 0;
+    for (const h of this.highlighted) {
+      const c = h.getBoundingInfo().boundingSphere.centerWorld;
+      cx += c.x;
+      cy += c.y;
+      cz += c.z;
+      n++;
+    }
+    if (!n) return;
+    this.hlAxis.set(cx / n - eye.x, cy / n - eye.y, cz / n - eye.z);
+    const d = Math.max(1e-3, this.hlAxis.length());
+    this.hlAxis.scaleInPlace(1 / d);
+    let r = 0;
+    for (const h of this.highlighted) {
+      const bs = h.getBoundingInfo().boundingSphere;
+      const c = bs.centerWorld;
+      r = Math.max(
+        r,
+        Math.hypot(c.x - cx / n, c.y - cy / n, c.z - cz / n) + bs.radiusWorld,
+      );
+    }
+    this.hlHalf = Math.min(1.4, Math.atan(r / d) + HL_CONE_MARGIN);
+    this.hlRadius = r;
+    this.hlFar = d + r;
+  }
+
+  /** Sphere (centre, radius) intersects the target cone before its far side. */
+  private inCone(
+    c: { x: number; y: number; z: number },
+    r: number,
+    eye: Vector3,
+  ): boolean {
+    const vx = c.x - eye.x;
+    const vy = c.y - eye.y;
+    const vz = c.z - eye.z;
+    const d = Math.hypot(vx, vy, vz);
+    if (d <= r) return true; // contains the eye
+    if (d - r > this.hlFar) return false;
+    const a = this.hlAxis;
+    const cosC = (vx * a.x + vy * a.y + vz * a.z) / d;
+    // Angle to the axis minus the sphere's angular radius < cone half-angle.
+    const ang = Math.acos(Math.max(-1, Math.min(1, cosC)));
+    return ang - Math.asin(Math.min(1, r / d)) < this.hlHalf;
+  }
+
+  /**
+   * World AABB (inflated by the target radius) crosses the segment from the
+   * eye to the target's far side — the tight test for big merged meshes whose
+   * sphere contains the eye (lobby, factory hall, sky, exterior).
+   */
+  private boxOnSegment(
+    min: { x: number; y: number; z: number },
+    max: { x: number; y: number; z: number },
+    eye: Vector3,
+  ): boolean {
+    const r = this.hlRadius;
+    const a = this.hlAxis;
+    const len = this.hlFar;
+    let t0 = 0;
+    let t1 = len;
+    const axes: [number, number, number, number][] = [
+      [eye.x, a.x, min.x - r, max.x + r],
+      [eye.y, a.y, min.y - r, max.y + r],
+      [eye.z, a.z, min.z - r, max.z + r],
+    ];
+    for (const [o, d, lo, hi] of axes) {
+      if (Math.abs(d) < 1e-9) {
+        if (o < lo || o > hi) return false;
+        continue;
+      }
+      let u = (lo - o) / d;
+      let v = (hi - o) / d;
+      if (u > v) [u, v] = [v, u];
+      t0 = Math.max(t0, u);
+      t1 = Math.min(t1, v);
+      if (t0 > t1) return false;
+    }
+    return true;
+  }
+
+  private thinInCone(m: Mesh, eye: Vector3): boolean {
+    const st = (
+      m as unknown as {
+        _thinInstanceDataStorage?: {
+          matrixData: Float32Array | null;
+          instancesCount: number;
+        };
+      }
+    )._thinInstanceDataStorage;
+    const data = st?.matrixData;
+    const count = Math.min(st?.instancesCount ?? 0, m.thinInstanceCount);
+    if (!data || count <= 0) return false;
+    const r = thinRadius(m);
+    const w = m.getWorldMatrix().m;
+    const p = this.hlPoint;
+    for (let i = 0; i < count; i++) {
+      const o = i * 16;
+      const lx = data[o + 12];
+      const ly = data[o + 13];
+      const lz = data[o + 14];
+      p.x = lx * w[0] + ly * w[4] + lz * w[8] + w[12];
+      p.y = lx * w[1] + ly * w[5] + lz * w[9] + w[13];
+      p.z = lx * w[2] + ly * w[6] + lz * w[10] + w[14];
+      if (this.inCone(p, r, eye)) return true;
+    }
+    return false;
+  }
+
+  private readonly hlPoint = { x: 0, y: 0, z: 0 };
+
+  readonly highlight: HighlightLayer;
+  /** Debug (drawdbg): highlight occluders accepted, by mesh-name prefix. */
+  debugOccluders = false;
+  occluderKinds: Record<string, number> = {};
+  /** Meshes currently highlighted (crosshair target). */
+  private readonly highlighted = new Set<AbstractMesh>();
+  /** Target cone (eye → highlighted bounds), refreshed once per frame. */
+  private hlFrame = -1;
+  private readonly hlAxis = new Vector3();
+  private hlHalf = 0;
+  private hlRadius = 0;
+  private hlFar = 0;
 
   /** Active camera post-processes (diagnostics). */
   get postProcessCount(): number {
@@ -370,7 +578,7 @@ export class PostFx {
     p.bloomEnabled = plan.bloom;
     p.bloomThreshold = 0.8;
     p.bloomWeight = 0.22;
-    p.bloomKernel = 64;
+    p.bloomKernel = 32; // perf: half the blur taps (P11)
     p.bloomScale = 0.5;
 
     p.fxaaEnabled = plan.fxaa;
@@ -421,6 +629,8 @@ export class PostFx {
         camera: this.camera,
       });
       g.intensity = 0.55;
+      nameMainTexture(g, "glowRTT");
+      this.limitGlowRange(g);
       for (const m of this.glowMeshes)
         if (m !== this.suppressed) g.addIncludedOnlyMesh(m);
       this.glow = g;
@@ -428,6 +638,33 @@ export class PostFx {
       this.glow.dispose();
       this.glow = null;
     }
+  }
+
+  /**
+   * Only glowing meshes within GLOW_MAX_M of the eye render into the glow
+   * pass (included-only meshes, so skipping one only drops its halo, which
+   * is a few pixels at that distance anyway).
+   */
+  private limitGlowRange(g: GlowLayer): void {
+    const thin = (
+      g as unknown as {
+        _thinEffectLayer?: { _shouldRenderMesh(m: AbstractMesh): boolean };
+      }
+    )._thinEffectLayer;
+    if (!thin || typeof thin._shouldRenderMesh !== "function") return;
+    const base = thin._shouldRenderMesh.bind(thin);
+    const max2 = GLOW_MAX_M * GLOW_MAX_M;
+    thin._shouldRenderMesh = (m: AbstractMesh): boolean => {
+      if (!base(m)) return false;
+      const eye = this.camera.globalPosition;
+      const bs = m.getBoundingInfo().boundingSphere;
+      const c = bs.centerWorld;
+      const d = Math.max(
+        0,
+        Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z) - bs.radiusWorld,
+      );
+      return d * d < max2;
+    };
   }
 
   addGlow(mesh: Mesh): void {
@@ -453,16 +690,23 @@ export class PostFx {
     this.glow?.removeIncludedOnlyMesh(mesh);
   }
 
+  /**
+   * Crosshair target (characters): soft outer glow (see
+   * limitHighlightOccluders for the occluder set).
+   */
   setHighlight(meshes: AbstractMesh[], color: string): void {
     this.highlight.removeAllMeshes();
+    this.highlighted.clear();
     const c = Color3.FromHexString(color);
     let any = false;
     for (const m of meshes) {
       if ("subMeshes" in m && (m as Mesh).getClassName() === "Mesh") {
         this.highlight.addMesh(m as Mesh, c);
+        this.highlighted.add(m);
         any = true;
       }
     }
+    this.hlFrame = -1;
     this.highlight.isEnabled = any;
   }
 

@@ -28,12 +28,9 @@ import {
   savePose,
   type SavedPose,
 } from "@/engine/player/poseMemory";
-import { isStaticCollider } from "@/engine/physics/Colliders";
+import { Colliders, isStaticCollider } from "@/engine/physics/Colliders";
 import type { PlayerAvatar } from "@/engine/player/Avatar";
-import {
-  FlyController,
-  resolveLanding,
-} from "@/engine/player/FlyCamera";
+import { FlyController, resolveLanding } from "@/engine/player/FlyCamera";
 
 export const PLAYER = {
   capsuleHeight: 1.8,
@@ -412,11 +409,14 @@ export class Player {
       const sprint = input?.sprint ?? false;
       const jump = input?.consumeJump() ?? false;
       const sp = sprint ? PLAYER.sprint : PLAYER.walk;
-      const fwd = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-      const right = new Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-      const desired = fwd
-        .scale(move.y * sp)
-        .addInPlace(right.scale(move.x * sp));
+      const sy = Math.sin(this.yaw);
+      const cy = Math.cos(this.yaw);
+      // fwd (sin, 0, cos) * move.y + right (cos, 0, -sin) * move.x
+      const desired = this.sDesired.set(
+        (sy * move.y + cy * move.x) * sp,
+        0,
+        (cy * move.y - sy * move.x) * sp,
+      );
       if (this.cc) this.stepPhysics(dt, desired, jump);
       else this.stepFallback(dt, desired, jump);
       this.speed = Math.hypot(this.vel.x, this.vel.z);
@@ -501,7 +501,7 @@ export class Player {
       support.supportedState === CharacterSupportedState.SUPPORTED;
     let out: Vector3;
     if (supported) {
-      const fwd = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      const fwd = this.sFwd.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
       out = cc.calculateMovement(
         dt,
         fwd,
@@ -515,17 +515,15 @@ export class Player {
       out.subtractInPlace(support.averageSurfaceVelocity);
       const n = support.averageSurfaceNormal;
       const into = out.dot(n);
-      if (into < 0) out.subtractInPlace(n.scale(into));
+      if (into < 0) out.subtractInPlace(n.scaleToRef(into, this.sTmp));
       out.addInPlace(support.averageSurfaceVelocity);
       if (jump) out.y = PLAYER.jump;
     } else {
       // Light air control: steer horizontal velocity, keep vertical + gravity.
-      const h = new Vector3(current.x, 0, current.z);
-      const target = desired.scale(1);
-      h.addInPlace(
-        target.subtract(h).scale(Math.min(1, PLAYER.airControl * dt * 10)),
-      );
-      out = new Vector3(h.x, current.y + GRAVITY.y * dt, h.z);
+      const k = Math.min(1, PLAYER.airControl * dt * 10);
+      const hx = current.x + (desired.x - current.x) * k;
+      const hz = current.z + (desired.z - current.z) * k;
+      out = this.sOut.set(hx, current.y + GRAVITY.y * dt, hz);
     }
     cc.setVelocity(out);
     cc.integrate(dt, support, GRAVITY);
@@ -557,7 +555,7 @@ export class Player {
     } else {
       this.vel.y += GRAVITY.y * dt;
     }
-    body.moveWithCollisions(this.vel.scale(dt));
+    body.moveWithCollisions(this.vel.scaleToRef(dt, this.sTmp));
     this.feet.set(
       body.position.x,
       body.position.y - PLAYER.capsuleHeight / 2,
@@ -583,28 +581,70 @@ export class Player {
       );
       return;
     }
-    // Third person boom.
-    const pivot = this.feet.add(new Vector3(0, 1.55, 0));
-    const dir = new Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      -Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch),
+    // Third person boom (scratch vectors: no per-frame allocation).
+    const pivot = this.sPivot.set(this.feet.x, this.feet.y + 1.55, this.feet.z);
+    const cp = Math.cos(this.pitch);
+    const offset = this.sOffset.set(
+      -Math.sin(this.yaw) * cp * PLAYER.boomLength,
+      Math.sin(this.pitch) * PLAYER.boomLength + PLAYER.boomUp,
+      -Math.cos(this.yaw) * cp * PLAYER.boomLength,
     );
-    const back = dir.scale(-1);
-    const offset = back
-      .scale(PLAYER.boomLength)
-      .addInPlace(new Vector3(0, PLAYER.boomUp, 0));
     const len = offset.length();
-    const ray = new Ray(pivot, offset.normalizeToNew(), len);
-    const hit = this.scene.pickWithRay(ray, (m) =>
-      isStaticCollider(m.metadata),
-    );
-    const maxLen = hit?.hit ? Math.max(0.3, hit.distance - 0.25) : len;
+    const ray = this.boomRay;
+    ray.origin.copyFrom(pivot);
+    offset.scaleToRef(1 / Math.max(1e-6, len), ray.direction);
+    ray.length = len;
+    const dist = this.boomHit(ray);
+    const maxLen = dist !== null ? Math.max(0.3, dist - 0.25) : len;
     // Shorten instantly, extend smoothly.
     if (maxLen < this.boom) this.boom = maxLen;
     else this.boom += (maxLen - this.boom) * Math.min(1, dt * 4);
-    const p = pivot.add(offset.normalizeToNew().scale(this.boom));
-    cam.position.copyFrom(p);
+    cam.position.set(
+      pivot.x + ray.direction.x * this.boom,
+      pivot.y + ray.direction.y * this.boom,
+      pivot.z + ray.direction.z * this.boom,
+    );
+  }
+
+  // Scratch for update / stepPhysics / placeCamera.
+  private readonly sDesired = new Vector3();
+  private readonly sFwd = new Vector3();
+  private readonly sTmp = new Vector3();
+  private readonly sOut = new Vector3();
+  private readonly sPivot = new Vector3();
+  private readonly sOffset = new Vector3();
+  private readonly boomRay = new Ray(Vector3.Zero(), Vector3.Forward(), 1);
+  private boomList: readonly AbstractMesh[] = [];
+  private boomListN = -1;
+
+  /**
+   * Nearest opaque-collider hit along the third-person boom: intersects the
+   * collider registry's occluder list (`Colliders.of(scene).occluders()`, as
+   * Interaction does) instead of picking every mesh in the scene. Without a
+   * registry, a cached filter of the scene's static colliders.
+   */
+  private boomHit(ray: Ray): number | null {
+    const reg = Colliders.of(this.scene);
+    if (reg) this.boomList = reg.occluders();
+    else {
+      const n = this.scene.meshes.length;
+      if (n !== this.boomListN) {
+        this.boomListN = n;
+        this.boomList = this.scene.meshes.filter((m) =>
+          isStaticCollider(m.metadata),
+        );
+      }
+    }
+    let best: number | null = null;
+    for (const m of this.boomList) {
+      if (m.isDisposed()) {
+        this.boomListN = -1; // replaced collider: rebuild next frame
+        continue;
+      }
+      const h = m.intersects(ray, false);
+      if (h.hit && (best === null || h.distance < best)) best = h.distance;
+    }
+    return best;
   }
 
   dispose(): void {

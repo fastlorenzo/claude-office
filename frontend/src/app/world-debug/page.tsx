@@ -7,7 +7,7 @@
  * Query params:
  *   n=6                      number of demo sessions
  *   tierStep=low@60,high@120  live quality change after N frames (repro)
- *   quality=auto|high|low
+ *   quality=auto|high|medium|low
  *   cam=x,y,z,yawDeg,pitchDeg  fixed eye pose for screenshots (freezes the player)
  *   gfx=low|medium|high|ultra|auto  force a graphics preset
  *   gfxset=key:value,...     override single graphics settings (e.g. antiAliasing:taa)
@@ -21,6 +21,7 @@
  *   live=1                   feed the live backend campus (/ws/campus) instead of
  *                            the demo campus (real projects / PRs on the factory)
  *   demoFactory=1            demo factory data on the production lines
+ *   drawdbg=1                per-pass draw breakdown in __worldStats.passes
  *   panel=1                  press F on the first factory target in view and dock
  *                            the panel it opens (needs live=1 for panel data)
  *   walk=x,y,z,yawDeg;x,z;…  scripted walk with the real player collider from
@@ -68,8 +69,9 @@ function parseParams() {
   const q = new URLSearchParams(window.location.search);
   const n = Math.max(0, Math.min(32, Number(q.get("n") ?? 6) || 0));
   const qualityRaw = q.get("quality");
-  const quality: QualitySetting =
-    qualityRaw === "high" || qualityRaw === "low" ? qualityRaw : "auto";
+  const isQuality = (v: string | null | undefined): v is QualitySetting =>
+    v === "auto" || v === "high" || v === "medium" || v === "low";
+  const quality: QualitySetting = isQuality(qualityRaw) ? qualityRaw : "auto";
   const cameraMode: CameraMode = q.get("tp") === "1" ? "tp" : "fp";
   let camera:
     { x: number; y: number; z: number; yaw: number; pitch: number } | undefined;
@@ -159,15 +161,16 @@ function parseParams() {
     ops: q.get("ops") === "1",
     live: q.get("live") === "1",
     demoFactory: q.get("demoFactory") === "1",
+    drawBreakdown: q.get("drawdbg") === "1",
     panel: q.get("panel") === "1",
     tierSteps: (q.get("tierStep") ?? "")
       .split(",")
       .map((x) => x.split("@"))
-      .filter((x) => x.length === 2 && Number(x[1]) >= 0)
-      .map(([quality, f]) => ({
-        quality: quality as QualitySetting,
-        frame: Number(f),
-      })),
+      .filter(
+        (x): x is [QualitySetting, string] =>
+          x.length === 2 && isQuality(x[0]) && Number(x[1]) >= 0,
+      )
+      .map(([quality, f]) => ({ quality, frame: Number(f) })),
   };
 }
 
@@ -213,6 +216,7 @@ export default function WorldDebugPage() {
           preserveDrawingBuffer: p.shot,
           headBob: !p.camera && !p.walk,
           demoFactory: p.demoFactory,
+          drawBreakdown: p.drawBreakdown,
         },
       );
       if (p.brand) world.setBranding?.(p.brand);

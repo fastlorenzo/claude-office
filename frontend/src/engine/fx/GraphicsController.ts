@@ -15,7 +15,7 @@ import type {
   Scene,
   Camera,
 } from "@/engine/babylon";
-import { Vector3 } from "@/engine/babylon";
+import { Vector3, type Mesh } from "@/engine/babylon";
 import type { Lighting } from "@/engine/fx/Lighting";
 import type { Materials } from "@/engine/materials/Materials";
 import type { PostFx } from "@/engine/fx/PostFx";
@@ -67,6 +67,114 @@ interface LightingExt {
 interface MaterialsExt {
   setAnisotropy?(n: number): void;
   setTextureQuality?(q: GraphicsSettings["textureQuality"]): void;
+}
+
+/** Base-geometry AABB of a thin-instanced mesh (instance-local), cached. */
+const geomBounds = new WeakMap<
+  Mesh,
+  {
+    x0: number;
+    x1: number;
+    y0: number;
+    y1: number;
+    z0: number;
+    z1: number;
+    r: number;
+    n: number;
+  }
+>();
+/** Instances entirely this far above / below the eye (another storey) are skipped. */
+const STOREY_M = 2.5;
+/**
+ * G-buffer range for thin-instanced furniture / room prefabs (m, from the eye
+ * to the instance's box): their AO and reflections are close-up detail; a
+ * team room seen through its glass front from the lobby does not need them.
+ */
+const THIN_RANGE_M = 6;
+
+/**
+ * Thin-instanced meshes (furniture parts, room prefabs, factory pools) carry
+ * bounds spanning every instance in the building, so the sphere test above
+ * would keep all of them in the G-buffer from anywhere. Test the instances
+ * instead: is any instance's box (base geometry, in its own frame) within
+ * reach of the eye and on the eye's storey?
+ */
+function thinNear(m: Mesh, eye: Vector3, range: number): boolean {
+  const st = (
+    m as unknown as {
+      _thinInstanceDataStorage?: {
+        matrixData: Float32Array | null;
+        instancesCount: number;
+      };
+    }
+  )._thinInstanceDataStorage;
+  const data = st?.matrixData;
+  const count = Math.min(st?.instancesCount ?? 0, m.thinInstanceCount);
+  if (!data || count <= 0) return true;
+  const pos = m.geometry?.getVerticesData("position");
+  if (!pos) return true;
+  let g = geomBounds.get(m);
+  if (!g || g.n !== pos.length) {
+    let x0 = Infinity,
+      y0 = Infinity,
+      z0 = Infinity,
+      x1 = -Infinity,
+      y1 = -Infinity,
+      z1 = -Infinity;
+    for (let i = 0; i < pos.length; i += 3) {
+      x0 = Math.min(x0, pos[i]);
+      x1 = Math.max(x1, pos[i]);
+      y0 = Math.min(y0, pos[i + 1]);
+      y1 = Math.max(y1, pos[i + 1]);
+      z0 = Math.min(z0, pos[i + 2]);
+      z1 = Math.max(z1, pos[i + 2]);
+    }
+    const r = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2;
+    g = { x0, x1, y0, y1, z0, z1, r, n: pos.length };
+    geomBounds.set(m, g);
+  }
+  const reach = Math.min(gbufferReach(g.r, range), THIN_RANGE_M);
+  const w = m.getWorldMatrix().m;
+  for (let i = 0; i < count; i++) {
+    const o = i * 16;
+    // Instance → world: instance matrix, then the mesh's world matrix.
+    const tx = data[o + 12];
+    const ty = data[o + 13];
+    const tz = data[o + 14];
+    const px = tx * w[0] + ty * w[4] + tz * w[8] + w[12];
+    const py = tx * w[1] + ty * w[5] + tz * w[9] + w[13];
+    const pz = tx * w[2] + ty * w[6] + tz * w[10] + w[14];
+    const dx = eye.x - px;
+    const dy = eye.y - py;
+    const dz = eye.z - pz;
+    // Eye in the instance frame (rotation + scale; mesh world assumed
+    // translation-only, as for every pool / prefab / furniture part).
+    const ax = data[o],
+      ay = data[o + 1],
+      az = data[o + 2];
+    const bx = data[o + 4],
+      by = data[o + 5],
+      bz = data[o + 6];
+    const cx = data[o + 8],
+      cy = data[o + 9],
+      cz = data[o + 10];
+    const sa = ax * ax + ay * ay + az * az || 1;
+    const sb = bx * bx + by * by + bz * bz || 1;
+    const sc = cx * cx + cy * cy + cz * cz || 1;
+    const lx = (dx * ax + dy * ay + dz * az) / sa;
+    const ly = (dx * bx + dy * by + dz * bz) / sb;
+    const lz = (dx * cx + dy * cy + dz * cz) / sc;
+    const s = Math.sqrt(Math.max(sa, sb, sc));
+    // Another storey (room furniture seen from the factory floor, factory
+    // pools seen from the offices): its AO / reflections never show.
+    const oy = Math.max(0, g.y0 - ly, ly - g.y1) * Math.sqrt(sb);
+    if (oy > STOREY_M) continue;
+    const ox = Math.max(0, g.x0 - lx, lx - g.x1);
+    const oz = Math.max(0, g.z0 - lz, lz - g.z1);
+    const d = Math.hypot(ox, oy / Math.sqrt(sb), oz) * s;
+    if (d < reach) return true;
+  }
+  return false;
 }
 
 const INSPECT_IN = 7; // 1/s exponential rates
@@ -203,6 +311,17 @@ export class GraphicsController {
       out.length = 0;
       for (let i = 0; i < len; i++) {
         const m = list[i];
+        // Unlit (emissive screens, LED panels, sky) neither receive AO nor
+        // reflect: the surface behind them stands in for their depth.
+        const mat = m.material as {
+          disableLighting?: boolean;
+          unlit?: boolean;
+        } | null;
+        if (mat && (mat.disableLighting || mat.unlit)) continue;
+        if ((m as Mesh).hasThinInstances) {
+          if (thinNear(m as Mesh, eye, range)) out.push(m);
+          continue;
+        }
         const bs = m.getBoundingInfo().boundingSphere;
         const c = bs.centerWorld;
         const r = bs.radiusWorld;

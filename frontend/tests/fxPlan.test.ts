@@ -55,13 +55,27 @@ describe("planFx presets", () => {
     expect(p.renderScale).toBeCloseTo(0.6);
   });
   it("scales SSAO / SSR with the quality level", () => {
-    expect(of("medium").ssao?.samples).toBe(8);
+    expect(of("medium").ssao).toBeNull(); // medium: no G-buffer pass
+    expect(of("medium").gbufferRangeM).toBe(0);
     expect(of("high").ssao?.samples).toBe(16);
+    expect(of("high").ssao?.expensiveBlur).toBe(false);
     expect(of("ultra").ssao?.samples).toBeGreaterThan(16);
     expect(of("medium").ssr).toBeNull();
-    expect(of("high").ssr?.downsample).toBe(1);
+    expect(of("high").ssr?.downsample).toBe(0);
+    expect(of("high").ssr?.blur).toBe(0); // single SSR pass at high
     expect(of("ultra").ssr?.downsample).toBe(0);
     expect(of("ultra").ssr!.maxSteps).toBeGreaterThan(of("high").ssr!.maxSteps);
+  });
+  it("drops the sharpen pass when TAA is on", () => {
+    expect(of("high").taa).not.toBeNull();
+    expect(of("high").sharpenOn).toBe(false);
+    expect(of("medium").sharpenOn).toBe(true);
+  });
+  it("keeps medium within 6 and high within 12 post-process stages", () => {
+    // activeStages lists stage names; bloom = 4 passes, ssao = 4, ssr = 1-4.
+    expect(activeStages(of("medium"), false)).not.toContain("ssao2");
+    expect(activeStages(of("medium"), false)).not.toContain("ssr");
+    expect(activeStages(of("high"), false)).not.toContain("sharpen");
   });
   it("passes personal settings through", () => {
     const s = updateSetting(updateSetting(base, "fov", 90), "fpsCap", 60);
@@ -160,7 +174,7 @@ describe("QualityGovernor", () => {
 describe("gbuffer range / character budget", () => {
   it("caps the G-buffer range only when SSAO or SSR is on", () => {
     const s = applyPreset("high", defaultGraphicsSettings());
-    expect(planFx(s).gbufferRangeM).toBe(16);
+    expect(planFx(s).gbufferRangeM).toBe(10);
     const off = {
       ...s,
       ambientOcclusion: "off",

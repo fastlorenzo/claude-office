@@ -556,13 +556,26 @@ export class ControlRoom {
     this.redraw(false);
   }
 
-  setFar(far: boolean): void {
-    if (far === this.far) return;
-    this.far = far;
-    this.monitor.setEnabled(!far);
-    this.dots.setEnabled(!far);
-    for (const f of this.feedSlots) f.mesh.setEnabled(!far && !!f.room);
+  /**
+   * `far`: consoles, map dots and feed screens off. `deep` (lower tiers, seen
+   * from the far end of the hall): the interior batches and the video wall
+   * too — a handful of pixels through the neck at that range.
+   */
+  setFar(far: boolean, deep = false): void {
+    const d = far && deep;
+    if (far !== this.far) {
+      this.far = far;
+      this.monitor.setEnabled(!far);
+      this.dots.setEnabled(!far);
+      for (const f of this.feedSlots) f.mesh.setEnabled(!far && !!f.room);
+    }
+    if (d === this.deep) return;
+    this.deep = d;
+    for (const m of this.statics) m.setEnabled(!d);
+    for (const cv of Object.values(this.canvases)) cv.mesh.setEnabled(!d);
   }
+
+  private deep = false;
 
   dispose(): void {
     if (this.disposed) return;

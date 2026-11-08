@@ -64,13 +64,25 @@ describe("FeedScheduler (NullEngine)", () => {
     expect(feeds.getTexture("s1")).toBe(rtt);
     expect(scene.customRenderTargets).not.toContain(rtt);
     feeds.setActive(true);
-    expect(scene.customRenderTargets).toContain(rtt);
+    // Only the feed scheduled for this frame is attached (at most one).
+    expect(scene.customRenderTargets).not.toContain(rtt);
     feeds.update();
+    expect(scene.customRenderTargets).toContain(rtt);
+    const b = feeds.addFeed(
+      "s2",
+      { position: { x: 0, y: 2, z: 0 }, target: { x: 1, y: 0, z: 1 } },
+      () => [],
+    );
+    feeds.update();
+    expect(
+      scene.customRenderTargets.filter((t) => t === rtt || t === b).length,
+    ).toBeLessThanOrEqual(1);
+    feeds.removeFeed("s2");
     feeds.setActive(false);
     expect(scene.customRenderTargets).not.toContain(rtt);
     feeds.removeFeed("s1");
     expect(feeds.getTexture("s1")).toBeNull();
-    expect(changed).toEqual(["s1", "s1"]);
+    expect(changed).toEqual(["s1", "s2", "s2", "s1"]);
     feeds.dispose();
     scene.dispose();
     engine.dispose();

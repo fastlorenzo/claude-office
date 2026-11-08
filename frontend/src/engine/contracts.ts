@@ -663,6 +663,8 @@ export interface SyncInput {
   stats?: CampusStats | null;
   /** Projects (one team room each); grouped client-side when absent. */
   projects?: CampusProject[] | null;
+  /** UI language (i18n `Locale`) for in-world canvas text (control room). */
+  locale?: string;
 }
 
 // ============================================================================
@@ -738,8 +740,10 @@ export interface InteractionEvent {
 // ============================================================================
 
 export type CameraMode = "fp" | "tp";
-export type QualitySetting = "auto" | "high" | "low";
-export type QualityTier = "high" | "low";
+/** Requested quality: "auto" lets the frame-time governor pick the tier. */
+export type QualitySetting = "auto" | "high" | "medium" | "low";
+/** Concrete preset in effect (the governor's tier under "auto"). */
+export type QualityTier = "low" | "medium" | "high" | "ultra";
 
 export type TeleportTarget =
   | { sessionId: string }
@@ -777,8 +781,8 @@ export interface WorldEvents {
     frameMs: number;
     tier: QualityTier;
     drawCalls: number;
-    /** Concrete preset in effect (the governor's tier under "auto"). */
-    effective?: "low" | "medium" | "high" | "ultra";
+    /** Same as `tier` (kept for older consumers). */
+    effective?: QualityTier;
     /** Active camera post-processes. */
     postProcesses?: number;
   };

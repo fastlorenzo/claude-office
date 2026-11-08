@@ -374,13 +374,17 @@ export class ProjectRoom {
     return this.fixtures;
   }
 
-  /** Static meshes for this room's control-room feed camera. */
-  getRenderList(): AbstractMesh[] {
+  /**
+   * Static meshes for this room's control-room feed camera: the room's own
+   * prefab parts plus only the AssetLibrary parts of the props placed in this
+   * room (and in `podGroups`, its pods' asset groups).
+   */
+  getRenderList(podGroups: readonly string[] = []): AbstractMesh[] {
     return [
       ...this.parts,
       this.led.mesh,
       this.info.mesh,
-      ...this.ctx.assets.allParts(),
+      ...this.ctx.assets.partsOf([this.group, ...podGroups]),
     ];
   }
 

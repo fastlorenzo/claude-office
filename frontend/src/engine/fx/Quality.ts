@@ -7,7 +7,7 @@
  * pin the tier and the governor ignores samples. The governor only decides
  * the tier — `GraphicsController` turns it into a render plan.
  */
-import type { QualitySetting, QualityTier } from "@/engine/contracts";
+import type { QualitySetting } from "@/engine/contracts";
 import {
   AUTO_LADDER,
   applyPreset,
@@ -15,12 +15,7 @@ import {
 } from "@/engine/fx/graphicsSettings";
 import { autoStartTier, type ConcretePreset } from "@/engine/fx/fxPlan";
 
-/** Contract tier ("high" | "low") for stats: low only for the lowest preset. */
-export function coarseTier(preset: ConcretePreset): QualityTier {
-  return preset === "low" ? "low" : "high";
-}
-
-/** Legacy `setQuality(auto|high|low)` mapped onto presets, keeping personal prefs. */
+/** `setQuality(auto|high|medium|low)` mapped onto presets, keeping personal prefs. */
 export function settingsForQuality(
   q: QualitySetting,
   current: GraphicsSettings,

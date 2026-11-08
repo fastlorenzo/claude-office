@@ -94,12 +94,16 @@ export const SSAO_BY_QUALITY: Record<
   SsaoPlan
 > = {
   low: { ratio: 0.5, blurRatio: 0.5, samples: 8, expensiveBlur: false },
-  medium: { ratio: 0.5, blurRatio: 0.5, samples: 16, expensiveBlur: true },
+  // High preset: half-res AO with the cheap blur (TAA resolves the noise).
+  medium: { ratio: 0.5, blurRatio: 0.5, samples: 16, expensiveBlur: false },
   high: { ratio: 0.75, blurRatio: 0.75, samples: 24, expensiveBlur: true },
 };
 
-/** G-buffer draw range per AO quality (AO radius is < 1 m, SSR is subtle far away). */
-export const GBUFFER_RANGE_M = { low: 12, medium: 16, high: 20 } as const;
+/**
+ * G-buffer draw range per AO quality (AO radius is < 1 m, SSR is subtle far
+ * away). "medium" is the high preset: 10 m covers a room and a hall bay.
+ */
+export const GBUFFER_RANGE_M = { low: 8, medium: 10, high: 16 } as const;
 
 /**
  * How far from the eye a mesh of bounding radius `r` must still be drawn into
@@ -129,14 +133,16 @@ export const SSR_BY_QUALITY: Record<
     downsample: 1,
     blur: 0.4,
   },
+  // High preset: one full-resolution pass, no blur/combiner (3 fewer passes);
+  // TAA resolves the roughness jitter while the camera rests.
   medium: {
     maxSteps: 96,
     step: 2,
     thickness: 0.45,
-    strength: 0.75,
+    strength: 0.7,
     roughnessFactor: 0.2,
-    downsample: 1,
-    blur: 0.3,
+    downsample: 0,
+    blur: 0,
   },
   high: {
     maxSteps: 180,
@@ -190,7 +196,8 @@ export function planFx(s: GraphicsSettings): FxPlan {
     chromaticAberration: s.chromaticAberration,
     grain: s.filmGrain,
     motionBlur: s.motionBlur,
-    sharpenOn: s.sharpen > 0.001 && !fsrOn,
+    // FSR has its own sharpening; TAA output is already crisp when static.
+    sharpenOn: s.sharpen > 0.001 && !fsrOn && !aa.taa,
     dofMode: s.depthOfField,
     glow: s.glow,
     sharpen: s.sharpen,

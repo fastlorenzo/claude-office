@@ -1,8 +1,8 @@
 /**
  * Security-camera feeds for the control room: one FreeCamera + 320×180
  * RenderTargetTexture per project room (sessions alias to it), rendered round-robin (one feed per
- * update) with REFRESHRATE_RENDER_ONCE. While inactive the RTTs are removed
- * from scene.customRenderTargets so they cost nothing; the last frame stays.
+ * update) with REFRESHRATE_RENDER_ONCE. Only the feed scheduled for a frame
+ * is attached to scene.customRenderTargets; the others keep their last frame.
  */
 
 import {
@@ -137,7 +137,6 @@ export class FeedScheduler {
     });
     this.feeds.set(sessionId, feed);
     this.order.push(sessionId);
-    if (this.active) this.scene.customRenderTargets.push(rtt);
     this.onChanged.notifyObservers(sessionId);
     return rtt;
   }
@@ -193,27 +192,34 @@ export class FeedScheduler {
     const active = wanted && this.mode !== "off";
     if (active === this.active) return;
     this.active = active;
-    for (const f of this.feeds.values()) {
-      if (active) {
-        if (!this.scene.customRenderTargets.includes(f.rtt))
-          this.scene.customRenderTargets.push(f.rtt);
-      } else {
-        this.detach(f.rtt);
-      }
-    }
+    // Feeds join scene.customRenderTargets only for the frame they render
+    // (see update); leaving the room detaches whatever is attached.
+    if (!active) for (const f of this.feeds.values()) this.detach(f.rtt);
   }
 
-  /** Call once per frame: re-arms one feed (never-rendered feeds first). */
+  /**
+   * Call once per frame: renders at most ONE feed this frame (never-rendered
+   * feeds first, then round-robin every 3rd frame at "high", every 6th at
+   * "low" — CCTV rate; each feed render redraws its whole room). Only the
+   * scheduled feed is attached to scene.customRenderTargets, so nothing else
+   * (render-once bookkeeping, readiness retries) can render several feeds in
+   * one frame.
+   */
   update(): void {
     if (!this.active || this.disposed || this.order.length === 0) return;
-    if (this.mode === "low" && (this.tick++ & 1) === 1) return;
+    for (const f of this.feeds.values()) this.detach(f.rtt);
     const fresh = this.order.find((id) => !this.feeds.get(id)?.rendered);
+    const every = this.mode === "low" ? 6 : 3;
+    if (!fresh && this.tick++ % every !== 0) return;
     let id = fresh;
     if (!id) {
       this.cursor = (this.cursor + 1) % this.order.length;
       id = this.order[this.cursor];
     }
-    this.feeds.get(id)?.rtt.resetRefreshCounter();
+    const rtt = this.feeds.get(id)?.rtt;
+    if (!rtt) return;
+    rtt.resetRefreshCounter();
+    this.scene.customRenderTargets.push(rtt);
   }
 
   dispose(): void {

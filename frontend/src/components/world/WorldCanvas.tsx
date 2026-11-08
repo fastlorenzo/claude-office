@@ -74,6 +74,7 @@ export function WorldCanvas({
       selectedSessionId: selectedRef.current || null,
       stats: useCampusStore.getState().stats,
       projects: useCampusStore.getState().projects,
+      locale: usePreferencesStore.getState().language,
     });
 
     const flush = (): void => {
@@ -212,9 +213,9 @@ export function WorldCanvas({
             )
               schedule();
           }),
+          // Control-room wall text follows the UI language.
           usePreferencesStore.subscribe((s, prev) => {
-            if (s.graphicsQuality !== prev.graphicsQuality)
-              w.setQuality(s.graphicsQuality);
+            if (s.language !== prev.language) schedule();
           }),
           useWorldUiStore.subscribe((s, prev) => {
             if (

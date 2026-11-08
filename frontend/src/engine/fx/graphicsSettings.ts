@@ -167,6 +167,9 @@ export const PRESETS: Record<
     liveScreens: "near",
     securityFeeds: "low",
   },
+  // A real mid tier: no geometry-buffer pass (no SSAO / SSR), no glow layer
+  // (bloom stays), 1024² cascades with a 2-character shadow budget, MSAA
+  // rather than TAA: ≥ 25 % fewer draws than high and ≤ 6 post-processes.
   medium: {
     antiAliasing: "msaa2",
     renderScale: 1,
@@ -174,15 +177,15 @@ export const PRESETS: Record<
     sharpen: 0.2,
     anisotropy: 8,
     textureQuality: "medium",
-    shadows: "medium",
-    ambientOcclusion: "low",
+    shadows: "low",
+    ambientOcclusion: "off",
     areaLights: false,
     maxDynamicLights: 2,
     iblShadows: false,
     screenSpaceReflections: "off",
     reflectionProbes: true,
     bloom: true,
-    glow: true,
+    glow: false,
     depthOfField: "inspectOnly",
     colorGrading: true,
     filmGrain: false,

@@ -58,6 +58,57 @@ export interface ShadowSink {
 interface Slot {
   tier: ActorTier;
   shadow: boolean;
+  /** Facial detail meshes shown (near and close). */
+  face: boolean;
+  /** Impostor colours, cached per tint / skin string. */
+  tintHex: string;
+  skinHex: string;
+  rgb: [number, number, number];
+  skin: [number, number, number];
+}
+
+/** Reused per-frame sort entry (no per-frame allocation). */
+interface OrderEntry {
+  a: HubActor;
+  slot: Slot;
+  dist: number;
+}
+
+/**
+ * Skinned meshes of one actor, by size relative to its largest mesh:
+ * 0 = facial detail (eyes, lashes, brows: only drawn within FACE_IN_M at
+ *     "near", never cast),
+ * 1 = regular (hair, shoes: drawn, no shadow), 2 = shadow caster (body, clothes).
+ */
+type MeshClass = 0 | 1 | 2;
+const DETAIL_REL = 0.1;
+/** Facial detail distance (m) with hysteresis. */
+const FACE_IN_M = 5;
+const FACE_OUT_M = 5.75;
+const CASTER_REL = 0.6;
+
+/**
+ * Real-shadow budget per detail level: only the nearest N "near" characters
+ * cast into the cascades (every caster submesh costs a draw per cascade); the
+ * rest get the blob contact shadow.
+ */
+const MAX_SHADOW_ACTORS: Record<CharacterDetail, number> = {
+  low: 0,
+  medium: 2,
+  high: 3,
+};
+
+/**
+ * Pods at "impostor" detail (beyond POD_IMPOSTOR_M) still get a skinned "mid"
+ * character inside this distance (within the skinned budget): the capsule
+ * impostor only reads as a person from far away (review R13).
+ */
+export const IMPOSTOR_MIN_M = 15;
+/** …only on the eye's storey (from the factory floor a slab hides them). */
+const SAME_STOREY_M = 2.5;
+
+function sortByDist(x: OrderEntry, y: OrderEntry): number {
+  return x.dist - y.dist;
 }
 
 const hubs = new WeakMap<Scene, ActorHub>();
@@ -82,6 +133,9 @@ export class ActorHub {
   /** Debug: bypass all LOD (every actor stays a full skinned mesh). */
   bypass = false;
   private budget = characterBudget("high");
+  private maxShadows = MAX_SHADOW_ACTORS.high;
+  private readonly order: OrderEntry[] = [];
+  private readonly meshClass = new WeakMap<AbstractMesh, MeshClass>();
   private shadows: ShadowSink | null = null;
   private readonly impostor: Mesh;
   private readonly impHead: Mesh;
@@ -189,7 +243,15 @@ export class ActorHub {
   }
 
   add(a: HubActor): void {
-    this.actors.set(a, { tier: "near", shadow: false });
+    this.actors.set(a, {
+      tier: "near",
+      shadow: false,
+      face: true,
+      tintHex: "\u0000",
+      skinHex: "\u0000",
+      rgb: [0, 0, 0],
+      skin: [0, 0, 0],
+    });
   }
 
   remove(a: HubActor): void {
@@ -210,6 +272,51 @@ export class ActorHub {
   /** Graphics setting: LOD distance bias + skinned-character budget. */
   setDetail(d: CharacterDetail): void {
     this.budget = characterBudget(d);
+    this.maxShadows = MAX_SHADOW_ACTORS[d];
+  }
+
+  /** Size class of each skinned mesh (cached; computed per actor on first sight). */
+  private classOf(meshes: readonly AbstractMesh[], m: AbstractMesh): MeshClass {
+    const c = this.meshClass.get(m);
+    if (c !== undefined) return c;
+    let maxR = 0;
+    for (const x of meshes)
+      maxR = Math.max(maxR, x.getBoundingInfo().boundingSphere.radius);
+    for (const x of meshes) {
+      const r = x.getBoundingInfo().boundingSphere.radius;
+      this.meshClass.set(
+        x,
+        maxR <= 0
+          ? 2
+          : r < DETAIL_REL * maxR
+            ? 0
+            : r >= CASTER_REL * maxR
+              ? 2
+              : 1,
+      );
+    }
+    return this.meshClass.get(m) ?? 2;
+  }
+
+  /**
+   * Cast only with the big meshes while `cast`; facial detail meshes only
+   * draw at "near". Idempotent: also overrides the room's own caster toggling.
+   */
+  private syncMeshes(
+    a: HubActor,
+    tier: ActorTier,
+    cast: boolean,
+    face: boolean,
+  ): void {
+    const meshes = a.shadowMeshes();
+    for (const m of meshes) {
+      const k = this.classOf(meshes, m);
+      if (k === 0 && tier !== "far" && tier !== "hidden")
+        if (m.isEnabled(false) !== face) m.setEnabled(face);
+      if (!this.shadows) continue;
+      if (cast && k === 2) this.shadows.add(m);
+      else this.shadows.remove(m);
+    }
   }
 
   /** Feeds need real actors in every room: nobody is impostor / hidden. */
@@ -233,39 +340,71 @@ export class ActorHub {
     if (this.bypass) return;
     let ni = 0;
     let nb = 0;
-    const order: { a: HubActor; slot: Slot; dist: number }[] = [];
+    const order = this.order;
+    let n = 0;
     for (const [a, slot] of this.actors) {
       const f = a.feet;
       const dist = Math.hypot(eye.x - f.x, eye.y - 1.2 - f.y, eye.z - f.z);
-      order.push({ a, slot, dist });
+      let e = order[n];
+      if (!e) order.push((e = { a, slot, dist }));
+      else {
+        e.a = a;
+        e.slot = slot;
+        e.dist = dist;
+      }
+      n++;
     }
-    order.sort((x, y) => x.dist - y.dist);
+    order.length = n;
+    order.sort(sortByDist);
     let skinned = 0;
     let nears = 0;
-    for (const { a, slot, dist } of order) {
+    let casting = 0;
+    for (let i = 0; i < n; i++) {
+      const { a, slot, dist } = order[i];
       const f = a.feet;
       const detail = this.detail.get(a.sessionId) ?? "full";
       let tier = this.feedMode
         ? "near"
         : selectTier(slot.tier, dist, detail, this.budget.scale);
+      // Impostor-detail pods: a capsule within 15 m reads as a blob, keep
+      // the skinned mesh at mid detail instead (budget below still applies).
+      if (
+        !this.feedMode &&
+        tier === "far" &&
+        detail === "impostor" &&
+        dist < IMPOSTOR_MIN_M &&
+        Math.abs(eye.y - 1.2 - a.feet.y) < SAME_STOREY_M
+      )
+        tier = "mid";
       // Skinned-character budget: only the nearest N keep their skinned mesh.
       if (!this.feedMode && (tier === "near" || tier === "mid")) {
         if (++skinned > this.budget.maxSkinned) tier = "far";
         else if (tier === "near" && ++nears > this.budget.maxNear) tier = "mid";
       }
-      if (tier !== slot.tier) {
+      const tierChanged = tier !== slot.tier;
+      if (tierChanged) {
         slot.tier = tier;
         a.applyTier(tier);
       }
-      // Real shadows: only close characters.
+      // Real shadows: only the nearest few close characters.
       const wantShadow =
-        !this.feedMode && tier === "near" && wantsShadow(slot.shadow, dist);
+        !this.feedMode &&
+        tier === "near" &&
+        wantsShadow(slot.shadow, dist) &&
+        casting < this.maxShadows;
+      if (wantShadow) casting++;
+      const shadowChanged = wantShadow !== slot.shadow;
       slot.shadow = wantShadow;
-      // Idempotent: also overrides the room's own caster toggling.
-      if (this.shadows)
-        for (const m of a.shadowMeshes())
-          if (wantShadow) this.shadows.add(m);
-          else this.shadows.remove(m);
+      // Visible skinned actors re-assert every frame (rooms add every actor
+      // mesh as a caster on their own LOD change); far / hidden ones have a
+      // disabled root, so only their transition matters.
+      // Facial detail (eyes, lashes, brows) is a few pixels beyond ~5 m.
+      const face =
+        tier === "near" &&
+        (this.feedMode || dist < (slot.face ? FACE_OUT_M : FACE_IN_M));
+      slot.face = face;
+      if (tierChanged || shadowChanged || tier === "near" || tier === "mid")
+        this.syncMeshes(a, tier, wantShadow, face);
       if (a.isGone || tier === "hidden") continue;
       const p = a.presence;
       // Contact shadow for every visible character without a real one.
@@ -276,14 +415,27 @@ export class ActorHub {
       if (tier === "far" && ni < MAX && p > 0.01) {
         const sy = a.seatedNow ? 0.72 : 1;
         writeMatrix(this.impBuf, ni, f.x, f.y, f.z, p, sy * p, p, 0);
-        const [r, g, b] = hexToRgb(a.tintHex);
-        this.impCol.set([r, g, b, 1], ni * 4);
-        const skin = Color3.FromHexString(
-          a.skinHex && /^#[0-9a-f]{6}$/i.test(a.skinHex)
-            ? a.skinHex
-            : "#D9A882",
-        );
-        this.headCol.set([skin.r, skin.g, skin.b, 1], ni * 4);
+        if (slot.tintHex !== a.tintHex) {
+          slot.tintHex = a.tintHex;
+          slot.rgb = hexToRgb(a.tintHex);
+        }
+        const skinHex = a.skinHex ?? "";
+        if (slot.skinHex !== skinHex) {
+          slot.skinHex = skinHex;
+          const c = Color3.FromHexString(
+            /^#[0-9a-f]{6}$/i.test(skinHex) ? skinHex : "#D9A882",
+          );
+          slot.skin = [c.r, c.g, c.b];
+        }
+        const o = ni * 4;
+        this.impCol[o] = slot.rgb[0];
+        this.impCol[o + 1] = slot.rgb[1];
+        this.impCol[o + 2] = slot.rgb[2];
+        this.impCol[o + 3] = 1;
+        this.headCol[o] = slot.skin[0];
+        this.headCol[o + 1] = slot.skin[1];
+        this.headCol[o + 2] = slot.skin[2];
+        this.headCol[o + 3] = 1;
         ni++;
       }
     }

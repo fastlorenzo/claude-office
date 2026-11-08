@@ -11,9 +11,11 @@
  */
 import {
   Color4,
+  DynamicTexture,
   Engine,
   EngineInstrumentation,
   Logger,
+  RenderTargetTexture,
   Scene,
   SceneInstrumentation,
   Vector3,
@@ -36,7 +38,7 @@ import {
 } from "@/engine/contracts";
 import { AssetLibrary } from "@/engine/assets/AssetLibrary";
 import type { PropRole } from "@/engine/assets/proceduralProps";
-import { coarseTier, settingsForQuality } from "@/engine/fx/Quality";
+import { settingsForQuality } from "@/engine/fx/Quality";
 import {
   GraphicsController,
   type DetailSettings,
@@ -97,6 +99,7 @@ import {
   halfFovFor,
   VisibilityController,
   visRoomsOfProjects,
+  type VisInput,
   type VisRoomHandle,
 } from "@/engine/world/Visibility";
 
@@ -118,21 +121,28 @@ export interface WorldDebugOptions {
   };
   /** Demo factory data instead of the feed's projects (`?demoFactory=1`). */
   demoFactory?: boolean;
+  /**
+   * Per-pass draw-call breakdown in `__worldStats.passes` (`?drawdbg=1`):
+   * wraps `RenderTargetTexture.render` so every RTT (shadow maps, G-buffer,
+   * glow, feeds, probes) reports its own draws; `main` is the remainder.
+   */
+  drawBreakdown?: boolean;
 }
 
 const POSE_MS = 100;
-/** Props big enough for their shadows to matter (each part costs a draw per cascade). */
+/**
+ * Props big enough for their shadows to matter (each part costs a draw per
+ * cascade). Chairs and small tables rely on the static daylight map and the
+ * blob/AO contact cues instead.
+ */
 const SHADOW_ROLES: ReadonlySet<PropRole> = new Set<PropRole>([
   "workDesk",
   "execDesk",
-  "taskChair",
   "sofa",
   "shelves",
   "plant",
   "plantTall",
   "coffeeCart",
-  "chair",
-  "loungeTable",
 ]);
 const STATS_MS = 1000;
 
@@ -182,6 +192,38 @@ const p3 = (v: { x: number; y: number; z: number }) =>
 const WALK_SUBSTEPS = 4;
 const WALK_DT = 0.05;
 const WALK_TIMEOUT_S = 40;
+
+/**
+ * Screen texture uploads (every `DynamicTexture.update`: canvases, wall,
+ * monitors, signs) counted process-wide for `__worldStats.screenUploads`.
+ */
+const uploads = { n: 0 };
+(() => {
+  const proto = DynamicTexture.prototype as unknown as {
+    update: (...a: unknown[]) => void;
+    __counted?: boolean;
+  };
+  if (proto.__counted || typeof proto.update !== "function") return;
+  const orig = proto.update;
+  proto.__counted = true;
+  proto.update = function (this: unknown, ...a: unknown[]) {
+    uploads.n++;
+    return orig.apply(this, a);
+  };
+})();
+
+/**
+ * Detail distances (m) of furniture parts per tier (characterDetail): small
+ * accessories, and every other AssetLibrary part (high: unlimited).
+ */
+const SMALL_PART_M = { low: 10, medium: 14, high: 20 } as const;
+const PART_M = { low: 18, medium: 24, high: Infinity } as const;
+
+/** Lower tiers drop the control-room interior beyond this (m, to the wall). */
+const DEEP_FAR_M = 34;
+
+/** Camera-local forward (left-handed scene). */
+const LOCAL_FORWARD = new Vector3(0, 0, 1);
 
 /** Factory visibility tick (matches Visibility's VISIBILITY_HZ). */
 const FACTORY_VIS_MS = 200;
@@ -240,13 +282,20 @@ class World implements IWorld {
   private readonly engineInstr: EngineInstrumentation;
   private readonly resizeObserver: ResizeObserver | null = null;
   private readonly debug: WorldDebugOptions;
+  /**
+   * `__worldStats` (draws, active kinds, actors, factory, walk) is published
+   * only for debug hosts (world-debug passes a debug object); production
+   * (WorldCanvas) skips the 2 Hz scene walk.
+   */
+  private readonly statsOn: boolean;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly opts: WorldOptions,
-    debug: WorldDebugOptions = {},
+    debug?: WorldDebugOptions,
   ) {
-    this.debug = debug;
+    this.debug = debug ?? {};
+    this.statsOn = debug !== undefined;
     this.cameraMode = opts.cameraMode;
     Logger.LogLevels = Logger.WarningLogLevel | Logger.ErrorLogLevel;
     this.engine = new Engine(
@@ -255,7 +304,7 @@ class World implements IWorld {
       {
         stencil: true,
         antialias: true,
-        preserveDrawingBuffer: !!debug.preserveDrawingBuffer,
+        preserveDrawingBuffer: !!debug?.preserveDrawingBuffer,
         powerPreference: "high-performance",
         doNotHandleContextLost: false,
       },
@@ -318,6 +367,8 @@ class World implements IWorld {
     this.engineInstr = new EngineInstrumentation(this.engine);
     this.engineInstr.captureGPUFrameTime = false;
 
+    if (this.debug.drawBreakdown) this.hookDrawBreakdown();
+
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
       if (canvas.parentElement)
@@ -367,7 +418,13 @@ class World implements IWorld {
         headBob: this.debug.headBob ?? true,
       });
       this.player.setFlyKeyGate(() => this.inputEnabled);
-      if (!this.debug.camera && !this.debug.preserveDrawingBuffer)
+      // Debug cameras / scripted walks never resume a remembered pose (a hot
+      // reload mid-walk would otherwise restart from it: flaky walk-gate).
+      if (
+        !this.debug.camera &&
+        !this.debug.walk &&
+        !this.debug.preserveDrawingBuffer
+      )
         this.player.restoreOr(
           {
             feet: new Vector3(spawn.x, spawn.y + 0.05, spawn.z),
@@ -624,7 +681,10 @@ class World implements IWorld {
       this.projectRooms.set(id, room);
       this.projectKeys.set(id, projectKey(p));
       this.feeds?.addFeed(id, p.feedCamera, () => {
-        const out = room.getRenderList();
+        // Pod asset groups follow Room's `room:<sessionId>` naming.
+        const out = room.getRenderList(
+          p.pods.map((pod) => `room:${pod.sessionId}`),
+        );
         for (const pod of p.pods)
           out.push(...(this.rooms.get(pod.sessionId)?.getRenderList() ?? []));
         return out;
@@ -666,7 +726,13 @@ class World implements IWorld {
     if (!this.controlRoom || !input) return;
     const labels = new Map<string, string>();
     for (const [id, r] of this.rooms) labels.set(id, r.currentLabel);
-    this.controlRoom.setData(input.campus, input.stats, labels, input.projects);
+    this.controlRoom.setData(
+      input.campus,
+      input.stats,
+      labels,
+      input.projects,
+      input.locale,
+    );
   }
 
   private applyOps(ops: SyncOp[]): void {
@@ -813,7 +879,10 @@ class World implements IWorld {
       zone.kind === "control" ||
       (feet.y > FACTORY_Y && feet.z > this.layout.hall.length - 6);
     if (this.feeds) {
-      this.feeds.setActive(nearControl);
+      // Feeds render only inside the drum: from the hall end they would force
+      // every room / actor to full detail in the main view (+1 feed RTT per
+      // frame) for screens seen at 10 m through the neck.
+      this.feeds.setActive(zone.kind === "control");
       this.feeds.update();
     }
     this.controlRoom?.update(dt, nearControl);
@@ -846,7 +915,7 @@ class World implements IWorld {
         fps: Math.round(fps),
         frameMs:
           Math.round((this.frameMsAcc / Math.max(1, this.frames)) * 10) / 10,
-        tier: coarseTier(this.gfx.effective),
+        tier: this.gfx.effective,
         effective: this.gfx.effective,
         postProcesses: this.fx?.postProcessCount ?? 0,
         drawCalls: this.sceneInstr.drawCallsCounter.current,
@@ -997,6 +1066,54 @@ class World implements IWorld {
     this.labels.setOccluder((a, b) => occluders.blocked(a, b));
   }
 
+  /** Draws per render target in the last frame (debug `drawBreakdown`). */
+  private passDraws: Record<string, number> = {};
+  private passAcc: Record<string, number> = {};
+
+  private hookDrawBreakdown(): void {
+    const engine = this.engine as unknown as {
+      _drawCalls: { current: number };
+    };
+    const proto = RenderTargetTexture.prototype as unknown as {
+      render: (...a: unknown[]) => void;
+      __wrapped?: boolean;
+    };
+    const acc = () => this.passAcc;
+    if (!proto.__wrapped) {
+      const orig = proto.render;
+      proto.__wrapped = true;
+      proto.render = function (this: { name: string }, ...a: unknown[]) {
+        const before = engine._drawCalls.current;
+        orig.apply(this, a);
+        const k = this.name.replace(/[_:.\d]+$/, "");
+        const tgt = (
+          globalThis as { __passAcc?: () => Record<string, number> }
+        ).__passAcc?.();
+        if (tgt) tgt[k] = (tgt[k] ?? 0) + engine._drawCalls.current - before;
+      };
+    }
+    (globalThis as { __passAcc?: () => Record<string, number> }).__passAcc =
+      acc;
+    this.scene.onAfterRenderObservable.add(() => {
+      const total = engine._drawCalls.current;
+      let rt = 0;
+      for (const v of Object.values(this.passAcc)) rt += v;
+      this.passDraws = { ...this.passAcc, main: total - rt, total };
+      this.passAcc = {};
+    });
+  }
+
+  private lastUploads = 0;
+
+  /** Debug: highlight occluder kinds accumulated since the last stats tick. */
+  private takeOccluderKinds(): Record<string, number> {
+    const fx = this.fx;
+    if (!fx) return {};
+    fx.debugOccluders = true;
+    const k = fx.occluderKinds;
+    fx.occluderKinds = {};
+    return k;
+  }
   private readonly dbgHist: number[] = [];
   /** Median of the last samples (a single frame can include one-off passes). */
   private dbgDraws(v: number): number {
@@ -1036,26 +1153,27 @@ class World implements IWorld {
     const sealed = zone.kind === "control";
     this.actorHub.setFeedMode(feedMode && !sealed);
     this.screenHub.setFeedMode(feedMode && !sealed);
-    const dir = cam.getForwardRay(1).direction;
+    cam.getDirectionToRef(LOCAL_FORWARD, this.fwd);
+    const dir = this.fwd;
     const yaw =
       Math.hypot(dir.x, dir.z) > 0.2
         ? Math.atan2(dir.x, dir.z)
         : this.player.yaw;
-    if (!off)
-      this.visibility.update(
-        now,
-        this.visHandles(),
-        {
-          eye,
-          yaw,
-          halfFov: halfFovFor(cam.fov, this.engine.getAspectRatio(cam)),
-          zone,
-          rooms: visRoomsOfProjects(this.layout.projects),
-          hallLength: this.layout.hall.length,
-          hallHalfWidth: this.layout.hall.width / 2,
-        },
-        feedMode,
-      );
+    if (!off) {
+      // Reused input object; the room list only changes with the layout.
+      if (this.visRoomsOf !== this.layout) {
+        this.visRoomsOf = this.layout;
+        this.visInput.rooms = visRoomsOfProjects(this.layout.projects);
+      }
+      const vi = this.visInput;
+      vi.eye = eye;
+      vi.yaw = yaw;
+      vi.halfFov = halfFovFor(cam.fov, this.engine.getAspectRatio(cam));
+      vi.zone = zone;
+      vi.hallLength = this.layout.hall.length;
+      vi.hallHalfWidth = this.layout.hall.width / 2;
+      this.visibility.update(now, this.visHandles(), vi, feedMode);
+    }
     if (!off && this.factory && now - this.lastFactoryVisAt >= FACTORY_VIS_MS) {
       this.lastFactoryVisAt = now;
       this.factory.applyVisibility(
@@ -1072,23 +1190,49 @@ class World implements IWorld {
     if (this.screenHub.needsUpdate || now - this.lastScreensAt >= 200) {
       this.lastScreensAt = now;
       this.screenHub.update(eye);
+      // Furniture parts follow the tier's detail distances (5 Hz).
+      const tier = this.detail?.characterDetail ?? "high";
+      this.assets.cullParts(
+        eye,
+        off ? Infinity : SMALL_PART_M[tier],
+        off ? Infinity : PART_M[tier],
+      );
     }
     this.actorHub.update(eye);
     if (this.controlRoom) {
       const o = this.layout.controlRoom.screenWall.origin;
       const d = Math.hypot(eye.x - o.x, eye.z - o.z);
-      this.controlRoom.setFar(!feedMode && d > 22);
+      const tier = this.detail?.characterDetail ?? "high";
+      this.controlRoom.setFar(
+        !feedMode && d > 22,
+        tier !== "high" && d > DEEP_FAR_M,
+      );
     }
-    if (now - this.lastDbgAt >= 500) {
+    if (this.statsOn && now - this.lastDbgAt >= 500) {
+      const dbgDt = now - this.lastDbgAt;
       this.lastDbgAt = now;
+      const screenUploads =
+        Math.round(((uploads.n - this.lastUploads) * 10000) / dbgDt) / 10;
+      this.lastUploads = uploads.n;
       (globalThis as { __worldStats?: unknown }).__worldStats = {
         draws: this.dbgDraws(this.sceneInstr.drawCallsCounter.current),
         active: this.scene.getActiveMeshes().length,
         textures: this.scene.textures.length,
+        /** DynamicTexture uploads per second (screens / wall / signs). */
+        screenUploads,
+        postProcesses: this.fx?.postProcessCount ?? 0,
+        tier: this.gfx.effective,
         actors: this.actorHub.stats(),
         zone: zone.kind,
         kinds: this.activeKinds(),
         factory: this.factoryLines?.stats(),
+        ...(this.debug.drawBreakdown
+          ? {
+              passes: this.passDraws,
+              pp: this.fx?.stageNames ?? [],
+              hl: this.takeOccluderKinds(),
+            }
+          : {}),
         ...(this.debug.walk
           ? {
               walk: {
@@ -1104,6 +1248,19 @@ class World implements IWorld {
       };
     }
   }
+
+  /** Scratch for updateLod (no per-frame allocation). */
+  private readonly fwd = new Vector3();
+  private visRoomsOf: BuildingLayout | null = null;
+  private readonly visInput: VisInput = {
+    eye: { x: 0, y: 0, z: 0 },
+    yaw: 0,
+    halfFov: 1,
+    zone: { kind: "outside" } as Zone3,
+    rooms: [],
+    hallLength: 0,
+    hallHalfWidth: 0,
+  };
 
   /** Visibility units: project rooms, their pods follow (screens / actors). */
   private visCache: Map<string, VisRoomHandle> | null = null;

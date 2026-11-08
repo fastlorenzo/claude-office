@@ -259,7 +259,7 @@ export class AssetLibrary {
           },
           strip,
         );
-        parts = flat.parts;
+        parts = mergeByMaterial(flat.parts);
         anchor = flat.anchor;
         for (const ag of container.animationGroups) ag.dispose();
         for (const m of container.materials) {
@@ -600,10 +600,51 @@ export class AssetLibrary {
     }
   }
 
-  /** All part meshes (for render lists / shadow casters). */
-  allParts(): Mesh[] {
+  /**
+   * Detail distances (call at a few Hz). A part — all its instances, one draw
+   * per pass — is enabled only while one of its role's placements is within
+   * reach of the eye: `smallM` for small parts (accessories, trims: flagged
+   * `noDynamicShadow`), `allM` for every other part. Building-wide thin
+   * instances otherwise cost a draw per part from anywhere in the building.
+   */
+  cullParts(
+    eye: { x: number; y: number; z: number },
+    smallM: number,
+    allM: number,
+  ): void {
+    for (const e of this.entries.values()) {
+      let nearest2 = Infinity;
+      for (const pl of e.placements.values()) {
+        const m = pl.matrix.m;
+        const dx = m[12] - eye.x;
+        const dy = m[13] - eye.y;
+        const dz = m[14] - eye.z;
+        nearest2 = Math.min(nearest2, dx * dx + dy * dy + dz * dz);
+      }
+      for (const p of e.parts) {
+        const small = (p.metadata as { noDynamicShadow?: boolean } | null)
+          ?.noDynamicShadow;
+        const reach = small ? smallM : allM;
+        const on = nearest2 < reach * reach;
+        if (p.isEnabled(false) !== on) p.setEnabled(on);
+      }
+    }
+  }
+
+  /**
+   * Part meshes of the roles placed in any of `groups` (feed render lists:
+   * a room's security camera only needs the props that room actually has,
+   * not every part in the building).
+   */
+  partsOf(groups: readonly string[]): Mesh[] {
+    const roles = new Set<PropRole>();
+    for (const g of groups)
+      for (const k of this.groupIndex.get(g) ?? []) roles.add(k.role);
     const out: Mesh[] = [];
-    for (const e of this.entries.values()) out.push(...e.parts);
+    for (const r of roles) {
+      const e = this.entries.get(r);
+      if (e) out.push(...e.parts);
+    }
     return out;
   }
 
@@ -614,6 +655,46 @@ export class AssetLibrary {
     this.pending.clear();
     this.groupIndex.clear();
   }
+}
+
+/**
+ * One mesh per material: glTF models arrive as one primitive per node (the
+ * desk is 9 primitives sharing one material), and every part is one draw per
+ * pass for the whole building. Parts are already baked to a common frame by
+ * `flatten`; merging keeps the first part's name and material. Groups whose
+ * vertex layouts cannot be merged stay as they are.
+ */
+function mergeByMaterial(parts: Mesh[]): Mesh[] {
+  const byMat = new Map<unknown, Mesh[]>();
+  for (const p of parts) {
+    const k = p.material ?? null;
+    const list = byMat.get(k);
+    if (list) list.push(p);
+    else byMat.set(k, [p]);
+  }
+  const out: Mesh[] = [];
+  for (const group of byMat.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    const name = group[0].name;
+    const meta: unknown = group[0].metadata;
+    let merged: Mesh | null = null;
+    try {
+      merged = Mesh.MergeMeshes(group, true, true, undefined, false, false);
+    } catch {
+      merged = null;
+    }
+    if (!merged) {
+      out.push(...group.filter((m) => !m.isDisposed()));
+      continue;
+    }
+    merged.name = name;
+    merged.metadata = meta;
+    out.push(merged);
+  }
+  return out;
 }
 
 function boundsOf(meshes: Mesh[]): { min: Vector3; max: Vector3 } {
