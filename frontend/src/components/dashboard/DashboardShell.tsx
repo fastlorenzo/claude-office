@@ -29,6 +29,7 @@ import { OpsTab } from "./OpsTab";
 import { SessionsTab } from "./SessionsTab";
 import { ConsoleTab } from "./ConsoleTab";
 import { FactoryTab } from "./FactoryTab";
+import { attentionSession } from "./focusSession";
 import { threeDHref } from "./dashboardUrl";
 import { useDashboardState } from "./useDashboardState";
 
@@ -146,6 +147,7 @@ export function DashboardShell(): ReactNode {
   });
 
   const conn = useCampusConnection();
+  const attention = useCampusStore((s) => attentionSession(s.sessions));
   const liveCount = useCampusStore(
     (s) => s.sessions.filter((c) => !c.ended).length,
   );
@@ -201,7 +203,11 @@ export function DashboardShell(): ReactNode {
           <main className="min-w-0">
             {state.tab === "ops" && (
               <div className="-mx-4">
-                <OpsTab sessions={sessions} />
+                <OpsTab
+                  sessions={sessions}
+                  focusId={state.session}
+                  onFocus={(id) => navigate({ session: id }, { replace: true })}
+                />
               </div>
             )}
             {state.tab === "sessions" && (
@@ -217,7 +223,8 @@ export function DashboardShell(): ReactNode {
             {state.tab === "console" && (
               <ConsoleTab
                 sessions={sessions}
-                sessionId={state.session}
+                sessionId={state.session ?? attention}
+                callId={state.call}
                 token={linkToken}
                 onPick={(id) => navigate({ session: id }, { replace: true })}
               />

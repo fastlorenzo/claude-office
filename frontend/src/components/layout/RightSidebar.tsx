@@ -1,6 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Terminal } from "lucide-react";
+import { SessionConsole } from "@/components/console/SessionConsole";
+import { dashboardHref } from "@/components/dashboard/dashboardUrl";
+import { selectSessionId, useGameStore } from "@/stores/gameStore";
 import { AgentStatus } from "@/components/game/AgentStatus";
 import { EventLog } from "@/components/layout/EventLog";
 import { ConversationHistory } from "@/components/layout/ConversationHistory";
@@ -59,6 +63,18 @@ export function RightSidebar(): React.ReactNode {
     edge: "down",
   });
 
+  // Console sheet over the canvas: "Open console" button or a log row click.
+  const sessionId = useGameStore(selectSessionId);
+  const [sheet, setSheet] = useState<{ callId?: string } | null>(null);
+  useEffect(() => {
+    if (!sheet) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setSheet(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sheet]);
+
   const isDragging = isWidthDragging || isHeightDragging;
 
   return (
@@ -116,13 +132,52 @@ export function RightSidebar(): React.ReactNode {
           >
             {t("sidebar.conversation")}
           </button>
+          <button
+            onClick={() => setSheet({})}
+            title={t("hud.panel.console")}
+            aria-label={t("hud.panel.console")}
+            className="flex items-center gap-1.5 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-orange-300"
+          >
+            <Terminal size={13} aria-hidden />
+            {t("hud.panel.console")}
+          </button>
         </div>
 
         {/* Tab content */}
         <div className="flex-grow min-h-0">
-          {activeTab === "events" ? <EventLog /> : <ConversationHistory />}
+          {activeTab === "events" ? (
+            <EventLog onOpenCall={(_sid, callId) => setSheet({ callId })} />
+          ) : (
+            <ConversationHistory />
+          )}
         </div>
       </div>
+      {sheet && sessionId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("hud.panel.console")}
+          data-hud-keytrap
+          className="fixed inset-3 z-50 flex overflow-hidden rounded-2xl border border-white/10 bg-[#070C14] shadow-2xl shadow-black/60"
+        >
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <SessionConsole
+              sessionId={sessionId}
+              presentation="sheet"
+              focusCallId={sheet.callId}
+              onClose={() => setSheet(null)}
+              crossLink={{
+                label: t("console.openDashboard"),
+                href: dashboardHref({
+                  tab: "console",
+                  session: sessionId,
+                  call: sheet.callId,
+                }),
+              }}
+            />
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

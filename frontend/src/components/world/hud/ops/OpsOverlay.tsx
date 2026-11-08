@@ -30,14 +30,15 @@ export function OpsOverlay({ sessions }: { sessions: Session[] }): ReactNode {
       nowMs={nowMs}
       focusId={focus}
       onClose={() => ui.closeOps()}
-      onEnter={(id) => {
-        ui.closeOps();
-        nav.enterRoom?.(id);
-      }}
-      onInspect={(id, label) => {
-        ui.closeOps();
-        ui.openInspect({ kind: "screen", sessionId: id, roomLabel: label });
-      }}
+      onEnter={(id) => nav.openConsole(id, { from: "ops" })}
+      onEnterRoom={
+        nav.enterRoom
+          ? (id) => {
+              ui.closeOps();
+              nav.enterRoom?.(id);
+            }
+          : undefined
+      }
     />
   );
 }

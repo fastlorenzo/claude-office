@@ -266,7 +266,9 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
     }),
   openInspect: (target) => {
     set({ inspectTarget: target });
-    get().open("inspect");
+    // A session's monitor opens the console; targets without one keep Inspect.
+    if (target.sessionId) get().openConsole(target.sessionId);
+    else get().open("inspect");
   },
   openFactory: (target) => {
     const id = FACTORY_PANEL_BY_KIND[target.kind];

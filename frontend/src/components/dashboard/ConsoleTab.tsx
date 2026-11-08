@@ -1,76 +1,67 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { Box } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
-import type { InteractionTarget } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
 import { sessionLabel } from "@/components/world/sessionMeta";
-import { InspectPanel } from "@/components/world/hud/InspectPanel";
-import { PanelCard, Picker } from "./parts";
+import { SessionConsole } from "@/components/console/SessionConsole";
+import { Picker } from "./parts";
 import { threeDHref } from "./dashboardUrl";
 
-/**
- * Console tab. Phase 1 stand-in: the session inspector at page width. The
- * Session Console (WS5) replaces the body in phase 2.
- */
+/** Console tab: the full Session Console for one session (`?session=&call=`). */
 export function ConsoleTab({
   sessions,
   sessionId,
+  callId,
   token,
   onPick,
 }: {
   sessions: Session[];
   sessionId: string | undefined;
+  callId: string | undefined;
   token: string | null;
   onPick: (id: string) => void;
 }): ReactNode {
   const { t } = useTranslation();
   const campus = useCampusStore((s) => s.sessions);
-  const byId = useMemo(
-    () => new Map(campus.map((c) => [c.sessionId, c])),
-    [campus],
-  );
-  const options = sessions.map((s) => ({
-    value: s.id,
-    label: sessionLabel(s, byId.get(s.id)),
-  }));
-  const current = sessions.find((s) => s.id === sessionId);
-  const target = useMemo<InteractionTarget | null>(
-    () =>
-      current
-        ? {
-            kind: "screen",
-            sessionId: current.id,
-            roomLabel: sessionLabel(current, byId.get(current.id)),
-          }
-        : null,
-    [current, byId],
-  );
+  const options = useMemo(() => {
+    const byId = new Map(campus.map((c) => [c.sessionId, c]));
+    return sessions.map((s) => ({
+      value: s.id,
+      label: sessionLabel(s, byId.get(s.id)),
+    }));
+  }, [sessions, campus]);
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <Picker
         label={t("dashboard.pickSession")}
         value={sessionId ?? ""}
         options={options}
         onChange={onPick}
+        className="w-full sm:w-80"
       />
-      {target ? (
-        <PanelCard
-          title={t("dashboard.tab.console")}
-          icon={Box}
-          action={
-            <a
-              href={threeDHref(target.sessionId, token)}
-              className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs font-semibold text-slate-200 hover:bg-white/10"
-            >
-              {t("dashboard.openIn3d")}
-            </a>
-          }
-        >
-          <InspectPanel sessions={sessions} target={target} />
-        </PanelCard>
+      {sessionId ? (
+        <div className="flex h-[calc(100dvh-15rem)] min-h-[520px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#070C14]/95 shadow-lg shadow-black/30">
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
+            data-hud-keytrap
+          >
+            <SessionConsole
+              key={sessionId}
+              sessionId={sessionId}
+              presentation="sheet"
+              focusCallId={callId}
+              onEnterRoom={() =>
+                window.location.assign(threeDHref(sessionId, token))
+              }
+              crossLink={{
+                label: t("dashboard.openIn3d"),
+                href: threeDHref(sessionId, token),
+              }}
+            />
+          </div>
+        </div>
       ) : (
         <p className="rounded-2xl border border-dashed border-white/10 p-10 text-center text-sm text-slate-500">
           {t("dashboard.pickSession")}

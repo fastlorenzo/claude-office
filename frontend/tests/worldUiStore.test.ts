@@ -30,14 +30,15 @@ describe("worldUiStore", () => {
     expect(useWorldUiStore.getState().openPanel).toBe("help");
   });
 
-  it("openInspect stores the target and opens the panel", () => {
+  it("openInspect on a session monitor opens the console", () => {
     useWorldUiStore.getState().openInspect({
       kind: "monitor",
       sessionId: "s1",
       roomLabel: "Room",
     });
     const st = useWorldUiStore.getState();
-    expect(st.openPanel).toBe("inspect");
+    expect(st.openPanel).toBe("console");
+    expect(st.consoleTarget?.sessionId).toBe("s1");
     expect(st.inspectTarget?.sessionId).toBe("s1");
   });
 });

@@ -52,7 +52,8 @@ export interface OpsDashboardProps {
   variant?: "overlay" | "page";
   onClose?: () => void;
   onEnter?: (sessionId: string) => void;
-  onInspect?: (sessionId: string, label: string) => void;
+  /** Walk into the session's room (3D only); the row click opens the console. */
+  onEnterRoom?: (sessionId: string) => void;
 }
 
 type T = ReturnType<typeof useTranslation>["t"];
@@ -247,7 +248,7 @@ function SessionsBoard({
   focusId,
   variant,
   onEnter,
-  onInspect,
+  onEnterRoom,
 }: { m: OpsModel; t: T } & OpsDashboardProps): ReactNode {
   const page = variant === "page";
   const live = m.rows.filter((r) => r.status !== "ended");
@@ -287,7 +288,7 @@ function SessionsBoard({
             focused={r.sessionId === focusId}
             page={page}
             onEnter={onEnter}
-            onInspect={onInspect}
+            onEnterRoom={onEnterRoom}
           />
         ))}
       </ul>
@@ -301,14 +302,14 @@ function Row({
   focused,
   page,
   onEnter,
-  onInspect,
+  onEnterRoom,
 }: {
   r: OpsRow;
   t: T;
   focused: boolean;
   page: boolean;
   onEnter?: (id: string) => void;
-  onInspect?: (id: string, label: string) => void;
+  onEnterRoom?: (id: string) => void;
 }): ReactNode {
   const sc = STATUS_COLORS[r.status];
   const needs = r.status === "needs_you";
@@ -340,7 +341,7 @@ function Row({
           : "border-white/[0.05] bg-[#101826] hover:bg-[#152033]"
       } ${focused ? "ring-2 ring-sky-400/60" : ""} ${page ? ROW_GRID_PAGE : ROW_GRID} grid grid-cols-2 gap-x-3 gap-y-2`}
       onClick={() => onEnter?.(r.sessionId)}
-      title={t("ops.enter")}
+      title={t("ops.console")}
     >
       <span
         className="absolute inset-y-1.5 left-1 w-1 rounded-full"
@@ -367,22 +368,22 @@ function Row({
             </span>
           ))}
           <span className="ml-auto hidden shrink-0 gap-1 group-hover:flex">
-            {onInspect && (
+            {onEnterRoom && (
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onInspect(r.sessionId, r.project);
+                  onEnterRoom(r.sessionId);
                 }}
                 className="flex items-center gap-1 rounded-md bg-white/10 px-1.5 py-0.5 text-xs text-slate-200 hover:bg-white/20"
               >
-                <ScanSearch className="h-3 w-3" />
-                {t("ops.inspect")}
+                <LogIn className="h-3 w-3" />
+                {t("console.enterRoom")}
               </button>
             )}
             <span className="flex items-center gap-1 rounded-md bg-sky-500/20 px-1.5 py-0.5 text-xs text-sky-200">
-              <LogIn className="h-3 w-3" />
-              {t("ops.enter")}
+              <ScanSearch className="h-3 w-3" />
+              {t("ops.console")}
             </span>
           </span>
         </div>

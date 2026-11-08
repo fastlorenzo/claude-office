@@ -13,7 +13,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWebSocketEvents } from "@/hooks/useWebSocketEvents";
 import { useSessions } from "@/hooks/useSessions";
 import { useSessionSwitch } from "@/hooks/useSessionSwitch";
@@ -168,6 +168,20 @@ export default function V2TestPage(): React.ReactNode {
     startTour(mode);
     setIsHelpModalOpen(false);
   };
+
+  // `/?session=<id>` ("Open in 3D" from the dashboard): preselect once listed.
+  const wantedSession = useRef<string | null>(null);
+  useEffect(() => {
+    wantedSession.current = new URLSearchParams(window.location.search).get(
+      "session",
+    );
+  }, []);
+  useEffect(() => {
+    const id = wantedSession.current;
+    if (!id || !sessions.some((x) => x.id === id)) return;
+    wantedSession.current = null;
+    void handleSessionSelect(id);
+  }, [sessions, handleSessionSelect]);
 
   // Active session count gates the Command Center entry point (>= 2).
   const activeSessionCount = sessions.filter(

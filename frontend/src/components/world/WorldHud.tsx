@@ -8,6 +8,10 @@ import {
 import { GitStatusPanel } from "@/components/layout/GitStatusPanel";
 import { ConversationHistory } from "@/components/layout/ConversationHistory";
 import { EventLog } from "@/components/layout/EventLog";
+import { SessionConsole } from "@/components/console/SessionConsole";
+import { useTranslation } from "@/hooks/useTranslation";
+import { dashboardHref } from "@/components/dashboard/dashboardUrl";
+import { useSessionNav } from "@/components/shared/sessionNav";
 import { AgentStatus } from "@/components/game/AgentStatus";
 import {
   selectPanels,
@@ -68,6 +72,48 @@ function usePortrait(): boolean {
   );
 }
 
+/** The Session Console: dock (right / bottom) or a sheet over the ops dashboard. */
+function ConsolePanel(): ReactNode {
+  const { t } = useTranslation();
+  const target = useWorldUiStore((s) => s.consoleTarget);
+  const sheet = useWorldUiStore((s) => s.consolePresentation === "sheet");
+  const nav = useSessionNav();
+  if (!target) return null;
+  const { sessionId, callId } = target;
+  return (
+    <section
+      aria-label={t("hud.panel.console")}
+      data-hud-keytrap
+      className="pointer-events-auto flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-[#070C14]/95 shadow-xl shadow-black/50 backdrop-blur-xl"
+    >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <SessionConsole
+          sessionId={sessionId}
+          presentation={sheet ? "sheet" : "dock"}
+          focusCallId={callId}
+          onClose={() => useWorldUiStore.getState().close("console")}
+          onEnterRoom={
+            nav.enterRoom
+              ? () => {
+                  useWorldUiStore.getState().closeOps();
+                  nav.enterRoom?.(sessionId);
+                }
+              : undefined
+          }
+          crossLink={{
+            label: t("console.openDashboard"),
+            href: dashboardHref({
+              tab: "console",
+              session: sessionId,
+              call: callId,
+            }),
+          }}
+        />
+      </div>
+    </section>
+  );
+}
+
 function PanelBody({
   id,
   props,
@@ -97,7 +143,11 @@ function PanelBody({
     case "events":
       return (
         <HudPanelFrame id={id} flatten>
-          <EventLog />
+          <EventLog
+            onOpenCall={(sid, callId) =>
+              useWorldUiStore.getState().openConsole(sid, { callId })
+            }
+          />
         </HudPanelFrame>
       );
     case "agents":
@@ -131,12 +181,7 @@ function PanelBody({
         </HudPanelFrame>
       );
     case "console":
-      // Phase 1 stand-in: the Session Console replaces this body in phase 2.
-      return (
-        <HudPanelFrame id={id} flatten>
-          <EventLog />
-        </HudPanelFrame>
-      );
+      return <ConsolePanel />;
     case "factoryPr":
       return (
         <HudPanelFrame id={id}>
@@ -169,13 +214,18 @@ function useHudQueryParam(sessionId: string): void {
   const ready = useWorldUiStore((s) => s.ready);
   useEffect(() => {
     if (!ready) return;
-    const want = new URLSearchParams(window.location.search).get("hud");
-    if (!want) return;
+    const q = new URLSearchParams(window.location.search);
+    const want = (q.get("hud") ?? "").split(",").filter(Boolean);
+    if (want.length === 0) return;
     const ui = useWorldUiStore.getState();
-    if (want === "ops") ui.openOps();
-    else if (want === "console") {
-      if (sessionId) ui.openConsole(sessionId);
-    } else if (want in PANELS) ui.open(want as HudPanel);
+    const id = q.get("session") || sessionId;
+    const withOps = want.includes("ops");
+    for (const w of want) {
+      if (w === "ops") ui.openOps();
+      else if (w === "console") {
+        if (id) ui.openConsole(id, withOps ? { from: "ops" } : undefined);
+      } else if (w in PANELS) ui.open(w as HudPanel);
+    }
     // Once per ready, not on every session change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
@@ -191,6 +241,7 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
   const sheet = useWorldUiStore(
     (s) => s.consolePresentation === "sheet" && s.panels.includes("console"),
   );
+  const consoleDock = panels.includes("console");
   const { isMobile } = props;
 
   if (!ready) return null;
@@ -221,7 +272,9 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
           className="pointer-events-auto absolute bottom-3 left-16"
           style={{
             maxWidth:
-              docked && !portrait ? "calc(100% - 508px)" : "calc(100% - 76px)",
+              docked && !portrait && !consoleDock
+                ? "calc(100% - 508px)"
+                : "calc(100% - 76px)",
           }}
         >
           <KeyHints portrait={portrait} />
@@ -232,8 +285,8 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
         <div
           className={
             portrait
-              ? "absolute inset-x-2 bottom-2 flex h-[45%] gap-2 animate-[hud-sheet-up_200ms_ease-out]"
-              : "absolute bottom-3 right-3 top-14 flex w-[420px] max-w-[calc(100%-24px)] flex-col gap-2 animate-[hud-sheet-left_200ms_ease-out]"
+              ? `absolute inset-x-2 bottom-2 flex ${consoleDock ? "h-[62%]" : "h-[45%]"} gap-2 animate-[hud-sheet-up_200ms_ease-out]`
+              : `absolute bottom-3 right-3 top-14 flex ${consoleDock ? "w-[min(920px,calc(100%-24px))]" : "w-[420px] max-w-[calc(100%-24px)]"} flex-col gap-2 animate-[hud-sheet-left_200ms_ease-out]`
           }
         >
           {panels.map((id) => (
