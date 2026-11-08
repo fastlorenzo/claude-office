@@ -23,6 +23,7 @@ import type {
   SessionPhaseKind,
 } from "@/engine/contracts";
 import { CHECK_COLORS } from "@/engine/contracts";
+import { CI_COLORS } from "@/engine/logic/statusPalette";
 
 // ---------------------------------------------------------------------------
 // Thresholds (all tunable here)
@@ -246,20 +247,9 @@ export function worseState(a: CheckState, b: CheckState): CheckState {
   return STATE_RANK[b] > STATE_RANK[a] ? b : a;
 }
 
-/** Colour of a rolled-up check state (CHECK_COLORS: failure red, merged purple). */
+/** Colour of a rolled-up check state (CI_COLORS). */
 export function stateColor(state: CheckState): string {
-  switch (state) {
-    case "failure":
-      return CHECK_COLORS.failure;
-    case "success":
-      return CHECK_COLORS.done;
-    case "running":
-      return CHECK_COLORS.working;
-    case "queued":
-      return CHECK_COLORS.needs_you;
-    default:
-      return CHECK_COLORS.ended;
-  }
+  return CI_COLORS[state];
 }
 
 export function sizeClassOf(

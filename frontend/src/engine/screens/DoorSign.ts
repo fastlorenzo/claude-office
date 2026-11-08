@@ -11,6 +11,7 @@
  * the room goes away. Mesh metadata carries `interact: { kind: "screen", ... }`.
  */
 
+import { MUTED_GREY } from "@/engine/logic/statusPalette";
 import {
   Color3,
   CreateBox,
@@ -343,7 +344,7 @@ export function drawDoorSign(
   const countsW = ctx.measureText(counts).width;
   const branch = d.gitBranch?.trim();
   const textY = barY - footFont * 0.85;
-  ctx.fillStyle = "#64748B";
+  ctx.fillStyle = MUTED_GREY;
   ctx.fillText(counts, pad, textY);
   if (branch) {
     ctx.fillStyle = "#94A3B8";

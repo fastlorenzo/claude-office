@@ -80,14 +80,14 @@ describe("project info screen rows", () => {
     const needs = projectLedContent("p", ["working", "needs_you", "done"]);
     expect(needs.line.at(-1)).toEqual({
       text: "1 NEEDS YOU",
-      color: "#F5A524",
+      color: "#f59e0b",
     });
     expect(projectLedContent("p", ["done", "working"]).line.at(-1)?.text).toBe(
       "WORKING",
     );
     expect(projectLedContent("p", ["done"]).line.at(-1)).toEqual({
-      text: "IDLE",
-      color: "#34D399",
+      text: "DONE",
+      color: "#22c55e",
     });
     expect(projectLedContent("p", ["done"]).line[2].text).toBe("1 SESSION");
   });

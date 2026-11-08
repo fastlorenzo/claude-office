@@ -4,6 +4,7 @@
  * blue working, green idle, grey ended.
  */
 import type { RoomStatus, SessionPhaseKind } from "@/engine/contracts";
+import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 import type { LedContent } from "@/engine/world/LedPanel";
 
 export const PHASE_COLORS: Record<SessionPhaseKind, string> = {
@@ -38,11 +39,11 @@ export function projectLedContent(
   const live = statuses.filter((s) => s !== "ended").length;
   const st =
     needs > 0
-      ? { text: `${needs} NEEDS YOU`, color: "#F5A524" }
+      ? { text: `${needs} NEEDS YOU`, color: SESSION_COLORS.needs_you }
       : working
-        ? { text: "WORKING", color: "#5B9DFF" }
+        ? { text: "WORKING", color: SESSION_COLORS.working }
         : live > 0
-          ? { text: "IDLE", color: "#34D399" }
+          ? { text: "DONE", color: SESSION_COLORS.done }
           : { text: "ENDED", color: "#7C7A76" };
   const n = statuses.length;
   const sep = { text: "  ·  ", color: "#6E6A64" };
