@@ -49,6 +49,7 @@ import {
   type ShellKind,
 } from "@/engine/world/ProjectShell";
 import { projectLedContent } from "@/engine/world/RoomSign";
+import { endWallBoxes } from "@/engine/world/projectRoomColliders";
 
 export interface ProjectRoomContext {
   scene: Scene;
@@ -185,6 +186,14 @@ export class ProjectRoom {
       new Vector3(sx * hallHalf, LAYOUT.WALL_H / 2, (p0 + p1) / 2),
       new Vector3(0.18, LAYOUT.WALL_H, Math.abs(p1 - p0)),
     );
+    // End walls (the prefab has none): no walking into the next room / off
+    // the slab past an empty bay.
+    for (const w of endWallBoxes(layout))
+      colliders.addBox(
+        g,
+        new Vector3(w.center.x, w.center.y, w.center.z),
+        new Vector3(w.size.x, w.size.y, w.size.z),
+      );
 
     // ---- Plants: vacant pod bays get a planter pair; a hall planter at the far end.
     const place = (
