@@ -1192,6 +1192,7 @@ export class Building {
         assets.instantiate(
           "plantTall",
           null,
+    const fb = buildFactoryLayout(layout).bounds;
           {
             position: { x: px, y: PLANTER_SOIL_Y.planterTall, z: pz },
             yaw: s.bay,
@@ -1232,8 +1233,13 @@ export class Building {
     const max = layout.bounds.max;
     const center = new Vector3((min.x + max.x) / 2, 0, (min.z + max.z) / 2);
     if (!this.skyline)
-      this.skyline = new Exterior(this.ctx.scene, this.ctx.lighting, center);
-    else this.skyline.setCenter(center);
+      this.skyline = new Exterior(
+        this.ctx.scene,
+        this.ctx.lighting,
+        center,
+        fb,
+      );
+    else this.skyline.setCenter(center, fb);
     return emptyPart();
   }
 

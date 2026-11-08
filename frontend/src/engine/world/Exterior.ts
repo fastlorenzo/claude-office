@@ -521,7 +521,6 @@ export class Exterior {
   private readonly owned: { dispose(): void }[] = [];
   private disposed = false;
   private mats: Mats;
-  private zN = Number.NaN;
   plan: ExteriorPlan | null = null;
   /** ms from construction until the baked cube replaced the sky (null: pending). */
   bakeMs: number | null = null;
@@ -531,7 +530,10 @@ export class Exterior {
     private readonly lighting: Lighting,
     /** Centre of the office floor plate (x, z): the park is laid out around it. */
     private center: Vector3,
+    /** Current factory envelope bounds (FactoryLayout.bounds). */
+    bounds?: { min: { x: number; z: number }; max: { x: number; z: number } },
   ) {
+    if (bounds) this.bounds = bounds;
     const gtex = groundAtlas(scene);
     const ctex = claddingAtlas(scene);
     const ttex = treeAtlas(scene);
@@ -557,19 +559,42 @@ export class Exterior {
     void this.bakeFar(performance.now());
   }
 
-  /** Office plate centre moved (more bays): re-place the near park. */
-  setCenter(center: Vector3): void {
+  /**
+   * Office plate centre / factory bounds moved (more bays): re-place the near
+   * park whenever the envelope the scatter is planned against changes.
+   */
+  setCenter(
+    center: Vector3,
+    bounds?: { min: { x: number; z: number }; max: { x: number; z: number } },
+  ): void {
     this.center = center;
-    if (this.footprint().zN !== this.zN) this.buildNear();
+    if (bounds) this.bounds = bounds;
+    if (this.footprintKey() !== this.fpKey) this.buildNear();
+  }
+
+  private bounds: {
+    min: { x: number; z: number };
+    max: { x: number; z: number };
+  } | null = null;
+  private fpKey = "";
+  private footprintKey(): string {
+    const f = this.footprint();
+    return [f.halfW, f.zS, f.zN, f.entrance?.z0, f.entrance?.x1].join(",");
   }
 
   private footprint(): Footprint {
-    const zS = -LAYOUT.LOBBY_D;
-    const controlEnd = 2 * this.center.z - zS;
+    // Building bounds run from the entrance façade (-LOBBY_D) to the
+    // control room's end; the envelope starts at FACTORY.SOUTH_Z and the
+    // entrance building projects south of it under the reception.
+    const zFront = -LAYOUT.LOBBY_D;
+    const controlEnd = 2 * this.center.z - zFront;
+    const halfE = (LAYOUT.HALL_W + 2 * LAYOUT.ROOM_D) / 2;
+    const b = this.bounds;
     return {
-      halfW: FACTORY.OUTER_X,
-      zS,
-      zN: controlEnd + FACTORY.DOCK_D,
+      halfW: b ? b.max.x : FACTORY.OUTER_X,
+      zS: b ? b.min.z : FACTORY.SOUTH_Z,
+      zN: b ? b.max.z : controlEnd + FACTORY.DOCK_D,
+      entrance: { x0: -halfE, x1: halfE, z0: zFront, z1: FACTORY.SOUTH_Z },
     };
   }
 
@@ -579,7 +604,7 @@ export class Exterior {
     for (const m of this.near) m.dispose(false, false);
     this.near = [];
     const fp = this.footprint();
-    this.zN = fp.zN;
+    this.fpKey = this.footprintKey();
     const plan = planExterior(fp);
     this.plan = plan;
     const ground = newBuf();
@@ -657,7 +682,7 @@ export class Exterior {
       );
     }
     // Plaza pedestrian crossing across the lot's central aisle.
-    const plaza = plan.concrete[0];
+    const plaza = plan.plaza;
     for (let i = 0; i < 8; i++) {
       const x = plaza.x0 + 1.5 + i * 2.7;
       if (x + 1.0 > plaza.x1) break;
@@ -1184,7 +1209,8 @@ export class Exterior {
         [1.0, 0.96, 0.82],
       );
     };
-    for (let x = -28; x <= 28; x += 28) pole(x, fp.zS - 17.2, x <= 0 ? 1 : -1);
+    // Lot lights (clear of the central walk to the doors).
+    for (const x of [-28, 2.4, 28]) pole(x, plan.lot.z1 - 9.2, x <= 0 ? 1 : -1);
     for (let x = -28; x <= 28; x += 28) pole(x, fp.zN + 20, x <= 0 ? 1 : -1);
 
     const m = (name: string, b: Buf, mat: PBRMaterial): Mesh =>
