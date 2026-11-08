@@ -29,4 +29,3 @@ export async function loadHavok(): Promise<HavokPlugin> {
   const hk = await havokPromise;
   return new HavokPlugin(true, hk);
 }
-

@@ -254,7 +254,11 @@ describe("lighting state is a pure function of the plan (WS5 L1, P4)", () => {
     const scene = new Scene(engine);
     const lighting = new Lighting(scene);
     lighting.setShadowQuality("high");
-    const roof = CreateBox("roof", { width: 10, height: 0.1, depth: 10 }, scene);
+    const roof = CreateBox(
+      "roof",
+      { width: 10, height: 0.1, depth: 10 },
+      scene,
+    );
     roof.position.y = 6;
     lighting.addStaticCasters([roof]);
     // Not deferred to the readiness-gated first render: Babylon skips the

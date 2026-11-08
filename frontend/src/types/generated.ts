@@ -139,19 +139,23 @@ export type Author = string | null;
 export type Url = string | null;
 export type Draft = boolean;
 export type State = "open" | "merged" | "closed";
-export type Reviewdecision = ("approved" | "changes_requested" | "review_required") | null;
+export type Reviewdecision =
+  ("approved" | "changes_requested" | "review_required") | null;
 export type Mergeable = ("mergeable" | "conflicting" | "unknown") | null;
-export type State1 = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+export type State1 =
+  "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Total = number;
 export type Passed = number;
 export type Failed = number;
 export type Pending = number;
 export type Name2 = string;
-export type State2 = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+export type State2 =
+  "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Startedat1 = string | null;
 export type Durations = number | null;
 export type Url1 = string | null;
-export type Kind = "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
+export type Kind =
+  "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
 export type Attempt = number | null;
 export type Flaky = boolean;
 export type Runs = CheckRun[];
@@ -176,7 +180,8 @@ export type Id2 = string;
 export type Workflow = string;
 export type Kind1 = "ci" | "deploy" | "release" | "other";
 export type Branch1 = string | null;
-export type State3 = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+export type State3 =
+  "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Startedat2 = string | null;
 export type Durations1 = number | null;
 export type Url2 = string | null;
@@ -187,7 +192,8 @@ export type Flaky2 = boolean;
 export type Pipelines = PipelineRun[];
 export type Ciavailable = boolean;
 export type Updatedat1 = string;
-export type Mainhealth = "none" | "queued" | "running" | "success" | "failure" | "cancelled";
+export type Mainhealth =
+  "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Tag = string;
 export type Name4 = string | null;
 export type Publishedat = string | null;

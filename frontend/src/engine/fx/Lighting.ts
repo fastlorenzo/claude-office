@@ -580,8 +580,9 @@ export class Lighting {
     const was = map.renderList?.length ?? 0;
     map.renderList = this.staticCasterList();
     if (was === 0 && map.renderList.length > 0) {
-      (this.sun as unknown as { _markMeshesAsLightDirty(): void })
-        ._markMeshesAsLightDirty();
+      (
+        this.sun as unknown as { _markMeshesAsLightDirty(): void }
+      )._markMeshesAsLightDirty();
       this.refreezeMaterials();
     }
   }

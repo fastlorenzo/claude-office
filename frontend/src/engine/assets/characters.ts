@@ -221,4 +221,3 @@ export const CHARACTER_SIT_PELVIS_HEIGHT: Record<"m" | "f", number> = {
 
 /** Radians to add to a character's yaw so that yaw 0 looks toward +Z. */
 export const CHARACTER_FACING_YAW_OFFSET = 0;
-

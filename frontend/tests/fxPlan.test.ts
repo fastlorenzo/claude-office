@@ -64,7 +64,9 @@ describe("planFx presets", () => {
     expect(of("medium").ssr).toBeNull();
     expect(of("high").ssr).toBeNull(); // probes reflect; 12-pass budget (WS5b)
     expect(of("ultra").ssr?.downsample).toBe(0);
-    expect(of("ultra").ssr!.maxSteps).toBeGreaterThan(SSR_BY_QUALITY.medium.maxSteps);
+    expect(of("ultra").ssr!.maxSteps).toBeGreaterThan(
+      SSR_BY_QUALITY.medium.maxSteps,
+    );
   });
   it("drops the sharpen pass when TAA is on", () => {
     expect(of("high").taa).not.toBeNull();

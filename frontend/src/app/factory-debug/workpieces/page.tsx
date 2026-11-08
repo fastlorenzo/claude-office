@@ -142,24 +142,41 @@ export default function WorkpiecesDebugPage() {
     frameMat.roughness = 0.4;
     for (const z of LANES_Z) {
       const len = X1 - X0;
-      const belt = CreateBox("belt", { width: len, height: 0.08, depth: 0.9 }, scene);
+      const belt = CreateBox(
+        "belt",
+        { width: len, height: 0.08, depth: 0.9 },
+        scene,
+      );
       belt.position.set((X0 + X1) / 2, 0.81, z);
       belt.material = beltMat;
       for (const s of [-1, 1]) {
-        const rail = CreateBox("rail", { width: len, height: 0.12, depth: 0.05 }, scene);
+        const rail = CreateBox(
+          "rail",
+          { width: len, height: 0.12, depth: 0.05 },
+          scene,
+        );
         rail.position.set((X0 + X1) / 2, 0.83, z + s * 0.475);
         rail.material = frameMat;
       }
       for (let x = X0 + 0.5; x <= X1; x += 2) {
-        const leg = CreateBox("leg", { width: 0.08, height: 0.77, depth: 0.8 }, scene);
+        const leg = CreateBox(
+          "leg",
+          { width: 0.08, height: 0.77, depth: 0.8 },
+          scene,
+        );
         leg.position.set(x, 0.385, z);
         leg.material = frameMat;
       }
     }
     // Queue staging deck.
     const queue: Vec3[] = [];
-    for (let i = 0; i < 5; i++) queue.push({ x: -11, y: 0.3, z: -0.4 + i * 1.3 });
-    const deck = CreateBox("deck", { width: 1.6, height: 0.3, depth: 7 }, scene);
+    for (let i = 0; i < 5; i++)
+      queue.push({ x: -11, y: 0.3, z: -0.4 + i * 1.3 });
+    const deck = CreateBox(
+      "deck",
+      { width: 1.6, height: 0.3, depth: 7 },
+      scene,
+    );
     deck.position.set(-11, 0.15, 1.8);
     deck.material = frameMat;
 
@@ -174,7 +191,11 @@ export default function WorkpiecesDebugPage() {
       const [x, y, z, yaw, pitch] = cp.split(",").map(Number);
       if ([x, y, z].every(Number.isFinite)) {
         cam.position.set(x, y, z);
-        cam.rotation.set(((pitch || 0) * Math.PI) / 180, ((yaw || 0) * Math.PI) / 180, 0);
+        cam.rotation.set(
+          ((pitch || 0) * Math.PI) / 180,
+          ((yaw || 0) * Math.PI) / 180,
+          0,
+        );
       }
     }
     cam.minZ = 0.05;
@@ -217,7 +238,12 @@ export default function WorkpiecesDebugPage() {
     <canvas
       ref={canvasRef}
       tabIndex={0}
-      style={{ width: "100vw", height: "100vh", display: "block", outline: "none" }}
+      style={{
+        width: "100vw",
+        height: "100vh",
+        display: "block",
+        outline: "none",
+      }}
     />
   );
 }

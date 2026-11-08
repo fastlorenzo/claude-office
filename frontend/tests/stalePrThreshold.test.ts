@@ -23,7 +23,14 @@ function pr(extra: Partial<PullRequestInfo>): PullRequestInfo {
     branch: "feat/1",
     draft: false,
     state: "open",
-    checks: { state: "success", total: 1, passed: 1, failed: 0, pending: 0, runs: [] },
+    checks: {
+      state: "success",
+      total: 1,
+      passed: 1,
+      failed: 0,
+      pending: 0,
+      runs: [],
+    },
     updatedAt: ago(D),
     ...extra,
   };
@@ -61,7 +68,9 @@ describe("stale PR threshold", () => {
   });
 
   it("a very old open PR sits in holding; a fresh one does not", () => {
-    expect(segmentOf(pr({ updatedAt: ago(60 * D), stale: true }))).toBe("holding");
+    expect(segmentOf(pr({ updatedAt: ago(60 * D), stale: true }))).toBe(
+      "holding",
+    );
     expect(segmentOf(pr({ updatedAt: ago(D / 24) }))).not.toBe("holding");
   });
 

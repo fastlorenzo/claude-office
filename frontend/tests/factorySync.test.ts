@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NullEngine, Scene } from "@/engine/babylon";
 import type { CampusProject, PullRequestInfo } from "@/engine/contracts";
 import { demoFactoryProjects } from "@/engine/demo/demoFactory";
-import {
-  allocateSlots,
-  generateLayout,
-} from "@/engine/layout/buildingLayout";
+import { allocateSlots, generateLayout } from "@/engine/layout/buildingLayout";
 import {
   buildFactoryLayout,
   type FactoryLayout,
@@ -14,10 +11,7 @@ import { FactoryMotion } from "@/engine/logic/factoryMotion";
 import type { FactoryModel } from "@/engine/logic/factoryModel";
 import type { Factory } from "@/engine/world/factory/Factory";
 import { FactoryLines } from "@/engine/world/factory/FactoryLines";
-import {
-  FactorySync,
-  rekeyDemo,
-} from "@/engine/world/factory/factorySync";
+import { FactorySync, rekeyDemo } from "@/engine/world/factory/factorySync";
 import {
   conveyorPaths,
   intakeSlot,
@@ -207,7 +201,9 @@ describe("lineAdapter", () => {
 
   it("stations: one per lane x check, beacon = the lane's PR state", () => {
     const sync = new FactorySync();
-    const lanesOf = new Map(layout.cells.map((c) => [c.projectId, c.lanes.length]));
+    const lanesOf = new Map(
+      layout.cells.map((c) => [c.projectId, c.lanes.length]),
+    );
     const { model } = sync.update({
       projects: [project("o/a", [pr(1), pr(2)]), project("o/b", [])],
       campus: [],
@@ -258,7 +254,11 @@ describe("lineAdapter", () => {
     const slots = waitSlots(frame);
     const at = (n: number) => {
       const id = line.workpieces.find((w) => w.prNumber === n)!.id;
-      return placeMotion(ctx, frame.find((p) => p.id === id)!, slots)!;
+      return placeMotion(
+        ctx,
+        frame.find((p) => p.id === id)!,
+        slots,
+      )!;
     };
     const s = cell.side === "east" ? 1 : -1;
     const p1 = at(1);

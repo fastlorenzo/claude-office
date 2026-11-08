@@ -6,23 +6,24 @@ The models and HDRI below are downloaded from [Poly Haven](https://polyhaven.com
 and released under the CC0 1.0 Universal public-domain dedication. Attribution is not required
 but is gratefully given.
 
-| Asset                                   | Id                                     | Type    | Authors                                          | License                                                       | Source                                                       |
-| --------------------------------------- | -------------------------------------- | ------- | ------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------ |
-| Blender Institute                       | `blender_institute`                    | hdri    | Greg Zaal                                        | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/blender_institute                    |
-| Kloofendal 48d Partly Cloudy (Pure Sky) | `kloofendal_48d_partly_cloudy_puresky` | hdri    | Greg Zaal, Jarod Guest                           | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky |
-| Fire Alarm                              | `fire_alarm`                           | model   | Slinc                                            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/fire_alarm                           |
-| Metal Office Desk                       | `metal_office_desk`                    | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/metal_office_desk                    |
-| Office Notepads                         | `office_notepads`                      | model   | Ulan Cabanilla                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/office_notepads                      |
-| Potted Plant 01                         | `potted_plant_01`                      | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_01                      |
-| Potted Plant 02                         | `potted_plant_02`                      | model   | Rico Cilliers                                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_02                      |
-| Potted Plant 04                         | `potted_plant_04`                      | model   | James Ray Cock                                   | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_04                      |
-| Projector Screen                        | `projector_screen`                     | model   | PeterM                                           | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/projector_screen                     |
-| Security Camera 01                      | `security_camera_01`                   | model   | Alexander Otterbeck, Yann Kervran                | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/security_camera_01                   |
+| Asset                                   | Id                                     | Type  | Authors                           | License                                                       | Source                                                       |
+| --------------------------------------- | -------------------------------------- | ----- | --------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
+| Blender Institute                       | `blender_institute`                    | hdri  | Greg Zaal                         | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/blender_institute                    |
+| Kloofendal 48d Partly Cloudy (Pure Sky) | `kloofendal_48d_partly_cloudy_puresky` | hdri  | Greg Zaal, Jarod Guest            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky |
+| Fire Alarm                              | `fire_alarm`                           | model | Slinc                             | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/fire_alarm                           |
+| Metal Office Desk                       | `metal_office_desk`                    | model | Ulan Cabanilla                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/metal_office_desk                    |
+| Office Notepads                         | `office_notepads`                      | model | Ulan Cabanilla                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/office_notepads                      |
+| Potted Plant 01                         | `potted_plant_01`                      | model | Rico Cilliers                     | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_01                      |
+| Potted Plant 02                         | `potted_plant_02`                      | model | Rico Cilliers                     | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_02                      |
+| Potted Plant 04                         | `potted_plant_04`                      | model | James Ray Cock                    | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/potted_plant_04                      |
+| Projector Screen                        | `projector_screen`                     | model | PeterM                            | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/projector_screen                     |
+| Security Camera 01                      | `security_camera_01`                   | model | Alexander Otterbeck, Yann Kervran | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | https://polyhaven.com/a/security_camera_01                   |
 
 `HavokPhysics.wasm` (copied to `public/havok/`) is distributed under the license of the
 `@babylonjs/havok` package.
 
 <!-- BEGIN MATERIALS2 -->
+
 ## materials2 (ambientCG, CC0 1.0)
 
 PBR textures under `materials2/` come from [ambientCG](https://ambientcg.com)
@@ -47,4 +48,5 @@ required. Fetched, colour-graded, resized and packed (ORM) by `bun run materials
 - [Terrazzo006](https://ambientcg.com/a/Terrazzo006)
 - [Wood050](https://ambientcg.com/a/Wood050)
 - [Wood095](https://ambientcg.com/a/Wood095)
+
 <!-- END MATERIALS2 -->

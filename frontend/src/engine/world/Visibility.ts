@@ -313,4 +313,3 @@ export function visRoomsOfProjects(
     side: l.slot.side,
   }));
 }
-

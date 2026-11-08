@@ -35,7 +35,10 @@ describe("samplePolyline", () => {
     expect(samplePolyline(P, -3).x).toBe(0);
     expect(samplePolyline(P, 9).z).toBe(10);
     expect(samplePolyline([], 0.5)).toEqual({ x: 0, y: 0, z: 0, yaw: 0 });
-    expect(samplePolyline([{ x: 1, y: 2, z: 3 }], 0.5)).toMatchObject({ x: 1, z: 3 });
+    expect(samplePolyline([{ x: 1, y: 2, z: 3 }], 0.5)).toMatchObject({
+      x: 1,
+      z: 3,
+    });
   });
   it("heading: +x -> yaw 0, +z -> local x points along +z", () => {
     expect(samplePolyline(P, 0.1).yaw).toBeCloseTo(0);
@@ -124,7 +127,9 @@ describe("change detection", () => {
     ]) {
       expect(signaturesChanged(a, sigMap([{ ...base, ...patch }]))).toBe(true);
     }
-    expect(signaturesChanged(a, sigMap([base, { ...base, id: "b" }]))).toBe(true);
+    expect(signaturesChanged(a, sigMap([base, { ...base, id: "b" }]))).toBe(
+      true,
+    );
     expect(signaturesChanged(a, new Map())).toBe(true);
   });
   it("ignores sub-millimetre jitter", () => {

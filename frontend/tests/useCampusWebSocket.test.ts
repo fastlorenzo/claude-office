@@ -54,9 +54,8 @@ vi.mock("react", () => ({
 // zustand's React binding uses the real react; give the store a hook that just
 // reads the vanilla store so it works under the fake runtime.
 vi.mock("zustand", async () => {
-  const vanilla = await vi.importActual<typeof import("zustand/vanilla")>(
-    "zustand/vanilla",
-  );
+  const vanilla =
+    await vi.importActual<typeof import("zustand/vanilla")>("zustand/vanilla");
   return {
     create: () => (init: never) => {
       const api = vanilla.createStore(init);

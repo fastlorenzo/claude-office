@@ -21,7 +21,13 @@ interface JsonSchema {
 }
 
 const ROOT = path.resolve(__dirname, "..", "..");
-const CONTRACTS = path.resolve(__dirname, "..", "src", "engine", "contracts.ts");
+const CONTRACTS = path.resolve(
+  __dirname,
+  "..",
+  "src",
+  "engine",
+  "contracts.ts",
+);
 
 function loadSchema(): JsonSchema | null {
   const r = spawnSync(

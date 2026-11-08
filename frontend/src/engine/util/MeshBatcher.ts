@@ -164,4 +164,3 @@ export class MeshBatcher {
 export function v3(x: number, y: number, z: number): V3 {
   return { x, y, z };
 }
-

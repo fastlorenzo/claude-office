@@ -9,7 +9,10 @@ import { useWorldUiStore } from "@/stores/worldUiStore";
 import type { Session } from "@/hooks/useSessions";
 import { sessionLabel, toSessionMeta } from "./sessionMeta";
 import { enterSession, setEnterContext } from "./enterSession";
-import { githubUrlOf, isFactoryKind } from "@/engine/interaction/factoryTargets";
+import {
+  githubUrlOf,
+  isFactoryKind,
+} from "@/engine/interaction/factoryTargets";
 import { setWorld } from "./worldRef";
 
 const SYNC_THROTTLE_MS = 50;
