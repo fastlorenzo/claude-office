@@ -779,16 +779,14 @@ export class Lighting {
     const noSun = this.configured && this.shadowQuality === "off";
     let fill = FILL_ON;
     let key = KEY_ON;
-    if (noSun) {
-      fill = Math.max(fill, 0.55);
-      key = Math.max(key, 0.8);
-    }
-    if (noFixtures) {
-      // 0.75 / 0.9 left the low tier 17 % brighter than high at the spawn
-      // (perf-gate shots, WS5); the WS5 target is within 15 %.
-      fill = Math.max(fill, 0.62);
-      key = Math.max(key, 0.82);
-    }
+    if (noSun && noFixtures) {
+      // The low tier. Since the sun map occludes properly (WS5b) the high
+      // spawn lost its through-the-ceiling daylight (mean 109.8 -> 94.6),
+      // and 0.62 / 0.82 left low 32 % brighter (124.7); target within 15 %.
+      fill = 0.3;
+      key = 0.6;
+    } else if (noSun) fill = Math.max(fill, 0.4);
+    else if (noFixtures) fill = Math.max(fill, 0.45);
     this.fill.intensity = fill;
     this.key.intensity = key;
   }

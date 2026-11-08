@@ -235,8 +235,9 @@ describe("lighting state is a pure function of the plan (WS5 L1, P4)", () => {
     lighting.setMaxDynamicLights(0);
     lighting.setPoolIntensity(0);
     const low = [lighting.fill.intensity, lighting.key.intensity];
-    expect(low[0]).toBeGreaterThanOrEqual(0.55);
-    expect(low[1]).toBeGreaterThanOrEqual(0.8);
+    // Low tier (no sun, no fixtures): its own ambient, within 15 % of high
+    // at the spawn (WS5b perf-gate luminance).
+    expect(low).toEqual([0.3, 0.6]);
     lighting.setShadowQuality("high");
     lighting.setMaxDynamicLights(4);
     lighting.setPoolIntensity(1);
