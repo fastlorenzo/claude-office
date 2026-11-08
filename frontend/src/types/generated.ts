@@ -314,6 +314,11 @@ export type Linesaddedtoday = number | null;
 export type Linesremovedtoday = number | null;
 export type Updatedat3 = string;
 export type Lastupdated1 = string;
+export type Sentat = number | null;
+export type Revs = {
+  [k: string]: string;
+} | null;
+export type Staleprdays = number | null;
 export type Path1 = string;
 /**
  * Git file status codes.
@@ -1107,6 +1112,9 @@ export interface CampusState {
   projects?: Projects;
   stats?: CampusStats | null;
   lastUpdated: Lastupdated1;
+  sentAt?: Sentat;
+  revs?: Revs;
+  stalePrDays?: Staleprdays;
   [k: string]: unknown;
 }
 /**

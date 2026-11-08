@@ -7,6 +7,8 @@ frontend can render all sessions at once. Heavy ``GameState`` fields
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
@@ -111,6 +113,9 @@ class CampusSession(BaseModel):
     last_updated: datetime
 
 
+logger = logging.getLogger(__name__)
+
+
 class CampusState(BaseModel):
     """The full campus feed broadcast over ``/ws/campus``."""
 
@@ -120,6 +125,18 @@ class CampusState(BaseModel):
     projects: list[CampusProject] | None = None
     stats: CampusStats | None = None
     last_updated: datetime
+    # Server clock (epoch ms) when this frame was built; clients show the age of
+    # the data they hold when the feed stops (review D2).
+    sent_at: int | None = None
+    # Per-section content revisions: {sessions, projects, stats}. Equal rev = identical
+    # content, so clients skip a structural compare on every ~100 ms frame (review D10).
+    revs: dict[str, str] | None = None
+    # CI_STALE_PR_DAYS: open PRs idle longer are flagged ``stale`` (review D4).
+    stale_pr_days: int | None = None
+
+
+def _rev(*parts: str) -> str:
+    return hashlib.blake2b("\x1f".join(parts).encode(), digest_size=8).hexdigest()
 
 
 def _truncate(text: str, limit: int = SUMMARY_MAX_CHARS) -> str:
@@ -379,12 +396,21 @@ def _main_health(pipelines: list[PipelineRun], default_branch: str | None) -> Ch
 
 
 def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
-    """Build the campus feed for every session, sorted by session id."""
+    """Build the campus feed for every session, sorted by session id.
+
+    A session whose snapshot cannot be built is logged and skipped, so one
+    corrupt session never freezes the whole feed (review D2).
+    """
     items = sorted(
         ((sid, sm) for sid, sm in sessions.items() if not sm.campus_hidden),
         key=lambda kv: kv[0],
     )
-    built = [build_campus_session(sid, sm) for sid, sm in items]
+    built: list[CampusSession] = []
+    for sid, sm in items:
+        try:
+            built.append(build_campus_session(sid, sm))
+        except Exception:
+            logger.exception("Campus: skipping session %s (snapshot failed)", sid)
     by_status: dict[str, int] = {}
     subagents = 0
     for cs in built:
@@ -398,9 +424,18 @@ def build_campus(sessions: dict[str, StateMachine]) -> CampusState:
                 else sum(1 for a in cs.agents if a.state not in _INACTIVE_AGENT_STATES)
             )
     now = datetime.now(UTC)
+    projects = build_projects(built, now)
+    stats = get_telemetry_store().stats(by_status, subagents)
     return CampusState(
         sessions=built,
-        projects=build_projects(built, now),
-        stats=get_telemetry_store().stats(by_status, subagents),
+        projects=projects,
+        stats=stats,
         last_updated=now,
+        sent_at=int(now.timestamp() * 1000),
+        revs={
+            "sessions": _rev(*(cs.model_dump_json(by_alias=True) for cs in built)),
+            "projects": _rev(*(p.model_dump_json(by_alias=True) for p in projects)),
+            "stats": _rev(stats.model_dump_json(by_alias=True)) if stats else "",
+        },
+        stale_pr_days=get_settings().CI_STALE_PR_DAYS,
     )

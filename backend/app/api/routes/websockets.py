@@ -9,12 +9,15 @@ captured by the session-id route (which would treat "overview" as a session
 id, accept, find no state, and silently idle).
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.websocket import get_manager
+from app.config import get_settings
 from app.core.event_processor import get_event_processor
+from app.models.campus import CampusState
 from app.services.git_service import git_service
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,14 @@ _MAX_OVERVIEW_CONNECTIONS = 16
 _MAX_CAMPUS_CONNECTIONS = 8
 
 router = APIRouter()
+
+
+def _campus_frame(campus: CampusState) -> dict[str, object]:
+    return {
+        "type": "state_update",
+        "timestamp": campus.last_updated.isoformat(),
+        "state": campus.model_dump(mode="json", by_alias=True),
+    }
 
 
 @router.websocket("/ws/overview")
@@ -87,7 +98,11 @@ async def websocket_campus(websocket: WebSocket) -> None:
     """
     from app.api.websocket import validate_websocket_origin
 
+    # Refusals complete the handshake first: closing an un-accepted socket is an
+    # HTTP 403 the browser reports as 1006, so the 4003/4013 codes the frontend
+    # acts on (stop retrying / "too many viewers") would never reach it.
     if not validate_websocket_origin(websocket):
+        await websocket.accept()
         await websocket.close(code=4003, reason="Origin not allowed")
         return
 
@@ -95,20 +110,27 @@ async def websocket_campus(websocket: WebSocket) -> None:
         websocket, max_connections=_MAX_CAMPUS_CONNECTIONS
     )
     if not accepted:
+        await websocket.accept()
         await websocket.close(code=4013, reason="Too many campus connections")
         return
     try:
         campus = await get_event_processor().build_campus_snapshot()
-        await websocket.send_json(
-            {
-                "type": "state_update",
-                "timestamp": campus.last_updated.isoformat(),
-                "state": campus.model_dump(mode="json", by_alias=True),
-            }
-        )
-        # Keep alive -- discard incoming messages
+        await websocket.send_json(_campus_frame(campus))
+        # Keep alive -- discard incoming messages. While idle, push a fresh
+        # full frame every CAMPUS_HEARTBEAT_SECONDS: a quiet backend then keeps
+        # advancing the client's "last frame" clock, while a feed that can no
+        # longer be built (frozen data) goes silent and the client flags it.
+        heartbeat = get_settings().CAMPUS_HEARTBEAT_SECONDS
         while True:
-            await websocket.receive_text()
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=heartbeat)
+            except TimeoutError:
+                try:
+                    campus = await get_event_processor().build_campus_heartbeat()
+                except Exception:
+                    logger.exception("Campus heartbeat: snapshot failed")
+                    continue
+                await websocket.send_json(_campus_frame(campus))
     except WebSocketDisconnect:
         pass
     except Exception:

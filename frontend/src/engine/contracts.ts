@@ -320,6 +320,13 @@ export interface CampusProject {
   pinned?: boolean;
 }
 
+/** Content revisions of the three feed sections (equal rev = identical content). */
+export interface CampusRevs {
+  sessions: string;
+  projects: string;
+  stats: string;
+}
+
 export interface CampusState {
   sessions: CampusSession[];
   /** Sessions grouped by project with CI/CD data; absent on older backends. */
@@ -327,6 +334,12 @@ export interface CampusState {
   /** Building-wide stats; absent on older backends. */
   stats?: CampusStats | null;
   lastUpdated: string;
+  /** Server clock (epoch ms) when this frame was built. */
+  sentAt?: number | null;
+  /** Per-section content revisions; absent on older backends. */
+  revs?: CampusRevs | null;
+  /** Backend `CI_STALE_PR_DAYS` (PRs idle longer are flagged `stale`). */
+  stalePrDays?: number | null;
 }
 
 /** Session metadata from REST `/api/v1/sessions` needed by the world. */

@@ -843,6 +843,13 @@ class EventProcessor:
         async with self._sessions_lock:
             return build_campus(self.sessions)
 
+    async def build_campus_heartbeat(self) -> CampusState:
+        """Campus state for an idle-client heartbeat: no DB restore, no liveness sweep."""
+        from app.models.campus import build_campus
+
+        async with self._sessions_lock:
+            return build_campus(self.sessions)
+
     async def sweep_campus_liveness(self, broadcast: bool = True) -> bool:
         """Refresh ``alive`` for every session; end, then hide, dead ones.
 

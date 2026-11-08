@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # No hook event and no transcript write for this long => session is "stale"
     # (shown idle when liveness is unknown).
     CAMPUS_STALE_SECONDS: int = 1200  # 20 min
+    # Idle /ws/campus clients get a fresh full frame this often, so the frontend can
+    # tell a quiet backend from a frozen feed (it flags data older than ~30 s).
+    CAMPUS_HEARTBEAT_SECONDS: float = 10.0
     # A session whose process is gone is marked ended, then dropped from the
     # campus after this grace so the room can play its "ended" state.
     CAMPUS_DEAD_GRACE_SECONDS: int = 60
