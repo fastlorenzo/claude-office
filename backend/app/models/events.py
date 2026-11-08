@@ -320,6 +320,9 @@ class BackgroundTaskEventData(EventDataBase):
     background_task_output_file: str | None = None
     background_task_status: str | None = None  # "completed" | "failed"
     background_task_summary: str | None = None
+    # ``<tool-use-id>`` of the task-notification (the call that started the
+    # task) when the hook passes it; links the notification to its call.
+    tool_use_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

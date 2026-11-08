@@ -298,12 +298,21 @@ def _handle_pre_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
             sm.boss_bubble = bubble
             sm.boss_state = BossState.WORKING
         else:
-            if agent_id not in sm.agents and len(sm.agents) < sm.MAX_AGENTS:
+            node = sm.agent_tree.get(agent_id)
+            if node is not None and node.ended_at is not None:
+                # Tail of a finished agent's transcript (polled after its
+                # stop): no desk for it, the console still records the call.
+                pass
+            elif agent_id not in sm.agents and len(sm.agents) < sm.MAX_AGENTS:
                 new_agent = sm.create_agent(
                     AgentEventData(
                         agent_id=agent_id,
-                        agent_name=f"Ghost {agent_id[-4:]}",
-                        task_description="Resumed mid-session",
+                        agent_name=node.name if node is not None else f"Ghost {agent_id[-4:]}",
+                        task_description=(
+                            node.task_preview
+                            if node is not None and node.task_preview
+                            else "Resumed mid-session"
+                        ),
                     )
                 )
                 new_agent.state = AgentState.WORKING
@@ -423,6 +432,13 @@ def _handle_subagent_start(sm: "StateMachine", event: AnyEvent) -> None:
     short_name = agent.name or f"Agent-{agent.id[-4:]}"
     sm.whiteboard.record_agent_start(agent.id, short_name, agent.color)
     sm.whiteboard.add_news_item("agent", f"{short_name} joins the team!")
+
+
+def _handle_subagent_info(sm: "StateMachine", event: AnyEvent) -> None:
+    """Handle SUBAGENT_INFO: a link record (both ids) links the office agent too."""
+    assert isinstance(event, AgentEvent)
+    if event.data.agent_id and event.data.native_agent_id:
+        sm.link_native_agent(event.data.agent_id, event.data.native_agent_id)
 
 
 def _handle_subagent_stop(sm: "StateMachine", event: AnyEvent) -> None:
@@ -578,6 +594,7 @@ _DISPATCH_TABLE: dict[EventType, Callable[["StateMachine", AnyEvent], None]] = {
     EventType.PERMISSION_REQUEST: _handle_permission_request,
     EventType.POST_TOOL_USE: _handle_post_tool_use,
     EventType.SUBAGENT_START: _handle_subagent_start,
+    EventType.SUBAGENT_INFO: _handle_subagent_info,
     EventType.SUBAGENT_STOP: _handle_subagent_stop,
     EventType.CLEANUP: _handle_cleanup,
     EventType.STOP: _handle_stop,

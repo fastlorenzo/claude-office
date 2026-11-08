@@ -35,6 +35,7 @@ from app.core.broadcast_service import (
 from app.core.connection_manager import get_manager
 from app.core.floor_config import get_cached_building_config
 from app.core.handlers import (
+    discover_native_link,
     enrich_agent_from_transcript,
     ensure_task_poller_running,
     handle_agent_link,
@@ -62,7 +63,7 @@ from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
 from app.core.telemetry import get_telemetry_store
 from app.core.tool_calls import ApplyResult
-from app.core.transcript_poller import init_transcript_poller
+from app.core.transcript_poller import get_transcript_poller, init_transcript_poller
 from app.core.transcript_telemetry import refresh_transcript_telemetry
 from app.db.database import AsyncSessionLocal
 from app.db.models import EventRecord, SessionRecord
@@ -326,6 +327,19 @@ class EventProcessor:
 
     async def _handle_polled_event(self, event: AnyEvent) -> None:
         """Handle events extracted from polled subagent transcripts."""
+        # A re-read transcript (resume after a restart, a late link) re-emits
+        # calls the tracker already holds under the same agent: they add
+        # nothing, so they are not persisted again.
+        if isinstance(event, ToolEvent) and event.data.tool_use_id:
+            sm = self.sessions.get(event.session_id)
+            known = sm.tool_calls.get(event.data.tool_use_id) if sm is not None else None
+            redundant = event.event_type == EventType.PRE_TOOL_USE or (
+                event.event_type == EventType.POST_TOOL_USE
+                and known is not None
+                and known.status in ("ok", "error")
+            )
+            if known is not None and known.agent_id == event.data.agent_id and redundant:
+                return
         # tool_name is family-specific (ToolEvent); getattr keeps this log line
         # safe for non-tool polled events (AgentEvent thinking/text updates).
         tool_name = getattr(event.data, "tool_name", None)
@@ -645,6 +659,7 @@ class EventProcessor:
 
         console: ApplyResult | None = None
         if applied:
+            await self._apply_native_link(sm, event)
             sm.transition(event)
             # Captured now: enrichers may run further transitions.
             console = sm.last_console
@@ -1029,6 +1044,58 @@ class EventProcessor:
     # DB helpers
     # ------------------------------------------------------------------
 
+    async def _apply_native_link(self, sm: StateMachine, event: AnyEvent) -> None:
+        """Learn a native subagent link from ``.meta.json`` before *event* applies.
+
+        The link record is persisted with a timestamp just before the event,
+        so a DB restore replays it in the same order, then applied, broadcast
+        and the agent's transcript polled from the start (its calls were
+        missed while it was unlinked).
+        """
+        link = await discover_native_link(sm, event)
+        if link is None:
+            return
+        await self._persist_record(link)
+        sm.transition(link)
+        await broadcast_console(event.session_id, sm.last_console)
+        agent_id = link.data.agent_id
+        path = link.data.agent_transcript_path
+        if agent_id and path:
+            self._ensure_transcript_poller()
+            poller = get_transcript_poller()
+            if poller is not None:
+                await poller.start_polling(agent_id, event.session_id, path, from_start=True)
+                if event.event_type != EventType.SUBAGENT_INFO:
+                    poller.schedule_stop(agent_id, delay=5.0)
+
+    async def _backfill_linked(self, session_id: str, links: list[AgentEvent]) -> None:
+        """Read the transcripts of agents linked during a restore from the start."""
+        if not links:
+            return
+        self._ensure_transcript_poller()
+        poller = get_transcript_poller()
+        if poller is None:
+            return
+        for link in links:
+            agent_id = link.data.agent_id
+            path = link.data.agent_transcript_path
+            if agent_id and path:
+                await poller.start_polling(agent_id, session_id, path, from_start=True)
+                poller.schedule_stop(agent_id, delay=10.0)
+
+    async def _persist_record(self, event: AnyEvent) -> None:
+        """Persist a backend-made event row with the event's own timestamp."""
+        async with AsyncSessionLocal() as db:
+            db.add(
+                EventRecord(
+                    session_id=event.session_id,
+                    timestamp=event.timestamp,
+                    event_type=event.event_type.value,
+                    data=event.data.model_dump(),
+                )
+            )
+            await db.commit()
+
     async def _persist_synthetic_event(
         self, session_id: str, event_type: EventType, data: EventDataBase | dict[str, Any] | None
     ) -> None:
@@ -1172,6 +1239,7 @@ class EventProcessor:
 
             sm = StateMachine()
             skipped_count = 0
+            restored_links: list[AgentEvent] = []
             for rec in events:
                 try:
                     try:
@@ -1191,6 +1259,14 @@ class EventProcessor:
                             rec.event_type,
                         )
                         continue
+                    # Sessions recorded before link records existed: learn the
+                    # link now (persisted, so the next restore replays it) and
+                    # backfill the agent's calls from its transcript.
+                    link = await discover_native_link(sm, evt)
+                    if link is not None:
+                        await self._persist_record(link)
+                        sm.transition(link)
+                        restored_links.append(link)
                     sm.transition(evt)
                     await self._refresh_titles(sm, evt.data.transcript_path, evt.session_id)
 
@@ -1204,6 +1280,9 @@ class EventProcessor:
                     # Same dedupe as the live path: a merged duplicate copy of
                     # a call adds no history or conversation entry.
                     if sm.last_console.outcome == "merged_duplicate":
+                        continue
+                    # Backend link records are bookkeeping, not log entries.
+                    if evt.data.source == "link":
                         continue
                     history_entry: HistoryEntry = {
                         "id": entry_id,
@@ -1302,6 +1381,7 @@ class EventProcessor:
             sm.last_event_at = last_ts if last_ts.tzinfo else last_ts.replace(tzinfo=UTC)
             sm.todos = await load_tasks(session_id)
             logger.debug(f"Restored {len(sm.todos)} tasks for session {session_id}")
+            await self._backfill_linked(session_id, restored_links)
 
             return sm
 

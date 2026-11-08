@@ -11,12 +11,16 @@ Responsibilities:
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, cast
 
 from app.core.broadcast_service import broadcast_console, broadcast_state
 from app.core.jsonl_parser import get_first_user_prompt, get_last_assistant_response
+from app.core.path_utils import is_safe_transcript_path
 from app.core.state_machine import StateMachine, resolve_agent_for_stop
 from app.core.summary_service import get_summary_service
 from app.core.transcript_poller import get_transcript_poller
@@ -25,6 +29,8 @@ from app.models.common import BubbleContent, BubbleType
 from app.models.events import (
     AgentEvent,
     AgentEventData,
+    AnyEvent,
+    BackgroundTaskEvent,
     EventDataBase,
     EventType,
     ToolEvent,
@@ -36,6 +42,7 @@ __all__ = [
     "handle_subagent_stop",
     "handle_agent_link",
     "handle_agent_update",
+    "discover_native_link",
     "enrich_agent_with_summaries",
     "enrich_agent_from_transcript",
     "extract_and_set_agent_speech",
@@ -133,7 +140,10 @@ async def handle_subagent_info(
 
     # Synthesise a SUBAGENT_START if we have no agent tracking this native ID
     # and there are no unlinked (native_id=None) agents already present.
-    already_tracked = any(a.native_id == native_agent_id for a in sm.agents.values())
+    tree_id = sm.agent_tree.resolve_native(native_agent_id)
+    already_tracked = tree_id is not None or any(
+        a.native_id == native_agent_id for a in sm.agents.values()
+    )
     if not already_tracked and not any(a.native_id is None for a in sm.agents.values()):
         synthetic_data = AgentEventData(
             agent_id=f"subagent_{native_agent_id}",
@@ -161,14 +171,20 @@ async def handle_subagent_info(
     # that is already linked to this native id.
     ensure_transcript_poller_fn()
     poller = get_transcript_poller()
-    if poller:
+    if poller and tree_id is not None:
+        # The tree remembers agents the office already let go: an async agent
+        # resumed after a turn end keeps being polled under its own id.
+        await poller.start_polling(tree_id, event.session_id, transcript_path, from_start=True)
+    elif poller:
         for agent_id, agent in sm.agents.items():
             if agent.native_id == native_agent_id and not await poller.is_polling(agent_id):
                 logger.info(
                     f"Starting transcript polling for {agent_id} "
                     f"(native: {native_agent_id}) at {transcript_path}"
                 )
-                await poller.start_polling(agent_id, event.session_id, transcript_path)
+                await poller.start_polling(
+                    agent_id, event.session_id, transcript_path, from_start=True
+                )
                 break
 
     # Also enrich the freshly synthesised agent (its native_id was already set
@@ -210,7 +226,7 @@ async def handle_agent_link(
     ensure_transcript_poller_fn()
     poller = get_transcript_poller()
     if poller and not await poller.is_polling(agent_id):
-        await poller.start_polling(agent_id, event.session_id, transcript_path)
+        await poller.start_polling(agent_id, event.session_id, transcript_path, from_start=True)
 
 
 async def handle_subagent_stop(
@@ -235,6 +251,15 @@ async def handle_subagent_stop(
         agent_id=event.data.agent_id,
         native_agent_id=event.data.native_agent_id,
     )
+
+    # Poll a little longer to drain the last tool results; a resume restarts
+    # polling (async agents stop at every turn end). The tree knows agents
+    # the office already removed.
+    poll_id = resolved.agent_id if resolved else None
+    poll_id = poll_id or sm.agent_tree.resolve_native(event.data.native_agent_id)
+    poller = get_transcript_poller()
+    if poller and poll_id and event.data.source != "zombie":
+        poller.schedule_stop(poll_id)
 
     if not resolved:
         logger.warning(
@@ -261,10 +286,6 @@ async def handle_subagent_stop(
         if tool_count > 0:
             sm.tool_uses_since_compaction += tool_count
             logger.debug(f"Credited {tool_count} subagent tool uses to safety counter")
-
-    poller = get_transcript_poller()
-    if poller:
-        await poller.stop_polling(resolved_agent_id)
 
     await extract_and_set_agent_speech(sm, resolved_agent_id, event.data.agent_transcript_path)
 
@@ -409,3 +430,82 @@ async def extract_and_set_agent_speech(
             icon="✅",
         )
         logger.debug(f"Set agent {agent_id} completion summary: {summary[:50]}...")
+
+
+# Native ids already probed for a ``.meta.json`` link, per state machine.
+_PROBED_ATTR = "_native_link_probed"
+
+
+def _read_meta_tool_use_id(meta_path: Path) -> tuple[str | None, dict[str, Any]]:
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, {}
+    if not isinstance(raw, dict):
+        return None, {}
+    meta = cast(dict[str, Any], raw)
+    tool_use_id = meta.get("toolUseId")
+    return (tool_use_id if isinstance(tool_use_id, str) and tool_use_id else None), meta
+
+
+async def discover_native_link(sm: StateMachine, event: AnyEvent) -> AgentEvent | None:
+    """Link a native subagent id to its ``subagent_<toolu>`` node from ``.meta.json``.
+
+    Claude Code writes ``subagents/agent-<native>.meta.json`` next to each
+    subagent transcript, with the spawning ``toolUseId`` and ``description``.
+    When the Agent tool's PostToolUse (the usual link) was lost, this is the
+    exact link: no guessing. Returns a ``subagent_info`` link record
+    (``source="link"``, timestamped just before *event* so a DB restore
+    replays it first) for the caller to persist and apply, or None.
+    """
+    data = event.data
+    if isinstance(event, BackgroundTaskEvent):
+        native = event.data.background_task_id
+        main = data.transcript_path
+        agent_path = (
+            str(Path(main).with_suffix("") / "subagents" / f"agent-{native}.jsonl")
+            if main and native
+            else None
+        )
+    elif isinstance(event, AgentEvent) and event.event_type in (
+        EventType.SUBAGENT_INFO,
+        EventType.SUBAGENT_STOP,
+    ):
+        native = data.native_agent_id
+        agent_path = data.agent_transcript_path
+    else:
+        return None
+    if not native or not agent_path or sm.agent_tree.resolve_native(native) is not None:
+        return None
+    probed: set[str] = getattr(sm, _PROBED_ATTR, None) or set()
+    if native in probed:
+        return None
+    probed.add(native)
+    setattr(sm, _PROBED_ATTR, probed)
+
+    from app.config import get_settings  # local import to avoid cycles
+
+    transcript = Path(get_settings().translate_path(agent_path))
+    # The meta file sits next to the transcript; vet the transcript path
+    # (the safety check only admits .jsonl files under ~/.claude).
+    if not is_safe_transcript_path(transcript):
+        return None
+    meta_path = transcript.with_suffix(".meta.json")
+    tool_use_id, meta = await asyncio.to_thread(_read_meta_tool_use_id, meta_path)
+    if tool_use_id is None:
+        return None
+    description = meta.get("description")
+    agent_type = meta.get("agentType")
+    return AgentEvent(
+        event_type=EventType.SUBAGENT_INFO,
+        session_id=event.session_id,
+        timestamp=event.timestamp - timedelta(microseconds=1),
+        data=AgentEventData(
+            agent_id=f"subagent_{tool_use_id}",
+            native_agent_id=native,
+            agent_transcript_path=agent_path,
+            agent_name=description if isinstance(description, str) else None,
+            agent_type=agent_type if isinstance(agent_type, str) else None,
+            source="link",
+        ),
+    )

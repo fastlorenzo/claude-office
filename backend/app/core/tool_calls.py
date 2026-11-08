@@ -18,6 +18,7 @@ events, never from the wall clock.
 from __future__ import annotations
 
 import json
+import re
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -58,6 +59,11 @@ ACTIVITY_MAX_CHARS = 120
 _PERMISSION_LOOKBACK = 200
 
 _SPAWN_TOOLS = ("Task", "Agent")
+# Native subagent ids ("a" + 16 hex); background Bash ids are short.
+_NATIVE_ID = re.compile(r"^a[0-9a-f]{16}$")
+_AGENT_NOTIFICATION = re.compile(r'^Agent "(.+?)" ')
+_WAITING_MARK = "waiting on its own background work"
+_BACKGROUND_LOOKBACK = 500
 _ENDED: frozenset[str] = frozenset({"ok", "error", "denied", "interrupted"})
 _STDERR_MARK = "--- stderr ---"
 
@@ -193,6 +199,14 @@ def _spawn_id_of(agent_id: str | None) -> str | None:
     if agent_id and agent_id.startswith("subagent_toolu_"):
         return agent_id[len("subagent_") :]
     return None
+
+
+def _notification_agent_description(summary: str | None) -> str | None:
+    """``Agent "WS1 hooks capture" finished`` -> ``WS1 hooks capture``."""
+    if not summary:
+        return None
+    match = _AGENT_NOTIFICATION.match(summary)
+    return match.group(1) if match else None
 
 
 def _specificity(agent_id: str) -> int:
@@ -502,6 +516,10 @@ class ToolCallTracker:
             self._evicted += 1
         node = self.tree.ensure(agent_id, ts, result)
         node.tool_calls += 1
+        if node.kind == "subagent" and node.ended_at is not None and ts > node.ended_at:
+            # New work after its stop: it was resumed (or never really died).
+            node.state = "running"
+            node.ended_at = None
         if status in ("running", "waiting_permission"):
             node.current_activity = self._activity_text(call)
             self._activity_call[agent_id] = call_id
@@ -846,6 +864,10 @@ class ToolCallTracker:
         result.outcome = "created"
         result.agent_id = agent_id
 
+    def _is_live_async(self, node: AgentNode) -> bool:
+        call = self._calls.get(node.spawn_tool_use_id) if node.spawn_tool_use_id else None
+        return call is not None and call.status == "spawned"
+
     def _resolve_stop_target(self, event: AgentEvent) -> AgentNode | None:
         data = event.data
         if data.agent_id:
@@ -863,6 +885,10 @@ class ToolCallTracker:
         if data.agent_id and data.native_agent_id:
             self._learn_link(node.id, data.native_agent_id, ts, result)
         zombie = data.source == "zombie"
+        if zombie and (node.ended_at is not None or self._is_live_async(node)):
+            # A finished agent, or an async one whose real SubagentStop /
+            # task-notification is authoritative: the poller's guess is moot.
+            return
         node.state = "zombie" if zombie else ("error" if data.success is False else "done")
         node.ended_at = ts
         node.current_activity = None
@@ -900,14 +926,46 @@ class ToolCallTracker:
         result.agent_id = node.id
 
     def _on_subagent_info(self, event: AgentEvent, ts: str, result: ApplyResult) -> None:
-        """Native SubagentStart: a known (linked) agent that was stopped resumed."""
+        """Native SubagentStart (an agent (re)starts), or a backend link record.
+
+        A record carrying both ``agent_id`` and ``native_agent_id`` (persisted
+        by the backend from the subagent's ``.meta.json``, ``source="link"``)
+        links the two, creating the node when its spawn was never seen. A
+        plain native start revives a known agent that had stopped (async
+        agents stop at every turn end and resume on a new message).
+        """
         data = event.data
+        if data.agent_id and data.native_agent_id and data.agent_id.startswith("subagent_"):
+            node = self.tree.get(data.agent_id)
+            if node is None:
+                spawn_id = _spawn_id_of(data.agent_id)
+                spawn = self._calls.get(spawn_id) if spawn_id else None
+                self.tree.ensure_main(ts, result)
+                node = AgentNode(
+                    id=data.agent_id,
+                    parent_id=spawn.agent_id if spawn is not None else "main",
+                    kind="subagent",
+                    name=_clip(data.agent_name or data.agent_type or data.agent_id, 200),
+                    agent_type=data.agent_type,
+                    state="running",
+                    started_at=ts,
+                    spawn_tool_use_id=spawn_id,
+                    rev=1,
+                )
+                self.tree.add_node(node, result)
+            elif data.agent_type and not node.agent_type:
+                node.agent_type = data.agent_type
+                self.tree.bump(node, result)
+            self._learn_link(node.id, data.native_agent_id, ts, result)
+            if data.source == "link":
+                result.outcome = "updated"
+                return
         resolved = self.tree.resolve_native(data.native_agent_id)
         node = self.tree.get(resolved) if resolved else None
         if node is None:
             return
         changed = False
-        if node.ended_at is not None and node.state != "zombie":
+        if node.ended_at is not None or node.state in ("zombie", "waiting"):
             node.state = "running"
             node.ended_at = None
             changed = True
@@ -918,23 +976,101 @@ class ToolCallTracker:
             self.tree.bump(node, result)
             result.outcome = "updated"
 
+    def _agent_for_notification(
+        self,
+        task_id: str,
+        summary: str | None,
+        tool_use_id: str | None,
+        ts: str,
+        result: ApplyResult,
+    ) -> AgentNode | None:
+        """The subagent a task-notification is about (linking it if needed)."""
+        resolved = self.tree.resolve_native(task_id)
+        if resolved is not None:
+            return self.tree.get(resolved)
+        if tool_use_id:
+            node = self.tree.get(f"subagent_{tool_use_id}")
+            if node is not None:
+                self._learn_link(node.id, task_id, ts, result)
+                return node
+        description = _notification_agent_description(summary)
+        if description is None:
+            return None
+        candidates = [
+            n
+            for n in self.tree.nodes()
+            if n.kind == "subagent" and n.native_id is None and n.name == description
+        ]
+        if len(candidates) != 1:
+            return None
+        self._learn_link(candidates[0].id, task_id, ts, result)
+        return candidates[0]
+
+    def _merge_agent_notification(
+        self, node: AgentNode, status: str, summary: str | None, ts: str, result: ApplyResult
+    ) -> None:
+        """Fold an agent's task-notification into its node (no extra node)."""
+        waiting = bool(summary) and _WAITING_MARK in (summary or "")
+        if status == "failed":
+            node.state = "error"
+            node.ended_at = node.ended_at or ts
+        elif waiting:
+            # Its turn ended, but it is waiting on its own background work.
+            node.state = "waiting"
+            node.ended_at = None
+        else:
+            node.state = "done"
+            node.ended_at = node.ended_at or ts
+        node.current_activity = None
+        self.tree.bump(node, result)
+        call = self._calls.get(node.spawn_tool_use_id) if node.spawn_tool_use_id else None
+        if call is not None and waiting and call.status == "ok":
+            # Its SubagentStop closed the call, but the agent is not done.
+            self._set_status(call, "spawned", result)
+            call.ended_at = None
+            call.duration_ms = None
+            self._bump(call, result)
+        elif call is not None and not waiting and call.status in ("running", "spawned"):
+            if status == "failed":
+                call.error = call.error or "Subagent failed"
+            self._set_status(call, "error" if status == "failed" else "ok", result)
+            call.ended_at = ts
+            call.duration_ms = _ms_between(call.started_at, ts)
+            self._bump(call, result)
+
     def _on_background(self, event: BackgroundTaskEvent, ts: str, result: ApplyResult) -> None:
         data = event.data
         task_id = data.background_task_id or "unknown"
-        node_id = f"bg_{task_id}"
         summary = data.background_task_summary
         status = data.background_task_status or "completed"
+        result.outcome = "updated"
+
+        agent = self._agent_for_notification(task_id, summary, data.tool_use_id, ts, result)
+        if agent is not None:
+            self._merge_agent_notification(agent, status, summary, ts, result)
+            return
+        if _notification_agent_description(summary) is not None or _NATIVE_ID.match(task_id):
+            # An agent we cannot place: never a separate leaf beside its node.
+            return
+
+        # A background command (Bash run_in_background): a leaf of kind
+        # "background" under the agent whose call started it, when known.
+        starter = self._calls.get(data.tool_use_id) if data.tool_use_id else None
+        if starter is None and task_id != "unknown":
+            starter = self._find_background_starter(task_id)
+        node_id = f"bg_{task_id}"
         node = self.tree.get(node_id)
         if node is None:
             self.tree.ensure_main(ts, result)
             node = AgentNode(
                 id=node_id,
-                parent_id="main",
+                parent_id=starter.agent_id if starter is not None else "main",
                 kind="background",
                 name=_clip(summary or f"Background task {task_id[:8]}", 200),
                 state=status,
-                started_at=ts,
+                started_at=starter.started_at if starter is not None else ts,
                 ended_at=ts,
+                spawn_tool_use_id=starter.id if starter is not None else None,
                 result_preview=_clip(summary, RESULT_PREVIEW_MAX_CHARS) if summary else None,
                 errors=1 if status == "failed" else 0,
                 rev=1,
@@ -946,7 +1082,15 @@ class ToolCallTracker:
             if summary:
                 node.result_preview = _clip(summary, RESULT_PREVIEW_MAX_CHARS)
             self.tree.bump(node, result)
-        result.outcome = "updated"
+
+    def _find_background_starter(self, task_id: str) -> ToolCall | None:
+        """The Bash call whose output names this background task id, if any."""
+        for i, call in enumerate(reversed(self._calls.values())):
+            if i >= _BACKGROUND_LOOKBACK:
+                break
+            if call.output_preview and task_id in call.output_preview:
+                return call
+        return None
 
     # -- colours (filled from the office's Agent records) ------------------
 

@@ -35,6 +35,18 @@ def _zombie_timeout() -> timedelta:
     return timedelta(seconds=get_settings().ZOMBIE_SUBAGENT_TIMEOUT_SECONDS)
 
 
+def _record_time(record: dict[str, Any]) -> datetime | None:
+    """The transcript line's own timestamp (when the call really happened)."""
+    raw = record.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
 @dataclass
 class PolledAgent:
     """Tracks state for a polled subagent transcript."""
@@ -64,9 +76,48 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         """Initialize the poller with an event callback function."""
         super().__init__()
         self._event_callback = event_callback
+        # Last read offset per agent, kept across stop/start: an async agent
+        # stops at every turn end and resumes later (SubagentStart again).
+        self._positions: dict[str, int] = {}
+        # Deferred stops (see ``schedule_stop``), cancelled by a restart.
+        self._pending_stops: dict[str, asyncio.Task[None]] = {}
 
-    async def start_polling(self, agent_id: str, session_id: str, transcript_path: str) -> None:
-        """Start polling a subagent's transcript file."""
+    def schedule_stop(self, agent_id: str, delay: float = 3.0) -> None:
+        """Stop polling *agent_id* after *delay* seconds.
+
+        A SubagentStop arrives as soon as the agent's turn ends, usually
+        before the poller has read the last tool results; polling a little
+        longer drains that tail. A resume (``start_polling``) cancels it.
+        """
+        pending = self._pending_stops.pop(agent_id, None)
+        if pending is not None:
+            pending.cancel()
+
+        async def _later() -> None:
+            await asyncio.sleep(delay)
+            self._pending_stops.pop(agent_id, None)
+            await self.stop_polling(agent_id)
+
+        self._pending_stops[agent_id] = asyncio.create_task(_later(), name=f"stop_{agent_id}")
+
+    async def start_polling(
+        self,
+        agent_id: str,
+        session_id: str,
+        transcript_path: str,
+        from_start: bool = False,
+    ) -> None:
+        """Start (or keep) polling a subagent's transcript file.
+
+        Resumes from the last offset read for this agent. A first start reads
+        from the beginning when *from_start* (re-emitted calls merge into the
+        ones already tracked), otherwise from the current end of file.
+        """
+        pending = self._pending_stops.pop(agent_id, None)
+        if pending is not None:
+            pending.cancel()
+        if await self.is_polling(agent_id):
+            return
         settings = get_settings()
         translated_path = settings.translate_path(transcript_path)
         # Validate and poll the TRANSLATED path: hooks report host-form paths,
@@ -77,13 +128,15 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             logger.warning(f"Rejected transcript path outside ~/.claude/: {translated_path}")
             return
 
-        # Start at end of file if it exists
         agent = PolledAgent(
             agent_id=agent_id,
             session_id=session_id,
             transcript_path=path,
         )
-        if path.exists():
+        known = self._positions.get(agent_id)
+        if known is not None:
+            agent.file_position = known
+        elif not from_start and path.exists():
             agent.file_position = path.stat().st_size
 
         await self._register_polling(agent_id, agent, task_name=f"poll_{agent_id}")
@@ -106,7 +159,9 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         # state machine can clean up the orphaned agent. This
         # covers cases where Claude Code never sends SubagentStop
         # itself (rate-limit, crash, user interrupt, ...).
-        if inactivity > zombie_timeout:
+        # A tool call still in flight (a long build, a wait on a lock) is not
+        # a dead agent: only the hard timeout below may end its polling.
+        if inactivity > zombie_timeout and not state.active_tool_ids:
             zombie_event = self._build_zombie_stop_event(state)
             logger.warning(
                 f"Agent {key} appears to be a zombie "
@@ -187,6 +242,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
 
             new_content, new_position = result
             agent.file_position = new_position
+            self._positions[agent.agent_id] = new_position
 
             if new_content.strip():
                 agent.last_activity = datetime.now(UTC)
@@ -212,6 +268,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                 continue
 
             record_type = record.get("type")
+            stamp = _record_time(record)
             message: dict[str, Any] = record.get("message", {})
             content_blocks: list[Any] = message.get("content", [])
 
@@ -223,7 +280,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                     block_type: str | None = block.get("type")
 
                     if block_type == "tool_use":
-                        event = self._create_pre_tool_use_event(agent, block)
+                        event = self._create_pre_tool_use_event(agent, block, stamp)
                         if event:
                             events.append(event)
                             tool_id: str = block.get("id", "")
@@ -257,7 +314,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                     if block.get("type") == "tool_result":
                         tool_use_id: str = block.get("tool_use_id", "")
                         if tool_use_id in agent.active_tool_ids:
-                            event = self._create_post_tool_use_event(agent, block)
+                            event = self._create_post_tool_use_event(agent, block, stamp)
                             if event:
                                 events.append(event)
                             agent.active_tool_ids.discard(tool_use_id)
@@ -265,7 +322,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         return events
 
     def _create_pre_tool_use_event(
-        self, agent: PolledAgent, block: dict[str, Any]
+        self, agent: PolledAgent, block: dict[str, Any], stamp: datetime | None = None
     ) -> ToolEvent | None:
         """Create a pre_tool_use event from a tool_use block."""
         tool_name = block.get("name")
@@ -284,7 +341,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         return ToolEvent(
             event_type=EventType.PRE_TOOL_USE,
             session_id=agent.session_id,
-            timestamp=datetime.now(UTC),
+            timestamp=stamp or datetime.now(UTC),
             data=ToolEventData(
                 agent_id=agent.agent_id,
                 tool_name=tool_name,
@@ -294,7 +351,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         )
 
     def _create_post_tool_use_event(
-        self, agent: PolledAgent, block: dict[str, Any]
+        self, agent: PolledAgent, block: dict[str, Any], stamp: datetime | None = None
     ) -> ToolEvent | None:
         """Create a post_tool_use event from a tool_result block."""
         tool_use_id = block.get("tool_use_id", "")
@@ -303,7 +360,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         return ToolEvent(
             event_type=EventType.POST_TOOL_USE,
             session_id=agent.session_id,
-            timestamp=datetime.now(UTC),
+            timestamp=stamp or datetime.now(UTC),
             data=ToolEventData(
                 agent_id=agent.agent_id,
                 tool_use_id=tool_use_id,

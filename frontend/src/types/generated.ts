@@ -128,6 +128,7 @@ export type BackgroundTaskId = string | null;
 export type BackgroundTaskOutputFile = string | null;
 export type BackgroundTaskStatus = string | null;
 export type BackgroundTaskSummary = string | null;
+export type ToolUseId1 = string | null;
 /**
  * Visual states for the boss character.
  *
@@ -462,7 +463,7 @@ export type ProjectDir2 = string | null;
 export type WorkingDir2 = string | null;
 export type Source3 = string | null;
 export type ToolName = string | null;
-export type ToolUseId1 = string | null;
+export type ToolUseId2 = string | null;
 export type ToolInput = {
   [k: string]: unknown;
 } | null;
@@ -716,7 +717,7 @@ export type CacheCreationTokens8 = number | null;
 export type FloorId8 = string | null;
 export type RoomId8 = string | null;
 export type ToolName1 = string | null;
-export type ToolUseId2 = string | null;
+export type ToolUseId3 = string | null;
 export type ToolInput1 = {
   [k: string]: unknown;
 } | null;
@@ -916,6 +917,7 @@ export interface BackgroundTaskEventData {
   background_task_output_file?: BackgroundTaskOutputFile;
   background_task_status?: BackgroundTaskStatus;
   background_task_summary?: BackgroundTaskSummary;
+  tool_use_id?: ToolUseId1;
   [k: string]: unknown;
 }
 /**
@@ -1413,7 +1415,7 @@ export interface EventData {
   working_dir?: WorkingDir2;
   source?: Source3;
   tool_name?: ToolName;
-  tool_use_id?: ToolUseId1;
+  tool_use_id?: ToolUseId2;
   tool_input?: ToolInput;
   success?: Success1;
   agent_id?: AgentId2;
@@ -1819,7 +1821,7 @@ export interface ToolEventData {
   floor_id?: FloorId8;
   room_id?: RoomId8;
   tool_name?: ToolName1;
-  tool_use_id?: ToolUseId2;
+  tool_use_id?: ToolUseId3;
   tool_input?: ToolInput1;
   success?: Success2;
   result_summary?: ResultSummary2;

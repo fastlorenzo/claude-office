@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.event_processor import EventProcessor
+from app.core.handlers.agent_handler import discover_native_link
 from app.core.state_machine import StateMachine
 from app.core.telemetry import get_telemetry_store
 from app.core.tool_calls import (
@@ -27,7 +28,7 @@ from app.core.tool_calls import (
     ToolCallTracker,
     build_input_preview,
 )
-from app.core.transcript_poller import PolledAgent, TranscriptPoller
+from app.core.transcript_poller import PolledAgent, TranscriptPoller, get_transcript_poller
 from app.db.database import AsyncSessionLocal, Base, get_engine, override_engine
 from app.db.models import EventRecord, SessionRecord
 from app.models.agents import BossState
@@ -925,3 +926,385 @@ def test_poller_drops_nested_spawns_and_tags_zombie_stops(tmp_path: Path) -> Non
     assert poller._create_pre_tool_use_event(agent, read) is not None  # pyright: ignore[reportPrivateUsage]
     zombie = poller._build_zombie_stop_event(agent)  # pyright: ignore[reportPrivateUsage]
     assert zombie.data.source == "zombie" and zombie.data.agent_id == SUB
+
+
+# ---------------------------------------------------------------------------
+# Async subagent lifecycle (sanitized from the orchestrator session c9678b2a:
+# background agents stop at every turn end, notify via <task-notification>,
+# resume with a new SubagentStart; some Agent posts never reach the backend).
+# ---------------------------------------------------------------------------
+
+ASYNC = "toolu_fx_async01"
+ASYNC_SUB = f"subagent_{ASYNC}"
+ASYNC_NATIVE = "a0f0f0f0f0f0f0f01"
+
+
+def _async_spawn(t: float = 0.0, post: bool = True) -> list[AnyEvent]:
+    events = [
+        _ev(
+            "subagent_start",
+            t,
+            agent_id=ASYNC_SUB,
+            tool_use_id=ASYNC,
+            agent_name="Fixture async job",
+            agent_type="general-purpose",
+            task_description="Do the async fixture job.",
+        )
+    ]
+    if post:
+        events.append(
+            _ev(
+                "post_tool_use",
+                t + 0.2,
+                agent_id="main",
+                tool_name="Agent",
+                tool_use_id=ASYNC,
+                native_agent_id=ASYNC_NATIVE,
+                success=True,
+            )
+        )
+    return events
+
+
+def _notify(t: float, task_id: str, summary: str, status: str = "completed") -> AnyEvent:
+    return _ev(
+        "background_task_notification",
+        t,
+        background_task_id=task_id,
+        background_task_status=status,
+        background_task_summary=summary,
+    )
+
+
+def test_async_agent_turn_end_waiting_resume_and_finish() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn())
+    _run(
+        sm,
+        [
+            _ev("stop", 5),  # main turn ends while the async child works
+            _ev("subagent_stop", 20, native_agent_id=ASYNC_NATIVE),
+            _notify(
+                22, ASYNC_NATIVE, 'Agent "Fixture async job" is waiting on its own background work'
+            ),
+        ],
+    )
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None
+    assert node.state == "waiting" and node.ended_at is None
+    spawn = sm.tool_calls.get(ASYNC)
+    assert spawn is not None and spawn.status == "spawned"
+    assert sm.agent_tree.get(f"bg_{ASYNC_NATIVE}") is None  # merged, no leaf
+
+    sm.transition(_ev("subagent_info", 40, native_agent_id=ASYNC_NATIVE))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "running"
+    sm.transition(_ev("stop", 45))  # another main turn end: child untouched
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "running"
+
+    _run(
+        sm,
+        [
+            _ev("subagent_stop", 60, native_agent_id=ASYNC_NATIVE),
+            _notify(61, ASYNC_NATIVE, 'Agent "Fixture async job" finished'),
+        ],
+    )
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "done" and node.ended_at is not None
+    spawn = sm.tool_calls.get(ASYNC)
+    assert spawn is not None and spawn.status == "ok"
+    assert [n.kind for n in sm.agent_tree.nodes()] == ["main", "subagent"]
+
+
+def test_zombie_guess_never_ends_a_live_async_child() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn())
+    sm.transition(_ev("subagent_stop", 200, agent_id=ASYNC_SUB, source="zombie"))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "running" and node.ended_at is None
+    spawn = sm.tool_calls.get(ASYNC)
+    assert spawn is not None and spawn.status == "spawned"
+
+
+def test_zombie_on_finished_agent_is_ignored_and_new_work_revives() -> None:
+    sm = StateMachine()
+    sub = "subagent_toolu_rev"
+    _run(
+        sm,
+        [
+            _ev("subagent_start", 0, agent_id=sub, tool_use_id="toolu_rev", agent_name="R"),
+            _ev("subagent_stop", 50, agent_id=sub, source="zombie"),
+        ],
+    )
+    node = sm.agent_tree.get(sub)
+    assert node is not None and node.state == "zombie"
+    # It was alive after all: a new call after the guess revives it.
+    sm.transition(_ev("pre_tool_use", 60, agent_id=sub, tool_name="Bash", tool_use_id="toolu_rv1"))
+    node = sm.agent_tree.get(sub)
+    assert node is not None and node.state == "running" and node.ended_at is None
+    sm.transition(_ev("subagent_stop", 70, agent_id=sub))
+    sm.transition(_ev("subagent_stop", 200, agent_id=sub, source="zombie"))
+    node = sm.agent_tree.get(sub)
+    assert node is not None and node.state == "done"
+    # A late re-read copy of an old call does not revive it.
+    sm.transition(_ev("pre_tool_use", 61, agent_id=sub, tool_name="Bash", tool_use_id="toolu_rv1"))
+    node = sm.agent_tree.get(sub)
+    assert node is not None and node.state == "done"
+
+
+def test_link_record_links_unlinked_spawn_and_resolves_native_stop() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn(post=False))  # the Agent post was lost
+    sm.transition(_ev("subagent_stop", 30, native_agent_id=ASYNC_NATIVE))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "running"  # unresolvable so far
+    sm.transition(
+        _ev(
+            "subagent_info",
+            31,
+            agent_id=ASYNC_SUB,
+            native_agent_id=ASYNC_NATIVE,
+            source="link",
+        )
+    )
+    assert sm.agents[ASYNC_SUB].native_id == ASYNC_NATIVE  # office linked too
+    sm.transition(_ev("subagent_stop", 32, native_agent_id=ASYNC_NATIVE))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.native_id == ASYNC_NATIVE and node.state == "done"
+
+
+def test_link_record_creates_node_for_unseen_spawn() -> None:
+    sm = StateMachine()
+    sm.transition(
+        _ev(
+            "subagent_info",
+            1,
+            agent_id="subagent_toolu_unseen",
+            native_agent_id="a1111111111111111",
+            agent_name="Started before the backend",
+            agent_type="Explore",
+            source="link",
+        )
+    )
+    node = sm.agent_tree.get("subagent_toolu_unseen")
+    assert node is not None
+    assert (node.kind, node.parent_id, node.name, node.native_id) == (
+        "subagent",
+        "main",
+        "Started before the backend",
+        "a1111111111111111",
+    )
+
+
+def test_agent_notification_merges_by_description_without_link() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn(post=False))
+    sm.transition(_notify(90, ASYNC_NATIVE, 'Agent "Fixture async job" finished'))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.native_id == ASYNC_NATIVE and node.state == "done"
+    assert [n.id for n in sm.agent_tree.nodes()] == ["main", ASYNC_SUB]
+
+
+def test_unplaceable_agent_notification_creates_no_node() -> None:
+    sm = StateMachine()
+    sm.transition(_notify(1, "a2222222222222222", 'Agent "Somebody else" finished'))
+    assert all(n.kind == "main" for n in sm.agent_tree.nodes())
+
+
+def test_background_command_is_a_background_leaf_under_its_starter() -> None:
+    sm = StateMachine()
+    _run(
+        sm,
+        [
+            _ev(
+                "pre_tool_use",
+                0,
+                tool_name="Bash",
+                tool_use_id="toolu_bgcmd",
+                tool_input={"command": "sleep 60", "run_in_background": True},
+            ),
+            _ev(
+                "post_tool_use",
+                0.5,
+                tool_name="Bash",
+                tool_use_id="toolu_bgcmd",
+                success=True,
+                tool_output="Command running in background with ID: bfx0001",
+            ),
+            _notify(61, "bfx0001", 'Background command "Wait a minute" completed (exit code 0)'),
+            _notify(70, "bfx0002", 'Background command "Other" completed (exit code 0)'),
+        ],
+    )
+    node = sm.agent_tree.get("bg_bfx0001")
+    assert node is not None
+    assert (node.kind, node.parent_id, node.spawn_tool_use_id) == (
+        "background",
+        "main",
+        "toolu_bgcmd",
+    )
+    other = sm.agent_tree.get("bg_bfx0002")
+    assert other is not None and other.kind == "background" and other.spawn_tool_use_id is None
+
+
+@pytest.mark.asyncio
+async def test_discover_native_link_reads_meta_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    subagents = home / ".claude" / "projects" / "p" / "sess" / "subagents"
+    subagents.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    transcript = subagents / f"agent-{ASYNC_NATIVE}.jsonl"
+    transcript.write_text("")
+    (subagents / f"agent-{ASYNC_NATIVE}.meta.json").write_text(
+        json.dumps(
+            {"agentType": "general-purpose", "description": "Fixture async job", "toolUseId": ASYNC}
+        )
+    )
+    sm = StateMachine()
+    _run(sm, _async_spawn(post=False))
+    stop = _ev(
+        "subagent_stop", 30, native_agent_id=ASYNC_NATIVE, agent_transcript_path=str(transcript)
+    )
+    link = await discover_native_link(sm, stop)
+    assert link is not None
+    assert link.data.agent_id == ASYNC_SUB and link.data.native_agent_id == ASYNC_NATIVE
+    assert link.data.source == "link" and link.timestamp < stop.timestamp
+    assert await discover_native_link(sm, stop) is None  # probed once
+    # Notifications derive the path from the main transcript.
+    sm2 = StateMachine()
+    note = _ev(
+        "background_task_notification",
+        40,
+        background_task_id=ASYNC_NATIVE,
+        transcript_path=str(home / ".claude" / "projects" / "p" / "sess.jsonl"),
+    )
+    link2 = await discover_native_link(sm2, note)
+    assert link2 is not None and link2.data.agent_id == ASYNC_SUB
+    # Outside ~/.claude: never read.
+    sm3 = StateMachine()
+    outside = _ev(
+        "subagent_stop",
+        1,
+        native_agent_id="a3333333333333333",
+        agent_transcript_path="/tmp/x.jsonl",
+    )
+    assert await discover_native_link(sm3, outside) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ws2_db")
+async def test_processor_links_lost_spawn_and_restore_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    subagents = home / ".claude" / "projects" / "p" / "sess" / "subagents"
+    subagents.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    transcript = subagents / f"agent-{ASYNC_NATIVE}.jsonl"
+    transcript.write_text("")
+    (subagents / f"agent-{ASYNC_NATIVE}.meta.json").write_text(
+        json.dumps({"description": "Fixture async job", "toolUseId": ASYNC})
+    )
+    sid = "ws2-proc-link"
+    await _wipe(sid)
+    ep = EventProcessor()
+    try:
+        events = [
+            _ev(e.event_type, 0, sid, **e.data.model_dump(exclude_none=True))
+            for e in _async_spawn(post=False)
+        ]
+        events += [
+            _ev("stop", 5, sid),
+            _ev(
+                "subagent_stop",
+                30,
+                sid,
+                native_agent_id=ASYNC_NATIVE,
+                agent_transcript_path=str(transcript),
+            ),
+        ]
+        await _ingest(ep, sid, events)
+        live = ep.sessions[sid]
+        node = live.agent_tree.get(ASYNC_SUB)
+        assert node is not None and node.state == "done" and node.native_id == ASYNC_NATIVE
+        restored = await ep._build_restored_state_machine(sid)  # pyright: ignore[reportPrivateUsage]
+        assert restored is not None
+        assert _tracker_view(restored) == _tracker_view(live)
+    finally:
+        poller = get_transcript_poller()
+        if poller is not None:
+            await poller.stop_all()
+        await _wipe(sid)
+
+
+# ---------------------------------------------------------------------------
+# Poller: in-flight tools are not zombies; record timestamps; resume offsets
+# ---------------------------------------------------------------------------
+
+
+def _line(record: dict[str, Any]) -> str:
+    return json.dumps(record) + "\n"
+
+
+@pytest.mark.asyncio
+async def test_poller_no_zombie_while_tool_in_flight_and_resumes_offset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    d = home / ".claude" / "projects" / "p" / "sess" / "subagents"
+    d.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    path = d / "agent-afx.jsonl"
+    path.write_text(
+        _line(
+            {
+                "type": "assistant",
+                "timestamp": "2026-11-08T10:00:00.000Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "name": "Bash", "id": "toolu_long", "input": {}}
+                    ],
+                },
+            }
+        )
+    )
+    seen: list[AnyEvent] = []
+
+    async def collect(e: AnyEvent) -> None:
+        seen.append(e)
+
+    poller = TranscriptPoller(collect)
+    await poller.start_polling(SUB, "ws2-test", str(path), from_start=True)
+    state = poller._sessions[SUB]  # pyright: ignore[reportPrivateUsage]
+    await poller._check(SUB, state)  # pyright: ignore[reportPrivateUsage]
+    assert [e.event_type for e in seen] == ["pre_tool_use"]
+    assert seen[0].timestamp == datetime(2026, 11, 8, 10, 0, tzinfo=UTC)  # record time
+    # Silent for longer than the zombie timeout, but the Bash call is in flight.
+    state.last_activity = datetime.now(UTC) - timedelta(minutes=5)
+    await poller._check(SUB, state)  # pyright: ignore[reportPrivateUsage]
+    assert all(e.event_type != "subagent_stop" for e in seen)
+    assert await poller.is_polling(SUB)
+    # Stop, append, restart: resumes at the remembered offset (no re-read).
+    await poller.stop_polling(SUB)
+    with path.open("a") as f:
+        f.write(
+            _line(
+                {
+                    "type": "user",
+                    "timestamp": "2026-11-08T10:07:00.000Z",
+                    "message": {
+                        "role": "user",
+                        "content": [{"type": "tool_result", "tool_use_id": "toolu_long"}],
+                    },
+                }
+            )
+        )
+    await poller.start_polling(SUB, "ws2-test", str(path), from_start=True)
+    state = poller._sessions[SUB]  # pyright: ignore[reportPrivateUsage]
+    state.active_tool_ids.add("toolu_long")
+    await poller._check(SUB, state)  # pyright: ignore[reportPrivateUsage]
+    assert [e.event_type for e in seen] == ["pre_tool_use", "post_tool_use"]
+    await poller.stop_all()
