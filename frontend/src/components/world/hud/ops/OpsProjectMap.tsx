@@ -83,16 +83,16 @@ export function OpsProjectMap({
   return (
     <section className={className}>
       <div className="flex flex-wrap items-baseline gap-x-2 px-4 pt-3">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
           {t("ops.map")}
         </h3>
-        <span className="text-[11px] text-slate-500">
+        <span className="text-xs text-slate-500">
           {t("ops.map.sub", {
             projects: map.lines.length + map.moreLines,
             live,
           })}
         </span>
-        <span className="ml-auto flex items-center gap-3 text-[10px] text-slate-500">
+        <span className="ml-auto flex items-center gap-3 text-xs text-slate-500">
           {(
             [
               ["needs_you", "hud.status.needs_you"],

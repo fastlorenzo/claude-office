@@ -4,4 +4,4 @@ export const GLASS =
 
 /** Small-caps label style. */
 export const LABEL =
-  "text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400";
+  "text-xs font-semibold uppercase tracking-[0.14em] text-slate-400";

@@ -106,9 +106,26 @@ function zoneLabel(
       return t("hud.minimap.dock");
     case "stair":
       return t("hud.minimap.stairs");
+    case "entrance":
+      return t("hud.area.entrance");
+    case "balcony":
+      return t("hud.minimap.cell");
     default:
       return t("world.zone.outside");
   }
+}
+
+const FACTORY_KINDS = new Set([
+  "factory",
+  "cell",
+  "dock",
+  "stair",
+  "balcony",
+  "entrance",
+]);
+
+function isFactoryZone(zone: PlayerPose["zone"]): boolean {
+  return FACTORY_KINDS.has(zone.kind);
 }
 
 export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
@@ -118,10 +135,14 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
   const roomId = zone?.kind === "room" ? zone.sessionId : null;
   const projectName = useWorldUiStore((s) => {
     const z = s.pose?.zone;
-    if (z?.kind !== "room" || !z.projectId) return null;
-    return (
-      s.layout?.projects.find((p) => p.projectId === z.projectId)?.name ?? null
-    );
+    const id =
+      z?.kind === "room"
+        ? z.projectId
+        : z?.kind === "cell" || z?.kind === "balcony"
+          ? z.projectId
+          : undefined;
+    if (!id) return null;
+    return s.layout?.projects.find((p) => p.projectId === id)?.name ?? null;
   });
   const campus = useCampusStore((s) =>
     roomId ? s.sessions.find((x) => x.sessionId === roomId) : undefined,
@@ -134,8 +155,17 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
   if (!zone) return null;
   const pod = zoneLabel(zone, labels, t);
   // In a team room: "project · pod session" (the pod under the player).
+  const inFactory = isFactoryZone(zone);
   const where =
-    projectName && pod && pod !== projectName ? `${projectName} · ${pod}` : pod;
+    projectName && pod && pod !== projectName
+      ? inFactory
+        ? `${pod} · ${projectName}`
+        : `${projectName} · ${pod}`
+      : pod;
+  // "Level 1 · Offices" / "Ground · Factory" / "Ground · Dock".
+  const level = inFactory
+    ? `${t("hud.level.ground")} · ${t(zone.kind === "dock" ? "hud.minimap.dock" : zone.kind === "entrance" ? "hud.area.entrance" : "hud.area.factory")}`
+    : `${t("hud.level.one")} · ${t("hud.area.offices")}`;
   // Free-fly camera: "Fly · <zone below the camera>".
   const label = flying ? `${t("hud.fly.label")} · ${where}` : where;
   return (
@@ -154,9 +184,7 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
         <span className="h-2 w-2 rounded-full bg-[#D97757]" />
       )}
       <div className="flex flex-col leading-tight">
-        <span className={LABEL}>
-          {roomId ? t("world.enter.current") : t("hud.location")}
-        </span>
+        <span className={LABEL}>{level}</span>
         <span className="max-w-[14rem] truncate text-sm font-semibold text-white">
           {label}
         </span>
@@ -177,7 +205,7 @@ export function StatsChip(): ReactNode {
   const connected = useCampusStore((s) => s.connected);
   return (
     <div
-      className={`pointer-events-none flex items-center gap-3 rounded-2xl px-3.5 py-2 font-mono text-[11px] text-slate-300 ${GLASS}`}
+      className={`pointer-events-none flex items-center gap-3 rounded-2xl px-3.5 py-2 font-mono text-xs text-slate-300 ${GLASS}`}
     >
       {stats && showFps ? (
         <>
@@ -230,9 +258,8 @@ export function KeyHints({ portrait }: { portrait: boolean }): ReactNode {
           <button
             key={id}
             type="button"
-            tabIndex={-1}
             onClick={() => toggle(id)}
-            className={`flex items-center gap-1.5 text-[11px] transition-colors ${
+            className={`flex items-center gap-1.5 text-xs transition-colors ${
               active ? "text-[#f0a58b]" : "text-slate-400 hover:text-white"
             }`}
           >
@@ -243,22 +270,20 @@ export function KeyHints({ portrait }: { portrait: boolean }): ReactNode {
       })}
       <button
         type="button"
-        tabIndex={-1}
         onClick={() => useWorldUiStore.getState().toggleOps()}
-        className="flex items-center gap-1.5 text-[11px] text-slate-400 transition-colors hover:text-white"
+        className="flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-white"
       >
         <Keycap>B</Keycap>
         {t("hud.keys.ops")}
       </button>
-      <span className="flex items-center gap-1.5 text-[11px] text-slate-400">
+      <span className="flex items-center gap-1.5 text-xs text-slate-400">
         <Keycap>V</Keycap>
         {t(cameraMode === "fp" ? "hud.camera.fp" : "hud.camera.tp")}
       </span>
       <button
         type="button"
-        tabIndex={-1}
         onClick={() => getWorld()?.toggleFly()}
-        className={`flex items-center gap-1.5 text-[11px] transition-colors ${
+        className={`flex items-center gap-1.5 text-xs transition-colors ${
           flying ? "text-[#f0a58b]" : "text-slate-400 hover:text-white"
         }`}
       >
@@ -278,7 +303,8 @@ export function ClickToLook({ isMobile }: { isMobile: boolean }): ReactNode {
   const ready = useWorldUiStore((s) => s.ready);
   const locked = useWorldUiStore((s) => s.pointerLocked);
   const panelOpen = useWorldUiStore((s) => s.panels.length > 0);
-  if (isMobile || !ready || locked || panelOpen) return null;
+  const cardOpen = useWorldUiStore((s) => s.controlsOpen);
+  if (isMobile || !ready || locked || panelOpen || cardOpen) return null;
   return (
     <div className="pointer-events-none absolute left-1/2 top-[38%] -translate-x-1/2 -translate-y-1/2">
       <div
@@ -288,7 +314,7 @@ export function ClickToLook({ isMobile }: { isMobile: boolean }): ReactNode {
         <span className="text-sm font-semibold text-white">
           {t("world.clickToLook")}
         </span>
-        <span className="text-[11px] text-slate-400">
+        <span className="text-xs text-slate-400">
           {t("world.clickToLookHint")}
         </span>
       </div>

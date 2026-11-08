@@ -391,7 +391,8 @@ const ptBR: Record<TranslationKey, string> = {
   "hud.help.fly": "Câmera de voo livre (noclip); N volta ao seu corpo",
   "hud.help.flyLand": "Sair do voo livre e pousar sob a câmera",
   "hud.help.flyVertical": "Voo livre: subir (Espaço / E) e descer (Ctrl / Q)",
-  "hud.help.flySpeed": "Velocidade do voo: Shift rápido, Alt lento, roda ajusta",
+  "hud.help.flySpeed":
+    "Velocidade do voo: Shift rápido, Alt lento, roda ajusta",
   "hud.help.close": "Fechar painel / soltar o mouse",
   "hud.help.tip":
     "Abrir um painel libera o mouse. Clique na cena para olhar ao redor novamente.",
@@ -817,6 +818,31 @@ const ptBR: Record<TranslationKey, string> = {
   "factory.ago.m": "há {n} min",
   "factory.ago.h": "há {n} h",
   "factory.ago.d": "há {n} d",
+  "controls.title": "Bem-vindo ao escritório",
+  "controls.subtitle": "Clique na cena para capturar o mouse · Esc o libera",
+  "controls.jump": "Pular",
+  "controls.map": "Mapa: andares do escritório e da fábrica, clique para ir",
+  "controls.panels": "Painéis",
+  "controls.unstuck": "Segure R para voltar à recepção",
+  "controls.where": "Aonde ir",
+  "controls.where.offices": "Escritórios: escadas ou elevador, para cima",
+  "controls.where.factory": "Chão de fábrica: escadas centrais, para baixo",
+  "controls.where.control": "Sala de controle: no fim do corredor",
+  "controls.dismiss": "Entendi",
+  "controls.touch":
+    "O direcional esquerdo move · arraste à direita para olhar · Enter e F agem no que você mira",
+  "hud.touch.enter": "Entrar",
+  "hud.touch.camera": "Câmera",
+  "hud.touch.menu": "Menu",
+  "hud.level.ground": "Térreo",
+  "hud.level.one": "Nível 1",
+  "hud.area.offices": "Escritórios",
+  "hud.area.factory": "Fábrica",
+  "hud.area.entrance": "Entrada",
+  "hud.minimap.factoryDown": "Fábrica ↓",
+  "hud.minimap.officesUp": "Escritórios ↑",
+  "hud.minimap.lift": "Elevador",
+  "factory.legend": "Cores do CI",
 };
 
 export default ptBR;

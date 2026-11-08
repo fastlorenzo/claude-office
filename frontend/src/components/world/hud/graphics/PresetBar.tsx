@@ -74,7 +74,7 @@ export function PresetBar({
         })}
       </div>
       <div className="mt-2 flex items-start justify-between gap-3">
-        <p className="text-[11px] leading-snug text-slate-400">
+        <p className="text-xs leading-snug text-slate-400">
           {t(`gfx.preset.${active}.d`)}
         </p>
         <CostMeter cost={cost} />

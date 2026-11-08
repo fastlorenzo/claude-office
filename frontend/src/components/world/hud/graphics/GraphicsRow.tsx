@@ -71,12 +71,12 @@ export function GraphicsRow({
             {label}
           </span>
           {pending ? (
-            <span className="rounded bg-white/5 px-1.5 py-px text-[9px] uppercase tracking-wider text-slate-500">
+            <span className="rounded bg-white/5 px-1.5 py-px text-xs uppercase tracking-wider text-slate-500">
               {t("gfx.nextUpdate")}
             </span>
           ) : null}
         </div>
-        <p className="mt-0.5 pl-[22px] text-[11px] leading-snug text-slate-500">
+        <p className="mt-0.5 pl-[22px] text-xs leading-snug text-slate-500">
           {desc}
         </p>
       </div>

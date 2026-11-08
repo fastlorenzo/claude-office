@@ -55,7 +55,7 @@ export const PrPanelView = memo(function PrPanelView({
               </span>
               {v.title}
             </h3>
-            <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-[11px] text-slate-300">
+            <div className="mt-1 flex flex-wrap items-center gap-1 font-mono text-xs text-slate-300">
               <GitBranch className="h-3 w-3 shrink-0" />
               <span className="truncate">{v.branch}</span>
               {v.base && (
@@ -144,7 +144,7 @@ export const PrPanelView = memo(function PrPanelView({
           <GithubLink url={v.url} />
         </div>
         {!v.sessionId && (
-          <p className="mt-2 text-[11px] text-slate-500">
+          <p className="mt-2 text-xs text-slate-500">
             {t("factory.noSession")}
           </p>
         )}
@@ -165,7 +165,7 @@ export const PrPanelView = memo(function PrPanelView({
                   {c.name}
                 </span>
                 {c.attempt && (
-                  <span className="text-[10px] text-amber-400">
+                  <span className="text-xs text-amber-400">
                     {t("factory.attempt", { n: c.attempt })}
                   </span>
                 )}

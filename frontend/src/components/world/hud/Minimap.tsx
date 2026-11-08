@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
@@ -13,9 +13,28 @@ import {
 import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
 import { getWorld } from "../worldRef";
+import { CiLegend } from "./factory/parts";
 import { clip, sessionHeadline } from "./sessionGlance";
 
 type Level = "office" | "factory";
+
+/** Click + keyboard (Enter / Space) activation for an SVG `role=button` group. */
+function press(onActivate: () => void): {
+  onClick: () => void;
+  onKeyDown: (e: KeyboardEvent<SVGGElement>) => void;
+  tabIndex: 0;
+} {
+  return {
+    onClick: onActivate,
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+    tabIndex: 0,
+  };
+}
 const FACTORY_ZONES = new Set(["factory", "cell", "dock", "stair"]);
 
 /** Fast-travel targets on the factory floor (World.teleport handles these). */
@@ -72,7 +91,12 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
 
   const { lobby, hall, controlRoom } = layout;
   const travel = (
-    to: { sessionId: string } | { projectId: string } | "lobby" | "control",
+    to:
+      | { sessionId: string }
+      | { projectId: string }
+      | "lobby"
+      | "control"
+      | "floor",
   ): void => {
     getWorld()?.teleport(to);
     close("minimap");
@@ -103,6 +127,17 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
           {t(l === "office" ? "hud.minimap.office" : "hud.minimap.factory")}
         </button>
       ))}
+      <button
+        type="button"
+        onClick={() => travel(level === "office" ? "floor" : "lobby")}
+        className="rounded bg-[#D97757]/80 px-2 py-1 font-semibold text-white hover:bg-[#D97757]"
+      >
+        {t(
+          level === "office"
+            ? "hud.minimap.factoryDown"
+            : "hud.minimap.officesUp",
+        )}
+      </button>
     </div>
   );
 
@@ -122,6 +157,9 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
     return (
       <div className="relative flex h-full min-h-[240px] items-center justify-center p-3">
         {toggle}
+        <div className="absolute bottom-3 left-3 z-10 rounded-lg bg-slate-950/70 px-2 py-1">
+          <CiLegend />
+        </div>
         <svg
           viewBox={`${fx0} ${-fzTop} ${fw} ${fh}`}
           className="h-full max-h-full w-full max-w-full"
@@ -135,8 +173,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
             return (
               <g
                 key={c.projectId}
-                className="cursor-pointer"
-                onClick={() => travelFactory({ factoryCell: c.projectId })}
+                className="cursor-pointer outline-none focus-visible:opacity-80"
+                {...press(() => travelFactory({ factoryCell: c.projectId }))}
                 role="button"
                 aria-label={`${t("hud.minimap.cell")}: ${name}`}
               >
@@ -205,8 +243,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
             </rect>
           ))}
           <g
-            className="cursor-pointer"
-            onClick={() => travelFactory({ factoryDock: true })}
+            className="cursor-pointer outline-none focus-visible:opacity-80"
+            {...press(() => travelFactory({ factoryDock: true }))}
             role="button"
             aria-label={t("hud.minimap.dock")}
           >
@@ -270,8 +308,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
           rx={0.3}
         />
         <g
-          className="cursor-pointer"
-          onClick={() => travel("lobby")}
+          className="cursor-pointer outline-none focus-visible:opacity-80"
+          {...press(() => travel("lobby"))}
           role="button"
           aria-label={t("world.zone.lobby")}
         >
@@ -298,8 +336,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
           </text>
         </g>
         <g
-          className="cursor-pointer"
-          onClick={() => travel("control")}
+          className="cursor-pointer outline-none focus-visible:opacity-80"
+          {...press(() => travel("control"))}
           role="button"
           aria-label={t("world.zone.control")}
         >
@@ -344,8 +382,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
           return (
             <g key={p.projectId}>
               <g
-                className="cursor-pointer"
-                onClick={() => travel({ projectId: p.projectId })}
+                className="cursor-pointer outline-none focus-visible:opacity-80"
+                {...press(() => travel({ projectId: p.projectId }))}
                 role="button"
                 aria-label={`${t("hud.minimap.teamRoom")}: ${p.name}`}
               >
@@ -384,8 +422,8 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
                 return (
                   <g
                     key={d.sessionId}
-                    className="cursor-pointer"
-                    onClick={() => travel({ sessionId: d.sessionId })}
+                    className="cursor-pointer outline-none focus-visible:opacity-80"
+                    {...press(() => travel({ sessionId: d.sessionId }))}
                     role="button"
                     aria-label={label}
                   >
@@ -420,6 +458,61 @@ export function Minimap({ sessions }: { sessions: Session[] }): ReactNode {
             </g>
           );
         })}
+
+        {factory ? (
+          <g pointerEvents="none">
+            {[...factory.entrance.stairs, ...factory.spineStairs].map((st) => (
+              <rect
+                key={st.id}
+                x={st.rect.x0}
+                y={-st.rect.z1}
+                width={st.rect.x1 - st.rect.x0}
+                height={st.rect.z1 - st.rect.z0}
+                fill="#a5b4fc55"
+                stroke="#818cf8"
+                strokeWidth={0.1}
+              >
+                <title>{t("hud.minimap.stairs")}</title>
+              </rect>
+            ))}
+            <g>
+              <title>{t("hud.minimap.lift")}</title>
+              <rect
+                x={factory.entrance.lift.rect.x0}
+                y={-factory.entrance.lift.rect.z1}
+                width={
+                  factory.entrance.lift.rect.x1 - factory.entrance.lift.rect.x0
+                }
+                height={
+                  factory.entrance.lift.rect.z1 - factory.entrance.lift.rect.z0
+                }
+                fill="#22d3ee33"
+                stroke="#22d3ee"
+                strokeWidth={0.1}
+              />
+              <text
+                x={
+                  (factory.entrance.lift.rect.x0 +
+                    factory.entrance.lift.rect.x1) /
+                  2
+                }
+                y={
+                  -(
+                    factory.entrance.lift.rect.z0 +
+                    factory.entrance.lift.rect.z1
+                  ) / 2
+                }
+                fill="#67e8f9"
+                fontSize={0.8}
+                fontWeight={700}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                ⇅
+              </text>
+            </g>
+          </g>
+        ) : null}
 
         {pose ? (
           <g

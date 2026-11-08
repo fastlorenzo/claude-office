@@ -89,7 +89,7 @@ export function GraphicsPanel({
           <RotateCcw className="h-3.5 w-3.5" aria-hidden />
           {t("gfx.restoreDefaults")}
         </button>
-        <span className="self-center text-[10px] text-slate-500">
+        <span className="self-center text-xs text-slate-500">
           {t("gfx.liveHint")}
         </span>
       </div>

@@ -97,13 +97,13 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
               {project ?? label}
             </h3>
             {name && project && (
-              <div className="truncate text-[11px] italic text-slate-500">
+              <div className="truncate text-xs italic text-slate-500">
                 {name}
               </div>
             )}
           </div>
           <span
-            className="rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+            className="rounded-full border px-2 py-0.5 text-xs font-semibold uppercase tracking-wider"
             style={{
               color,
               borderColor: `${color}66`,
@@ -116,7 +116,7 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
         {cs && (
           <div className="mt-3 space-y-1.5">
             {sessionBranch(cs) && (
-              <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[11px] text-slate-300">
+              <span className="inline-flex max-w-full items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-xs text-slate-300">
                 <GitBranch className="h-3 w-3 shrink-0" />
                 <span className="truncate">{sessionBranch(cs)}</span>
               </span>
@@ -268,7 +268,7 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
                 {t("hud.inspect.noActivity")}
               </p>
             ) : (
-              <ul className="space-y-1 font-mono text-[11px]">
+              <ul className="space-y-1 font-mono text-xs">
                 {[...cs.recentActivity].reverse().map((a, i) => (
                   <li key={`${a.timestamp}-${i}`} className="flex gap-2">
                     <span className="shrink-0 text-slate-600">

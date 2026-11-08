@@ -391,7 +391,8 @@ const es: Record<TranslationKey, string> = {
   "hud.help.fly": "Cámara de vuelo libre (noclip); N vuelve a tu cuerpo",
   "hud.help.flyLand": "Salir del vuelo libre y aterrizar bajo la cámara",
   "hud.help.flyVertical": "Vuelo libre: subir (Espacio / E) y bajar (Ctrl / Q)",
-  "hud.help.flySpeed": "Velocidad del vuelo: Shift rápido, Alt lento, rueda ajusta",
+  "hud.help.flySpeed":
+    "Velocidad del vuelo: Shift rápido, Alt lento, rueda ajusta",
   "hud.help.close": "Cerrar panel / soltar el ratón",
   "hud.help.tip":
     "Abrir un panel libera el ratón. Haz clic en la escena para mirar de nuevo.",
@@ -819,6 +820,32 @@ const es: Record<TranslationKey, string> = {
   "factory.ago.m": "hace {n} min",
   "factory.ago.h": "hace {n} h",
   "factory.ago.d": "hace {n} d",
+  "controls.title": "Bienvenido a la oficina",
+  "controls.subtitle":
+    "Haz clic en la escena para capturar el ratón · Esc lo libera",
+  "controls.jump": "Saltar",
+  "controls.map": "Mapa: plantas de oficina y fábrica, clic para viajar",
+  "controls.panels": "Paneles",
+  "controls.unstuck": "Mantén R para volver a recepción",
+  "controls.where": "Adónde ir",
+  "controls.where.offices": "Oficinas: escaleras o ascensor, arriba",
+  "controls.where.factory": "Planta de fábrica: escaleras centrales, abajo",
+  "controls.where.control": "Sala de control: al final del pasillo",
+  "controls.dismiss": "Entendido",
+  "controls.touch":
+    "El stick izquierdo mueve · arrastra a la derecha para mirar · Enter y F actúan sobre lo que apuntas",
+  "hud.touch.enter": "Entrar",
+  "hud.touch.camera": "Cámara",
+  "hud.touch.menu": "Menú",
+  "hud.level.ground": "Planta baja",
+  "hud.level.one": "Nivel 1",
+  "hud.area.offices": "Oficinas",
+  "hud.area.factory": "Fábrica",
+  "hud.area.entrance": "Entrada",
+  "hud.minimap.factoryDown": "Fábrica ↓",
+  "hud.minimap.officesUp": "Oficinas ↑",
+  "hud.minimap.lift": "Ascensor",
+  "factory.legend": "Colores de CI",
 };
 
 export default es;

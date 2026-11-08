@@ -55,6 +55,9 @@ export function useHudKeys(): void {
       }
       // Panels sit under the dashboard: ignore their keys while it is open.
       if (ui.opsOpen) return;
+      // Tab belongs to keyboard focus navigation unless the mouse is captured.
+      if (e.key === "Tab" && !ui.pointerLocked && ui.panels.length === 0)
+        return;
       const panel = KEY_TO_PANEL.get(e.key.toLowerCase());
       if (!panel) return;
       e.preventDefault();

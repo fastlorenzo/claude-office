@@ -204,14 +204,14 @@ function SessionCard({
       <div className="flex items-center gap-1.5">
         <StatusDot color={color} pulse={needs} size={8} />
         <span
-          className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-300"
+          className="min-w-0 truncate text-xs font-semibold uppercase tracking-wide text-slate-300"
           title={project ?? label}
         >
           {project ?? label}
         </span>
         {branch && (
           <span
-            className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[9px] text-slate-400"
+            className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-xs text-slate-400"
             title={branch}
           >
             <GitBranch className="h-2.5 w-2.5 shrink-0" />
@@ -220,7 +220,7 @@ function SessionCard({
         )}
         {name && project && (
           <span
-            className="min-w-0 truncate text-[10px] italic text-slate-500"
+            className="min-w-0 truncate text-xs italic text-slate-500"
             title={name}
           >
             {name}
@@ -228,7 +228,7 @@ function SessionCard({
         )}
         {needs && (
           <span
-            className="ml-auto shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-slate-950"
+            className="ml-auto shrink-0 rounded-full px-1.5 py-px text-xs font-bold uppercase tracking-wider text-slate-950"
             style={{ backgroundColor: color }}
           >
             {t("hud.overview.needsYou")}
@@ -270,7 +270,7 @@ function SessionCard({
               style={{ width: `${pct}%`, backgroundColor: color }}
             />
           </div>
-          <span className="shrink-0 font-mono text-[9px] text-slate-500">
+          <span className="shrink-0 font-mono text-xs text-slate-500">
             {done}/{total}
           </span>
         </div>
@@ -280,10 +280,10 @@ function SessionCard({
         <div className="mt-2 space-y-1.5 border-t border-white/10 pt-2">
           {items.length > 0 && (
             <div>
-              <div className={`${LABEL} mb-0.5 !text-[9px]`}>
+              <div className={`${LABEL} mb-0.5 !text-xs`}>
                 {t("hud.overview.workItems")}
               </div>
-              <ul className="space-y-0.5 text-[11px] text-slate-200">
+              <ul className="space-y-0.5 text-xs text-slate-200">
                 {items.map((w, i) => (
                   <li key={i} className="flex gap-1.5">
                     <span
@@ -298,10 +298,10 @@ function SessionCard({
           )}
           {recent.length > 0 && (
             <div>
-              <div className={`${LABEL} mb-0.5 !text-[9px]`}>
+              <div className={`${LABEL} mb-0.5 !text-xs`}>
                 {t("hud.overview.recent")}
               </div>
-              <ul className="space-y-0.5 font-mono text-[10px] text-slate-400">
+              <ul className="space-y-0.5 font-mono text-xs text-slate-400">
                 {recent.map((a, i) => (
                   <li key={`${a.timestamp}-${i}`} className="truncate">
                     {a.summary}
@@ -381,10 +381,10 @@ export function OverviewStrip({
       aria-label={t("hud.overview.title")}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`pointer-events-auto absolute top-14 flex gap-1.5 ${
+      className={`pointer-events-auto absolute top-[4.5rem] flex gap-1.5 ${
         portrait
-          ? "inset-x-3 flex-row overflow-x-auto pb-1"
-          : "left-3 max-h-[calc(100%-9rem)] flex-col overflow-y-auto pr-1"
+          ? "left-3 right-[4.5rem] flex-row overflow-x-auto pb-1"
+          : "left-3 max-h-[calc(100%-10.5rem)] flex-col overflow-y-auto pr-1"
       }`}
     >
       {blocks.map((b) => (
@@ -395,7 +395,7 @@ export function OverviewStrip({
         >
           {!dotsOnly && (
             <div
-              className={`${LABEL} flex items-center gap-1.5 px-1 pt-1 !text-[10px] text-slate-300`}
+              className={`${LABEL} flex items-center gap-1.5 px-1 pt-1 !text-xs text-slate-300`}
             >
               <span className="truncate">{b.name}</span>
               <span className="text-slate-500">

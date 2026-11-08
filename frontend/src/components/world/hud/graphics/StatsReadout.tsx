@@ -9,9 +9,7 @@ export function StatsReadout(): ReactNode {
   const stats = useWorldUiStore((s) => s.stats);
   if (!stats)
     return (
-      <p className="px-4 py-2 text-[11px] text-slate-500">
-        {t("gfx.stats.none")}
-      </p>
+      <p className="px-4 py-2 text-xs text-slate-500">{t("gfx.stats.none")}</p>
     );
   const cells: [string, string][] = [
     [t("gfx.stats.fps"), String(Math.round(stats.fps))],
@@ -26,7 +24,7 @@ export function StatsReadout(): ReactNode {
     >
       {cells.map(([k, v]) => (
         <div key={k} className="bg-slate-950/60 px-2 py-1.5">
-          <dt className="text-[9px] uppercase tracking-[0.14em] text-slate-500">
+          <dt className="text-xs uppercase tracking-[0.14em] text-slate-500">
             {k}
           </dt>
           <dd className="text-sm font-semibold tabular-nums text-slate-100">

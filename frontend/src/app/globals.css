@@ -222,3 +222,10 @@ body {
     transform: translateX(260%);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[hud-"],
+  [class*="animate-[ops-"] {
+    animation: none !important;
+  }
+}

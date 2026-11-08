@@ -67,7 +67,7 @@ export function ErrorScreen(): ReactNode {
         <p className="text-sm text-slate-400">
           {noWebgl ? t("world.error.desc") : t("world.error.descRuntime")}
         </p>
-        <code className="max-h-24 w-full overflow-auto rounded-lg bg-black/40 p-2 text-left text-[11px] text-rose-300">
+        <code className="max-h-24 w-full overflow-auto rounded-lg bg-black/40 p-2 text-left text-xs text-rose-300">
           {error}
         </code>
         <div className="flex flex-wrap justify-center gap-2">

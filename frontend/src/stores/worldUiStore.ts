@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { controlsSeen } from "@/components/world/hud/controlsFlags";
 import type {
   BuildingLayout,
   CameraMode,
@@ -68,6 +69,8 @@ interface WorldUiState {
   banner: { id: number; text: string } | null;
   /** Bumped to re-create the world after an error (never reset). */
   worldEpoch: number;
+  /** First-run controls card visible (see ControlsCard). */
+  controlsOpen: boolean;
   /** Full-screen Ops dashboard (control room) open. */
   opsOpen: boolean;
   /** Session highlighted in the Ops dashboard (console monitor F). */
@@ -95,6 +98,7 @@ interface WorldUiState {
   setCameraMode: (mode: CameraMode) => void;
   setFlying: (flying: boolean) => void;
   setPointerLocked: (locked: boolean) => void;
+  setControlsOpen: (open: boolean) => void;
   setLayout: (layout: BuildingLayout | null) => void;
   setError: (error: string | null) => void;
   setReady: (ready: boolean) => void;
@@ -141,6 +145,7 @@ const INITIAL = {
   ready: false,
   peerPopup: null,
   banner: null as { id: number; text: string } | null,
+  controlsOpen: false,
   opsOpen: false,
   opsFocus: null as string | null,
 };
@@ -213,9 +218,15 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   setCameraMode: (cameraMode) => set({ cameraMode }),
   setFlying: (flying) => set({ flying }),
   setPointerLocked: (pointerLocked) => set({ pointerLocked }),
+  setControlsOpen: (controlsOpen) => set({ controlsOpen }),
   setLayout: (layout) => set({ layout }),
   setError: (error) => set({ error }),
-  setReady: (ready) => set({ ready }),
+  setReady: (ready) =>
+    set((s) => ({
+      ready,
+      // The card opens on the first ready of a visitor who has not seen it.
+      controlsOpen: ready && !s.ready ? !controlsSeen() : s.controlsOpen,
+    })),
   setPeerPopup: (peerPopup) => set({ peerPopup }),
   openOps: (focus = null) => set({ opsOpen: true, opsFocus: focus }),
   closeOps: () => set((s) => (s.opsOpen ? { opsOpen: false } : s)),

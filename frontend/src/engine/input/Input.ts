@@ -14,6 +14,9 @@ import {
   type PressAction,
 } from "@/engine/input/bindings";
 
+/** A failed pointer-lock request blocks new ones for this long. */
+const LOCK_RETRY_MS = 1200;
+
 export type InputEvent = PressAction | "lobby";
 
 function domWantsKeys(): boolean {
@@ -45,7 +48,8 @@ export class InputController {
   private lookSign = 1;
   private locked = false;
   private dragging = false;
-  private lockFailed = false;
+  /** Browsers refuse re-lock for ~1 s after Esc; retry once this has passed. */
+  private lockRetryAt = 0;
   private readonly listeners: (() => void)[] = [];
   private eventCb: (e: InputEvent) => void = () => {};
   private lockCb: (locked: boolean) => void = () => {};
@@ -70,9 +74,7 @@ export class InputController {
     on(window, "keyup", (e) => this.onKey(e, false));
     on(window, "blur", () => this.clearHeld());
     on(document, "pointerlockchange", () => this.onLockChange());
-    on(document, "pointerlockerror", () => {
-      this.lockFailed = true;
-    });
+    on(document, "pointerlockerror", () => this.noteLockFailed());
     on(canvas, "click", () => this.requestLock());
     on(canvas, "mousedown", (e) => {
       if (!this.locked && e.button === 0) this.dragging = true;
@@ -113,7 +115,12 @@ export class InputController {
   }
 
   private requestLock(): void {
-    if (!this.enabled || this.isMobile || this.locked || this.lockFailed)
+    if (
+      !this.enabled ||
+      this.isMobile ||
+      this.locked ||
+      performance.now() < this.lockRetryAt
+    )
       return;
     const c = this.canvas as HTMLCanvasElement & {
       requestPointerLock(opts?: {
@@ -128,16 +135,20 @@ export class InputController {
             const r2 = c.requestPointerLock();
             if (r2 && typeof (r2 as Promise<void>).catch === "function")
               (r2 as Promise<void>).catch(() => {
-                this.lockFailed = true;
+                this.noteLockFailed();
               });
           } catch {
-            this.lockFailed = true;
+            this.noteLockFailed();
           }
         });
       }
     } catch {
-      this.lockFailed = true;
+      this.noteLockFailed();
     }
+  }
+
+  private noteLockFailed(): void {
+    this.lockRetryAt = performance.now() + LOCK_RETRY_MS;
   }
 
   private onLockChange(): void {

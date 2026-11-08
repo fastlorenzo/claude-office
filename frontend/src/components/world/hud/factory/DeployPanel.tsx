@@ -35,7 +35,7 @@ export const DeployPanelView = memo(function DeployPanelView({
           )}
         </div>
         <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
             {t("factory.deploy.lastShip")}
           </div>
           {v.lastShip ? (
@@ -73,7 +73,7 @@ export const DeployPanelView = memo(function DeployPanelView({
                 <span className="min-w-0 flex-1 truncate text-slate-400">
                   {r.name}
                 </span>
-                <span className="text-[10px] text-slate-500">
+                <span className="text-xs text-slate-500">
                   <AgoText ago={r.ago} />
                 </span>
                 {r.url && /^https?:\/\//i.test(r.url) && (

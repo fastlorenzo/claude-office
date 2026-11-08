@@ -2,6 +2,7 @@
 
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { Menu, Video } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import { getWorld } from "../worldRef";
 import { GLASS } from "./glass";
@@ -97,6 +98,7 @@ function ActionButton({
 }
 
 export function TouchControls(): ReactNode {
+  const { t } = useTranslation();
   const ready = useWorldUiStore((s) => s.ready);
   const panelOpen = useWorldUiStore((s) => s.panels.length > 0);
   const toggle = useWorldUiStore((s) => s.toggle);
@@ -140,11 +142,18 @@ export function TouchControls(): ReactNode {
           />
           <Joystick />
           <div className="absolute bottom-6 right-5 flex flex-col items-end gap-3">
-            <ActionButton label="Enter" accent onPress={() => trigger("Enter")}>
-              Enter
+            <ActionButton
+              label={t("hud.touch.enter")}
+              accent
+              onPress={() => trigger("Enter")}
+            >
+              {t("hud.touch.enter")}
             </ActionButton>
             <div className="flex gap-3">
-              <ActionButton label="Camera" onPress={toggleCamera}>
+              <ActionButton
+                label={t("hud.touch.camera")}
+                onPress={toggleCamera}
+              >
                 <Video className="h-5 w-5" />
               </ActionButton>
               <ActionButton label="F" accent onPress={() => trigger("F")}>
@@ -154,8 +163,11 @@ export function TouchControls(): ReactNode {
           </div>
         </>
       )}
-      <div className="absolute left-3 top-14">
-        <ActionButton label="Menu" onPress={() => toggle("sessions")}>
+      <div className="absolute right-3 top-14">
+        <ActionButton
+          label={t("hud.touch.menu")}
+          onPress={() => toggle("sessions")}
+        >
           <Menu className="h-5 w-5" />
         </ActionButton>
       </div>

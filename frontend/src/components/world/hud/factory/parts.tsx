@@ -1,5 +1,6 @@
 "use client";
 
+import { CI_COLORS, CI_MARKS } from "@/engine/logic/statusPalette";
 import type { ReactNode } from "react";
 import { DoorOpen, ExternalLink } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -57,7 +58,7 @@ export function Chip({
   return (
     <span
       title={title}
-      className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+      className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold uppercase tracking-wider"
       style={{ color, borderColor: `${color}66`, background: `${color}1a` }}
     >
       <span className="truncate">{children}</span>
@@ -125,6 +126,46 @@ export function GithubLink({ url }: { url: string | null }): ReactNode {
       <ExternalLink className="h-3.5 w-3.5" />
       {t("factory.github")}
     </a>
+  );
+}
+
+/** Icon-only link to a CI run (opens GitHub); renders nothing without a safe URL. */
+export function RunLink({ url }: { url: string | null }): ReactNode {
+  const { t } = useTranslation();
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={t("factory.github")}
+      title={t("factory.github")}
+      className="shrink-0 text-slate-400 hover:text-white"
+    >
+      <ExternalLink className="h-3.5 w-3.5" />
+    </a>
+  );
+}
+
+const LEGEND_STATES: CheckState[] = ["success", "failure", "running", "queued"];
+
+/** What the CI colours mean (separate from the session palette). */
+export function CiLegend(): ReactNode {
+  const { t } = useTranslation();
+  return (
+    <ul
+      aria-label={t("factory.legend")}
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-300"
+    >
+      {LEGEND_STATES.map((s) => (
+        <li key={s} className="flex items-center gap-1">
+          <span style={{ color: CI_COLORS[s] }} aria-hidden>
+            {CI_MARKS[s]}
+          </span>
+          {t(`factory.state.${s}` as TranslationKey)}
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -162,7 +162,7 @@ export function SessionsPanel({
                     </span>
                     {branch && (
                       <span
-                        className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-[10px] text-slate-400"
+                        className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 bg-white/5 px-1.5 py-px font-mono text-xs text-slate-400"
                         title={branch}
                       >
                         <GitBranch className="h-2.5 w-2.5 shrink-0" />
@@ -172,7 +172,7 @@ export function SessionsPanel({
                       </span>
                     )}
                     {name && project && (
-                      <span className="min-w-0 truncate text-[11px] italic text-slate-500">
+                      <span className="min-w-0 truncate text-xs italic text-slate-500">
                         {name}
                       </span>
                     )}
@@ -205,7 +205,7 @@ export function SessionsPanel({
                   </div>
                 )}
                 {items.length > 0 && (
-                  <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                  <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
                     {items.slice(0, 2).map((w, i) => (
                       <li key={i} className="truncate">
                         › {w}
@@ -214,7 +214,7 @@ export function SessionsPanel({
                   </ul>
                 )}
               </div>
-              <span className="shrink-0 text-[11px] text-slate-500">
+              <span className="shrink-0 text-xs text-slate-500">
                 {formatDistanceToNow(new Date(s.updatedAt), {
                   addSuffix: false,
                 })}

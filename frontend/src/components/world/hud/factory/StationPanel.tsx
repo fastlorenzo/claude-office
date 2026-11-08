@@ -9,27 +9,37 @@ import {
   type StationRun,
   type StationView,
 } from "./factoryPanelModel";
-import { Chip, Empty, Section, Stat, StateChip, StateDot } from "./parts";
+import {
+  Chip,
+  CiLegend,
+  Empty,
+  RunLink,
+  Section,
+  Stat,
+  StateChip,
+  StateDot,
+} from "./parts";
 import { useFactoryData } from "./useFactoryData";
 
 function RunRow({ r }: { r: StationRun }): ReactNode {
   const { t } = useTranslation();
   return (
     <li className="flex items-center gap-2 text-xs text-slate-200">
-      <span className="w-12 shrink-0 font-mono text-[10px] text-slate-500">
+      <span className="w-12 shrink-0 font-mono text-xs text-slate-500">
         {r.lane !== null ? t("factory.lane", { n: r.lane }) : "—"}
       </span>
       <StateDot color={r.color} />
       <span className="shrink-0 font-mono text-slate-400">#{r.prNumber}</span>
       <span className="min-w-0 flex-1 truncate">{r.title}</span>
       {r.attempt && (
-        <span className="text-[10px] text-amber-400">
+        <span className="text-xs text-amber-400">
           {t("factory.attempt", { n: r.attempt })}
         </span>
       )}
       <span className="w-14 text-right tabular-nums text-slate-400">
         {r.duration}
       </span>
+      <RunLink url={r.url} />
     </li>
   );
 }
@@ -73,7 +83,7 @@ export const StationPanelView = memo(function StationPanelView({
           </div>
         )}
         {v.grouped.length > 0 && (
-          <p className="mt-3 break-words font-mono text-[11px] text-slate-400">
+          <p className="mt-3 break-words font-mono text-xs text-slate-400">
             {t("factory.station.grouped")}: {v.grouped.join(", ")}
           </p>
         )}
@@ -90,6 +100,9 @@ export const StationPanelView = memo(function StationPanelView({
             ))}
           </ul>
         )}
+      </Section>
+      <Section title={t("factory.legend")}>
+        <CiLegend />
       </Section>
       <Section title={t("factory.station.failures")}>
         {v.failures.length === 0 ? (

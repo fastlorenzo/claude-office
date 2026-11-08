@@ -93,7 +93,7 @@ export function PhasePill({
   const elapsed = formatElapsed(phase.since, nowMs);
   const agents = phase.kind === "delegating" ? activeAgents(cs) : [];
   const pulse = phase.kind === "needs_approval";
-  const text = size === "md" ? "text-xs" : "text-[11px]";
+  const text = size === "md" ? "text-xs" : "text-xs";
   return (
     <div
       className={`flex min-w-0 items-center gap-1.5 ${text} leading-tight`}
@@ -124,12 +124,12 @@ export function PhasePill({
         </span>
       )}
       {phase.detail && (
-        <span className="min-w-0 truncate font-mono text-[10px] text-slate-400">
+        <span className="min-w-0 truncate font-mono text-xs text-slate-400">
           {phase.detail}
         </span>
       )}
       {elapsed && (
-        <span className="shrink-0 text-[10px] text-slate-500">· {elapsed}</span>
+        <span className="shrink-0 text-xs text-slate-500">· {elapsed}</span>
       )}
     </div>
   );
@@ -143,7 +143,7 @@ export function RefChips({ refs }: { refs: string[] }): ReactNode {
       {refs.map((r) => (
         <span
           key={r}
-          className="shrink-0 rounded border border-white/10 bg-white/5 px-1 py-px font-mono text-[9px] font-semibold leading-none text-slate-300"
+          className="shrink-0 rounded border border-white/10 bg-white/5 px-1 py-px font-mono text-xs font-semibold leading-none text-slate-300"
         >
           {r}
         </span>

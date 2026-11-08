@@ -112,7 +112,7 @@ export function Segmented({
             aria-checked={on}
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(o.value)}
-            className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${FOCUS} ${
+            className={`rounded-md px-2 py-1 text-xs font-semibold transition-colors ${FOCUS} ${
               on
                 ? "bg-[#D97757]/25 text-[#f4b9a4]"
                 : "text-slate-400 hover:bg-white/10 hover:text-white"

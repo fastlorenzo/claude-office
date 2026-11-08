@@ -34,6 +34,8 @@ import { OverviewStrip } from "./hud/OverviewStrip";
 import { SessionsPanel, type SessionHandlers } from "./hud/SessionsPanel";
 import { useHudKeys } from "./hud/useHudKeys";
 import { OpsOverlay } from "./hud/ops/OpsOverlay";
+import { ControlsCard } from "./hud/ControlsCard";
+import { useApplyReducedMotion } from "./hud/reducedMotion";
 
 export interface WorldHudProps extends SessionHandlers {
   isMobile: boolean;
@@ -151,6 +153,7 @@ function PanelBody({
 
 function WorldHudBody(props: WorldHudProps): ReactNode {
   useHudKeys();
+  useApplyReducedMotion();
   const portrait = usePortrait();
   const panels = useWorldUiStore(selectPanels);
   const ready = useWorldUiStore((s) => s.ready);
@@ -164,6 +167,7 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
     <div className="pointer-events-none absolute inset-0 select-none overflow-hidden font-sans">
       <Crosshair isMobile={isMobile} />
       <ClickToLook isMobile={isMobile} />
+      <ControlsCard isMobile={isMobile} />
 
       <div className="absolute left-3 top-3">
         <LocationChip sessions={props.sessions} />
@@ -179,10 +183,10 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
 
       {!isMobile && (
         <div
-          className="pointer-events-auto absolute bottom-3 left-3"
+          className="pointer-events-auto absolute bottom-3 left-16"
           style={{
             maxWidth:
-              docked && !portrait ? "calc(100% - 464px)" : "calc(100% - 24px)",
+              docked && !portrait ? "calc(100% - 508px)" : "calc(100% - 76px)",
           }}
         >
           <KeyHints portrait={portrait} />
