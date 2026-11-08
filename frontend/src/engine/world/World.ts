@@ -47,6 +47,11 @@ import {
   defaultGraphicsSettings,
   type GraphicsSettings,
 } from "@/engine/fx/graphicsSettings";
+import {
+  estimateTextureMB,
+  largestTextures,
+  textureMBByGroup,
+} from "@/engine/fx/textureMemory";
 import { Lighting } from "@/engine/fx/Lighting";
 import { PostFx } from "@/engine/fx/PostFx";
 import { InputController, type InputEvent } from "@/engine/input/Input";
@@ -265,6 +270,8 @@ class World implements IWorld {
   private pending: SyncInput | null = null;
   private lastInput: SyncInput | null = null;
   private ready = false;
+  /** ms since navigation start when init finished (startup budget, WS5). */
+  private readyMs = 0;
   private visibility: VisibilityController | null = null;
   private actorHub: ActorHub | null = null;
   private screenHub: ScreenHub | null = null;
@@ -538,6 +545,7 @@ class World implements IWorld {
       // Colliders (building, factory, entrance) exist: let the player fall/walk.
       this.player.markReady();
       this.engine.runRenderLoop(() => this.frame());
+      this.readyMs = Math.round(performance.now());
       this.events.emit("ready", undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1221,6 +1229,9 @@ class World implements IWorld {
         draws: this.dbgDraws(this.sceneInstr.drawCallsCounter.current),
         active: this.scene.getActiveMeshes().length,
         textures: this.scene.textures.length,
+        /** Resident GPU texture memory estimate (WS5 budget: <= 300 at high). */
+        textureMB: estimateTextureMB(this.engine),
+        readyMs: this.readyMs,
         /** DynamicTexture uploads per second (screens / wall / signs). */
         screenUploads,
         postProcesses: this.fx?.postProcessCount ?? 0,
@@ -1232,6 +1243,8 @@ class World implements IWorld {
         ...(this.debug.drawBreakdown
           ? {
               passes: this.passDraws,
+              texTop: largestTextures(this.engine),
+              texBy: textureMBByGroup(this.engine),
               pp: this.fx?.stageNames ?? [],
               hl: this.takeOccluderKinds(),
             }
