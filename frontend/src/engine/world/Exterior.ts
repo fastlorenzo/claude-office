@@ -1168,6 +1168,8 @@ export class Exterior {
     const FC: RGB = [0.4, 0.43, 0.46];
     const inGate = (x: number, z: number) =>
       plan.gates.some((q) => x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1);
+    /** Fence openings left for the gates (panel extents, runs along x). */
+    const openings: { x0: number; x1: number; z: number }[] = [];
     const run = (ax: number, az: number, bx: number, bz: number) => {
       const len = Math.hypot(bx - ax, bz - az);
       const n = Math.ceil(len / 3);
@@ -1177,9 +1179,27 @@ export class Exterior {
         const t1 = (i + 1) / n;
         const mx = ax + (bx - ax) * ((t0 + t1) / 2);
         const mz = az + (bz - az) * ((t0 + t1) / 2);
-        if (inGate(mx, mz)) continue;
         const sx = ax + (bx - ax) * t0;
         const sz = az + (bz - az) * t0;
+        if (inGate(mx, mz)) {
+          const ex = ax + (bx - ax) * t1;
+          const o = openings.find(
+            (q) =>
+              Math.abs(q.z - sz) < 0.01 &&
+              (Math.abs(q.x1 - Math.min(sx, ex)) < 0.01 ||
+                Math.abs(q.x0 - Math.max(sx, ex)) < 0.01),
+          );
+          if (o) {
+            o.x0 = Math.min(o.x0, sx, ex);
+            o.x1 = Math.max(o.x1, sx, ex);
+          } else
+            openings.push({
+              x0: Math.min(sx, ex),
+              x1: Math.max(sx, ex),
+              z: sz,
+            });
+          continue;
+        }
         box(props, sx, sz, g, g + 2.4, 0.06, 0.06, FC);
         box(
           props,
@@ -1201,6 +1221,67 @@ export class Exterior {
     run(f.x1, f.z0, f.x1, f.z1);
     run(f.x1, f.z1, f.x0, f.z1);
     run(f.x0, f.z1, f.x0, f.z0);
+    // Closed cantilever sliding gates in the openings (the yard is shut: the
+    // walk collider closes the south gate line, so it must look closed too):
+    // heavy gate posts, a framed mesh leaf across the opening with vertical
+    // stiffeners, its counterweight tail parked along the fence on a ground
+    // track, and a red/white stripe at hand height.
+    const GATE: RGB = mul(FC, 0.9);
+    for (const o of openings) {
+      const w = o.x1 - o.x0;
+      const cx = (o.x0 + o.x1) / 2;
+      const z = o.z;
+      const inward = Math.abs(z - f.z0) < 0.01 ? 1 : -1;
+      for (const x of [o.x0, o.x1])
+        box(props, x, z, g, g + 2.6, 0.1, 0.1, mul(FC, 0.8));
+      box(
+        props,
+        cx,
+        z,
+        g + 0.12,
+        g + 2.15,
+        w / 2 - 0.12,
+        0.01,
+        mul(GATE, 0.75),
+      );
+      for (const y of [0.08, 2.15])
+        box(props, cx, z, g + y, g + y + 0.1, w / 2 - 0.1, 0.05, GATE);
+      for (let x = o.x0 + 0.1 + w / 4; x < o.x1 - 0.1; x += w / 4)
+        box(props, x, z, g + 0.12, g + 2.15, 0.035, 0.04, GATE);
+      for (const side of [-1, 1])
+        for (let k = 0; k < 8; k++)
+          box(
+            props,
+            o.x0 + 0.1 + ((k + 0.5) * (w - 0.2)) / 8,
+            z + side * 0.06,
+            g + 1.0,
+            g + 1.2,
+            (w - 0.2) / 16,
+            0.006,
+            k % 2 ? [0.85, 0.85, 0.82] : [0.72, 0.08, 0.06],
+          );
+      // Counterweight tail along the fence (east of the opening) on its track.
+      box(
+        props,
+        o.x1 + 2.2,
+        z + inward * 0.12,
+        g + 0.08,
+        g + 0.5,
+        2.1,
+        0.06,
+        GATE,
+      );
+      box(
+        props,
+        (o.x0 + o.x1 + 4.4) / 2,
+        z + inward * 0.12,
+        g,
+        g + 0.06,
+        w / 2 + 2.2,
+        0.08,
+        mul(FC, 0.6),
+      );
+    }
 
     // --- Light poles with arms + heads along the car park and the apron ----
     const pole = (x: number, z: number, dir: number) => {
