@@ -27,8 +27,15 @@ COMMON="n=6&demoFactory=1&gfx=low&quality=low"
 WALKS=(
   "end_wall_west|8,0,1.5,180;8,-2|abs(z-0.1)<0.5 and abs(y)<0.15 and reached==0"
   "end_wall_far|8,0,22.5,0;8,27|miny>-0.3 and abs(y)<0.15 and reached==0"
-  "factory_conveyor|20,-6,10,-90;15,10|reached==0 and x>15.4 and abs(y+6)<0.5"
-  "control_tier|0,0,30,0;0,38|abs(y-0.25)<0.06"
+  # Lanes run along x: walk across them (+z) from the corridor between lanes
+  # 8.4 and 10.8; feet stop within 0.4 m of the belt edge (10.33).
+  "factory_conveyor|19.25,-6,9.6,0;19.25,13|reached==0 and abs(z-10.0)<0.3 and abs(y+6)<0.5"
+  # Around the supervisor platform (its back rail is a wall at z 34.3) and up
+  # the tier's inner ramp. Feet read the deck (0.25) + the controller's hover
+  # (~0.05 moving, ~0.105 standing); the floor reads <= 0.11.
+  "control_tier|0,0,30,0;2.9,33;2.9,37;0,38.6;0,40.3|reached==4 and 0.27<y<0.42"
+  # Along the wall to the east stair foot, up both flights to the reception.
+  "entrance_stair|9.4,-6,-5.5,90;12.35,-5.5;12.35,-10.3;12.35,-11.25;10.85,-11.25;10.85,-6.2;10.85,-5.5|reached==6 and abs(y)<0.25 and z>-6.0"
   "forecourt|0,-6,-20,180;0,-56|z<=-55"
 )
 
