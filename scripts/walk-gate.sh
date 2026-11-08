@@ -60,16 +60,24 @@ miny = min([p[1] for p in pts] + [y])
 maxy = max([p[1] for p in pts] + [y])
 reached = w.get("reached", -1)
 # A walk blocked by a wall never finishes within the sampling window on
-# SwiftShader (40 s of sim time); treat an unchanged position over the last
-# 4 log samples (2 s), away from the start pose, as "stuck" = settled.
+# SwiftShader (40 s of sim time); treat a position that moved < 0.15 m over
+# the last 4 log samples (2 s; a capsule pressed against a wall jitters a
+# few cm sideways), away from the start pose, as "stuck" = settled.
 start = tuple(float(v) for v in sys.argv[3].split(",")[:3])
 moved = max(abs(a - b) for a, b in zip((x, y, z), start)) > 0.05
-stuck = len(log) >= 4 and len(set(log[-4:])) == 1 and moved
+tail = pts[-4:]
+span = max((max(abs(p[i] - q[i]) for i in range(3)) for p in tail for q in tail), default=0.0)
+stuck = len(tail) >= 4 and span < 0.15 and moved
 settled = bool(w.get("done")) or stuck
 ok = settled and bool(eval(pred, {"abs": abs}, dict(x=x, y=y, z=z, reached=reached, miny=miny, maxy=maxy)))
 print(f"{x:.2f} {y:.2f} {z:.2f} {reached}/{w.get('of')} {'yes' if w.get('done') else ('stuck' if stuck else 'unsettled')} {'ok' if ok else 'FAIL'}")
 PY
 }
+
+# Warm-up load: the first page after an idle dev server compiles and bakes
+# for minutes (readyMs > 140 s under load), which left the first walk only
+# ~1 s of sim time before shot.sh's hard timeout.
+"$SHOT_DIR/shot.sh" "$BASE/world-debug?$COMMON&shot=1&frames=5" "$OUT/warmup.png" 5 >"$OUT/warmup.log" 2>&1 || true
 
 fail=0
 printf '\n%-18s %8s %8s %8s %8s %5s  %s\n' walk x y z reached done result
