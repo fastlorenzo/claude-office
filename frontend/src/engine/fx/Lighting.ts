@@ -116,7 +116,8 @@ const KIND: Record<
   FixtureSpec["kind"],
   { color: string; intensity: number; range: number; exponent: number }
 > = {
-  down: { color: "#FFE4C4", intensity: 5.5, range: 6.5, exponent: 2.2 },
+  // 3700 K LED (not tungsten).
+  down: { color: "#FFEBD6", intensity: 5.5, range: 6.5, exponent: 2.2 },
   window: { color: "#CFE0FF", intensity: 3.2, range: 6, exponent: 1.4 },
   accent: { color: "#FFD9B0", intensity: 3, range: 4, exponent: 3 },
 };
@@ -147,6 +148,18 @@ const SHADOW_PRESET: Record<
 
 const SUN_DIR = new Vector3(-0.5, -0.62, 0.6).normalize();
 
+/** Static daylight map: coalesce re-renders (rooms arrive in bursts). */
+const STATIC_DEBOUNCE_MS = 1500;
+/** Render the static map anyway if casters are still compiling after this. */
+const STATIC_READY_TIMEOUT_MS = 6000;
+/** Baked sky brightness relative to the bake (windows read as daylight). */
+const SKY_GAIN = 1.6;
+/** Overhead key (contact shadows) and hemispheric bounce, fixtures on. */
+const KEY_ON = 0.8;
+const FILL_ON = 0.25;
+/** Per-fixture intensity cap without shadows / AO (no hard hotspots). */
+const LOW_TIER_LIGHT_CAP = 3.5;
+
 export class Lighting {
   /** Interior HDRI (IBL). */
   env: HDRCubeTexture | null = null;
@@ -165,13 +178,18 @@ export class Lighting {
   private readonly casters = new Set<AbstractMesh>();
   private readonly staticCasters = new Set<AbstractMesh>();
   private staticDirty = false;
+  /** When the static map was first marked dirty (debounce + readiness wait). */
+  private staticDirtyAt = 0;
+  private staticRenderedAt = -Infinity;
+  /** Shadow quality applied yet? Until the first plan, no generators exist. */
+  private configured = false;
   private shadowQuality: ShadowQuality = "high";
   private readonly slots: Slot[] = [];
   private container: ClusteredLightContainer | null = null;
   private clustered = false;
   private fixtures: FixturePoint[] = [];
   private poolIntensity = 1;
-  private maxLights = 4;
+  private maxLights = 0;
   private assignAt = 0;
   private assignedKey = "";
   private camera: Camera | null = null;
@@ -203,26 +221,25 @@ export class Lighting {
       scene,
     );
     this.key.position = new Vector3(10, 60, 10);
-    this.key.intensity = 0.55;
+    this.key.intensity = KEY_ON;
     this.key.diffuse = lin("#FFF1E2");
     this.key.specular = lin("#FFF1E2").scale(0.25);
 
     // Bounce: light coming *up* from the floors lights the ceilings and the
     // undersides of things (no real GI) — the ground colour does the work.
     this.fill = new HemisphericLight("fill", new Vector3(0, 1, 0), scene);
-    this.fill.intensity = 0.32;
+    this.fill.intensity = FILL_ON;
     this.fill.diffuse = lin("#DCE6F2");
     this.fill.groundColor = lin("#E8DCCB");
     this.fill.specular = Color3.Black();
 
     this.initFixtureLights();
     this.beforeRender = scene.onBeforeRenderObservable.add(() => {
-      if (this.staticDirty) {
-        this.staticDirty = false;
-        this.renderStaticShadows();
-      }
-      if (this.probesDirty && performance.now() - this.probesAt > 1500)
-        this.flushProbes();
+      const now = performance.now();
+      if (this.staticDirty) this.maybeRenderStatic(now);
+      else if (this.skippedStatic.length && now - this.skippedAt > 500)
+        this.checkSkipped(now);
+      if (this.probesDirty && now - this.probesAt > 1500) this.flushProbes();
     });
   }
 
@@ -246,7 +263,11 @@ export class Lighting {
     const url = hdriPath(ASSET_MANIFEST.hdri.id, assetBase);
     const tex = await loadHdr(this.scene, url, size, true);
     if (!tex) {
-      this.useFallbackAmbient();
+      if (!this.scene.isDisposed) this.useFallbackAmbient();
+      return false;
+    }
+    if (this.scene.isDisposed) {
+      tex.dispose();
       return false;
     }
     this.env = tex;
@@ -323,6 +344,9 @@ export class Lighting {
     if (this.skybox) this.skybox.scaling.y = -1;
     mat.unfreeze();
     mat.reflectionTexture = cube;
+    // Daylight is several times brighter than the interior: through the
+    // glazing the sky must read as noon, not dusk (same exposure inside).
+    mat.environmentIntensity = SKY_GAIN;
     mat.freeze();
     internal.incrementReferences();
     const refl = new BaseTexture(this.scene, internal);
@@ -332,6 +356,11 @@ export class Lighting {
     this.skyReflection?.dispose();
     this.skyReflection = refl;
     this.onSkyBaked?.(refl);
+    // The baked cube replaced the HDRI everywhere (skybox, glass): free it.
+    this.skyView?.dispose();
+    this.skyView = null;
+    this.exterior?.dispose();
+    this.exterior = null;
     return refl;
   }
 
@@ -356,12 +385,15 @@ export class Lighting {
       this.csm.dispose();
       this.csm = null;
     }
-    this.applyShadows();
+    // Before the first plan nothing is allocated (the real tier may be low).
+    if (this.configured) this.applyShadows();
   }
 
   setShadowQuality(q: ShadowQuality): void {
     this.shadowQuality = q;
+    this.configured = true;
     this.applyShadows();
+    this.compensateAmbient();
   }
 
   /** Legacy API: enable at a CSM map size (maps to a preset). */
@@ -411,6 +443,7 @@ export class Lighting {
       this.sun.setEnabled(false);
       return;
     }
+    if (!this.configured) return;
     this.sun.setEnabled(true);
     const p = SHADOW_PRESET[q];
     // Dynamic cascades (characters + furniture contact shadows).
@@ -418,11 +451,13 @@ export class Lighting {
       const want = `${p.csm}:${p.cascades}:${p.pcss}`;
       if (!this.csm || this.csmKey !== want) {
         this.csm?.dispose();
+        // Red-only float map: a depth needs one channel (RGBA32F is 4×).
         const csm = new CascadedShadowGenerator(
           p.csm,
           this.key,
           true,
           this.camera,
+          true,
         );
         this.csmKey = want;
         csm.numCascades = p.cascades;
@@ -441,7 +476,8 @@ export class Lighting {
         csm.bias = 0.005;
         csm.normalBias = 0.03;
         csm.depthClamp = true;
-        csm.setDarkness(0.15);
+        // Full-strength contact shadows (furniture must not float).
+        csm.setDarkness(0);
         csm.transparencyShadow = false;
         for (const m of this.casters) csm.addShadowCaster(m, false);
         this.csm = csm;
@@ -450,12 +486,20 @@ export class Lighting {
     // Static daylight map.
     if (!this.sunShadow || this.sunShadow.mapSize !== p.sun) {
       this.sunShadow?.dispose();
-      const sg = new ShadowGenerator(p.sun, this.sun, true);
-      sg.usePercentageCloserFiltering = true;
-      sg.filteringQuality =
-        q === "low"
-          ? ShadowGenerator.QUALITY_LOW
-          : ShadowGenerator.QUALITY_HIGH;
+      const sg = new ShadowGenerator(p.sun, this.sun, true, undefined, true);
+      if (q === "high" || q === "ultra") {
+        // Rendered once, so PCSS costs only shading: penumbrae widen away
+        // from the mullion / frame that casts them, as real daylight does.
+        sg.useContactHardeningShadow = true;
+        sg.contactHardeningLightSizeUVRatio = 0.012;
+        sg.filteringQuality = ShadowGenerator.QUALITY_HIGH;
+      } else {
+        sg.usePercentageCloserFiltering = true;
+        sg.filteringQuality =
+          q === "low"
+            ? ShadowGenerator.QUALITY_LOW
+            : ShadowGenerator.QUALITY_MEDIUM;
+      }
       // Closed static geometry: render back faces only into the map, which
       // removes acne / sawtooth bands on thin frames and metal door leaves.
       sg.forceBackFacesOnly = true;
@@ -466,18 +510,75 @@ export class Lighting {
       const map = sg.getShadowMap();
       if (map) map.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
       this.sunShadow = sg;
-      this.staticDirty = true;
+      this.markStaticDirty();
+      // A fresh generator renders as soon as its casters are ready.
+      this.staticRenderedAt = -Infinity;
+    } else if (this.sunShadow.mapSize === p.sun) {
+      // Same map (e.g. medium <-> high share 2048): filtering follows the tier.
+      this.markStaticDirty();
     }
   }
 
-  private renderStaticShadows(): void {
+  private markStaticDirty(): void {
+    if (!this.staticDirty) this.staticDirtyAt = performance.now();
+    this.staticDirty = true;
+  }
+
+  /**
+   * The static map renders ONCE per change, so it must not render while a
+   * caster's shadow effect is still compiling (that caster would be missing
+   * until the next change — the "first run has no mullion shadows, a tier
+   * round trip does" bug). Coalesced to one render per STATIC_DEBOUNCE_MS.
+   */
+  private maybeRenderStatic(now: number): void {
     const sg = this.sunShadow;
     const map = sg?.getShadowMap();
     if (!sg || !map) return;
-    map.renderList = [...this.staticCasters].filter(
-      (m) => !m.isDisposed() && !m.material?.needAlphaBlending(),
-    );
+    if (now - this.staticRenderedAt < STATIC_DEBOUNCE_MS) return;
+    const list = this.staticCasterList();
+    const waited = now - this.staticDirtyAt;
+    if (waited < STATIC_READY_TIMEOUT_MS && !this.castersReady(sg, list))
+      return;
+    this.staticDirty = false;
+    this.staticRenderedAt = now;
+    map.renderList = list;
     map.resetRefreshCounter();
+    // Hidden zones (visibility culling) are not drawn into the map: render
+    // again once one of them is shown.
+    this.skippedStatic = list.filter((m) => !m.isEnabled());
+    this.skippedAt = now;
+  }
+
+  private skippedStatic: AbstractMesh[] = [];
+  private skippedAt = 0;
+
+  private checkSkipped(now: number): void {
+    this.skippedAt = now;
+    if (this.skippedStatic.some((m) => !m.isDisposed() && m.isEnabled()))
+      this.markStaticDirty();
+  }
+
+  private staticCasterList(): AbstractMesh[] {
+    const out: AbstractMesh[] = [];
+    for (const m of this.staticCasters)
+      if (!m.isDisposed() && !m.material?.needAlphaBlending()) out.push(m);
+    return out;
+  }
+
+  private castersReady(sg: ShadowGenerator, list: AbstractMesh[]): boolean {
+    for (const m of list) {
+      if (!m.isEnabled() || !m.isVisible || !m.subMeshes) continue;
+      const inst =
+        (m as Mesh).hasThinInstances || ((m as Mesh).hasInstances ?? false);
+      for (const sub of m.subMeshes)
+        if (!sg.isReady(sub, inst, false)) return false;
+    }
+    return true;
+  }
+
+  /** Static-map state for tests / diagnostics. */
+  get staticShadowState(): { dirty: boolean; casters: number } {
+    return { dirty: this.staticDirty, casters: this.staticCasters.size };
   }
 
   /** Dynamic caster (characters, furniture): cascaded overhead shadows. */
@@ -506,15 +607,15 @@ export class Lighting {
       this.staticCasters.add(m);
       m.onDisposeObservable.addOnce(() => {
         this.staticCasters.delete(m);
-        this.staticDirty = true;
+        this.markStaticDirty();
       });
     }
-    this.staticDirty = true;
+    this.markStaticDirty();
   }
 
-  /** Re-render the daylight shadow map next frame (rooms / props changed). */
+  /** Re-render the daylight shadow map (rooms / props changed; coalesced). */
   invalidateStaticShadows(): void {
-    this.staticDirty = true;
+    this.markStaticDirty();
   }
 
   // -------------------------------------------------------------------------
@@ -611,6 +712,9 @@ export class Lighting {
     this.fixtures = points.map((p) =>
       p instanceof FixturePoint ? p : new FixturePoint(p.x, p.y, p.z),
     );
+    this.linearFixtures = this.fixtures.filter(
+      (f) => f.spec.size && f.spec.kind === "down",
+    );
     for (const s of this.slots) s.target = null;
     this.assignedKey = "";
     this.assignAt = 0;
@@ -627,11 +731,34 @@ export class Lighting {
     this.compensateAmbient();
   }
 
-  /** Without fixture lights the interior needs more ambient to stay readable. */
+  /**
+   * Without fixture lights (or without the sun, which needs shadows to stay
+   * out of the ceilings) the interior needs more ambient to stay readable.
+   * A pure function of (maxLights, pool, shadows): a tier round trip
+   * restores exactly the same values.
+   */
   private compensateAmbient(): void {
-    const off = this.maxLights === 0 || this.poolIntensity === 0;
-    this.fill.intensity = off ? 0.75 : 0.32;
-    this.key.intensity = off ? 0.9 : 0.55;
+    const noFixtures = this.maxLights === 0 || this.poolIntensity === 0;
+    const noSun = this.configured && this.shadowQuality === "off";
+    let fill = FILL_ON;
+    let key = KEY_ON;
+    if (noSun) {
+      fill = Math.max(fill, 0.55);
+      key = Math.max(key, 0.8);
+    }
+    if (noFixtures) {
+      fill = Math.max(fill, 0.75);
+      key = Math.max(key, 0.9);
+    }
+    this.fill.intensity = fill;
+    this.key.intensity = key;
+  }
+
+  /** Per-light cap: low tiers have no AO / shadow to break a hotspot. */
+  private lightCap(): number {
+    return this.shadowQuality === "off" || this.shadowQuality === "low"
+      ? LOW_TIER_LIGHT_CAP
+      : Infinity;
   }
 
   /** Assign lights to the fixtures nearest `eye` (fading on reassignment). */
@@ -643,17 +770,20 @@ export class Lighting {
     if (this.fixtures.length <= this.slots.length) nearest = this.fixtures;
     else if (now - this.assignAt > 400 || !this.assignedKey) {
       this.assignAt = now;
-      nearest = [...this.fixtures]
-        .map((p) => ({ p, d: Vector3.DistanceSquared(p, eye) }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, this.slots.length)
-        .map((x) => x.p);
-      this.lastNearest = nearest;
+      this.assignedKey = "assigned";
+      nearest = this.nearestFixtures(eye, this.slots.length);
     } else nearest = this.lastNearest;
-    const want = new Set(nearest);
-    const claimed = new Set<FixturePoint>();
+    const want = this.wantSet;
+    if (this.wantFrom !== nearest || want.size !== nearest.length) {
+      want.clear();
+      for (const p of nearest) want.add(p);
+      this.wantFrom = nearest;
+    }
+    const claimed = this.claimed;
+    claimed.clear();
     for (const s of this.slots)
       if (s.target && want.has(s.target)) claimed.add(s.target);
+    const cap = this.lightCap();
     const instant = this.clustered && this.fixtures.length <= this.slots.length;
     for (const s of this.slots) {
       const keep = s.target && want.has(s.target);
@@ -672,11 +802,39 @@ export class Lighting {
       }
       const base = s.target ? KIND[s.target.spec.kind].intensity : 0;
       s.light.intensity =
-        s.level * base * (s.target?.spec.intensity ?? 1) * this.poolIntensity;
+        s.level *
+        Math.min(cap, base * (s.target?.spec.intensity ?? 1)) *
+        this.poolIntensity;
     }
   }
 
   private lastNearest: FixturePoint[] = [];
+  private readonly wantSet = new Set<FixturePoint>();
+  private wantFrom: FixturePoint[] | null = null;
+  private readonly claimed = new Set<FixturePoint>();
+  private readonly distScratch: number[] = [];
+
+  /** The `k` fixtures nearest `eye` (insertion into a k-list, no full sort). */
+  private nearestFixtures(eye: Vector3, k: number): FixturePoint[] {
+    const out: FixturePoint[] = [];
+    const d = this.distScratch;
+    d.length = 0;
+    for (const p of this.fixtures) {
+      const dist = Vector3.DistanceSquared(p, eye);
+      if (out.length === k && dist >= d[k - 1]) continue;
+      let i = Math.min(out.length, k - 1);
+      while (i > 0 && d[i - 1] > dist) {
+        d[i] = d[i - 1];
+        out[i] = out[i - 1];
+        i--;
+      }
+      d[i] = dist;
+      out[i] = p;
+    }
+    // A new array per reassignment (2.5 Hz): the want-set refreshes on it.
+    this.lastNearest = out;
+    return out;
+  }
 
   private configure(s: Slot, f: FixturePoint): void {
     const k = KIND[f.spec.kind];
@@ -726,14 +884,29 @@ export class Lighting {
     }
   }
 
+  private linearFixtures: FixturePoint[] = [];
+
   private updateArea(eye: Vector3): void {
     if (!this.areaOn || this.areaLights.length === 0) return;
-    const linear = this.fixtures
-      .filter((f) => f.spec.size && f.spec.kind === "down")
-      .map((f) => ({ f, d: Vector3.DistanceSquared(f, eye) }))
-      .sort((a, b) => a.d - b.d);
+    // The two nearest linear luminaires, no allocation.
+    let f0: FixturePoint | null = null;
+    let f1: FixturePoint | null = null;
+    let d0 = Infinity;
+    let d1 = Infinity;
+    for (const f of this.linearFixtures) {
+      const d = Vector3.DistanceSquared(f, eye);
+      if (d < d0) {
+        f1 = f0;
+        d1 = d0;
+        f0 = f;
+        d0 = d;
+      } else if (d < d1) {
+        f1 = f;
+        d1 = d;
+      }
+    }
     this.areaLights.forEach((a, i) => {
-      const hit = linear[i]?.f;
+      const hit = i === 0 ? f0 : f1;
       if (!hit || !hit.spec.size) {
         a.light.intensity = 0;
         return;
@@ -765,12 +938,38 @@ export class Lighting {
     const spec: ProbeSpec = {
       center,
       size,
-      materials,
+      materials: [...materials, ...(this.probeExtras.get(name) ?? [])],
       renderList,
       probe: null,
     };
     this.probes.set(name, spec);
     if (this.probesOn) this.buildProbe(name, spec);
+  }
+
+  private readonly probeExtras = new Map<string, PBRMaterial[]>();
+
+  /**
+   * Extra materials that take a zone probe's reflection when it registers
+   * (glass partitions reflect the hall, drum glazing the control room).
+   */
+  attachToProbe(name: string, materials: PBRMaterial[]): void {
+    const list = this.probeExtras.get(name) ?? [];
+    for (const m of materials) if (!list.includes(m)) list.push(m);
+    this.probeExtras.set(name, list);
+    const spec = this.probes.get(name);
+    if (spec) {
+      for (const m of materials)
+        if (!spec.materials.includes(m)) spec.materials.push(m);
+      if (this.probesOn) this.buildProbe(name, spec);
+    }
+  }
+
+  /** A probe never draws the surfaces that sample it (GL feedback loop). */
+  private fillProbeList(spec: ProbeSpec, list: AbstractMesh[]): void {
+    list.length = 0;
+    for (const m of spec.renderList())
+      if (!spec.materials.includes(m.material as PBRMaterial)) list.push(m);
+    if (this.skybox) list.push(this.skybox);
   }
 
   setReflectionProbes(on: boolean): void {
@@ -794,9 +993,7 @@ export class Lighting {
     probe.position.copyFrom(spec.center);
     probe.position.y = Math.min(spec.center.y, 1.6);
     probe.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
-    const list = probe.renderList!;
-    for (const m of spec.renderList()) list.push(m);
-    if (this.skybox) list.push(this.skybox);
+    this.fillProbeList(spec, probe.renderList!);
     const cube = probe.cubeTexture;
     cube.boundingBoxSize = spec.size.clone();
     cube.boundingBoxPosition = spec.center.clone();
@@ -842,10 +1039,7 @@ export class Lighting {
     for (const spec of this.probes.values()) {
       const probe = spec.probe;
       if (!probe) continue;
-      const list = probe.renderList!;
-      list.length = 0;
-      for (const m of spec.renderList()) list.push(m);
-      if (this.skybox) list.push(this.skybox);
+      this.fillProbeList(spec, probe.renderList!);
       probe.cubeTexture.resetRefreshCounter();
     }
   }

@@ -334,6 +334,9 @@ class World implements IWorld {
     );
 
     this.lighting = new Lighting(scene);
+    // Glass partitions and the floor strip reflect the hall (box-projected
+    // zone probe) instead of the dim generic IBL.
+    this.lighting.attachToProbe("hall", [this.materials.get("glass")]);
     this.assets.onPart((m, role) => {
       if (SHADOW_ROLES.has(role)) this.lighting.addShadowCaster(m);
     });
