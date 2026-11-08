@@ -26,6 +26,7 @@ export const SOLID_ROLES: ReadonlySet<DressingRole> = new Set<DressingRole>([
   "toolTrolley",
   "bollard",
   "binIndustrial",
+  "officeBin",
   "visitorChair",
 ]);
 

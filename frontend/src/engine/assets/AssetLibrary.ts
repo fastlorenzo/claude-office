@@ -130,6 +130,7 @@ const PROCEDURAL_COLLIDERS: Record<
   visitorChair: "none",
   entranceMat: "none",
   dockLeveller: "none",
+  officeBin: "none",
 };
 
 /**
@@ -227,6 +228,7 @@ const BLOB_ROLES: ReadonlySet<PropRole> = new Set<PropRole>([
   "bollard",
   "binIndustrial",
   "visitorChair",
+  "officeBin",
 ]);
 
 export class AssetLibrary {

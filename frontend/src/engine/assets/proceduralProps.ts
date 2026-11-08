@@ -55,7 +55,8 @@ export type ProceduralRole =
   | "binIndustrial"
   | "visitorChair"
   | "entranceMat"
-  | "dockLeveller";
+  | "dockLeveller"
+  | "officeBin";
 export type PropRole = ModelRole | ProceduralRole;
 export const PROCEDURAL_ROLES: readonly ProceduralRole[] = [
   "workDesk",
@@ -85,6 +86,7 @@ export const PROCEDURAL_ROLES: readonly ProceduralRole[] = [
   "visitorChair",
   "entranceMat",
   "dockLeveller",
+  "officeBin",
 ];
 
 const BOOK_COLORS = [
@@ -779,6 +781,7 @@ export const DRESSING_DIMS = {
   visitorChair: { w: 0.5, d: 0.56, h: 0.9 },
   entranceMat: { w: 1, d: 1, h: 0.012 },
   dockLeveller: { w: 2, d: 2, h: 0.022 },
+  officeBin: { w: 0.3, d: 0.3, h: 0.62 },
 } as const;
 
 /**
@@ -996,12 +999,26 @@ const bollard: Builder = (b) => {
  */
 const stripCurtain: Builder = (b) => {
   b.box("blackMetal", v3(0, 3.36, 0), v3(3.4, 0.08, 0.08));
-  for (let i = 0; i < 16; i++)
+  // 14 tinted PVC strips 0.26 wide at a 0.2423 pitch: neighbours overlap by
+  // 2 cm in plan but hang 3 cm apart in depth (alternating), so no coplanar
+  // faces; each strip is 1.2 cm thick and clears the floor by 5 cm.
+  for (let i = 0; i < 14; i++)
     b.box(
-      "glassFrosted",
-      v3(-1.6 + i * 0.2133, 1.7, i % 2 ? 0.006 : -0.006),
-      v3(0.2, 3.3, 0.004),
+      "glassTint",
+      v3(-1.6 + i * 0.2423 + 0.0, 1.7, i % 2 ? 0.016 : -0.016),
+      v3(0.26, 3.3, 0.012),
     );
+};
+
+/** Slim office bin: charcoal powder-coated drum with a steel rim. */
+const officeBin: Builder = (b) => {
+  b.paint = paintOf("#2B2D31");
+  b.cylinder("paint", v3(0, 0.3, 0), 0.6, 0.27, 0.25, 24);
+  b.paint = paintOf("#B9BCC0");
+  b.cylinder("paint", v3(0, 0.61, 0), 0.02, 0.3, 0.3, 24);
+  b.paint = paintOf("#0F1012");
+  b.cylinder("paint", v3(0, 0.612, 0), 0.01, 0.26, 0.26, 24);
+  b.paint = null;
 };
 
 /** 240 l wheelie bin: dark green body, black lid, rear wheels and handle. */
@@ -1108,6 +1125,7 @@ const BUILDERS: Record<PropRole, Builder> = {
   visitorChair,
   entranceMat,
   dockLeveller,
+  officeBin,
 };
 
 /** Build the procedural parts for a role (merged per material, model space). */

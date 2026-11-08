@@ -43,11 +43,8 @@ export function receptionPieces(
     // Fire point + a litter bin beside the factory door.
     const f = against("fireExtinguisher", s * 2.1, zw, 0, -1, { gap: 0.02 });
     if (s > 0) out.push({ role: "fireExtinguisher", ...f, y });
-    const b = against("binIndustrial", s * 3.2, zw, 0, -1, {
-      gap: 0.05,
-      scale: 0.7,
-    });
-    out.push({ role: "binIndustrial", ...b, y, scale: 0.7 });
+    const b = against("officeBin", s * 3.8, zw, 0, -1, { gap: 0.05 });
+    out.push({ role: "officeBin", ...b, y });
   }
 
   // Level 1 reception: visitor chairs in front of the desk wing, a bin by
@@ -57,14 +54,7 @@ export function receptionPieces(
   out.push(
     { role: "visitorChair", x: -6.5, y: up, z: -4.9, yaw: 0.15 },
     { role: "visitorChair", x: -5.75, y: up, z: -4.9, yaw: -0.1 },
-    {
-      role: "binIndustrial",
-      x: -(halfW - 0.8),
-      y: up,
-      z: -2.3,
-      yaw: Math.PI / 2,
-      scale: 0.7,
-    },
+    { role: "officeBin", x: -(halfW - 0.8), y: up, z: -2.3, yaw: 0 },
   );
   return out;
 }
