@@ -188,7 +188,7 @@ export function Timeline({
   const onSelect = ui.select;
   const onToggle = ui.toggleExpand;
   const isTaskRow = ui.isTaskRow;
-  const showChip = ui.mode === "flat" || density === "compact";
+  const showChip = ui.mode === "flat";
 
   const empty =
     rows.length === 0 ? (

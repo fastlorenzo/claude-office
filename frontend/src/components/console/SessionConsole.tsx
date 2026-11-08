@@ -395,6 +395,7 @@ export function SessionConsoleView({
         counts={counts}
         pr={pr}
         compact={layout === "one"}
+        touch={touch}
         onErrors={ui.toggleErrors}
         onEnterRoom={onEnterRoom}
         crossLink={crossLink}

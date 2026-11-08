@@ -107,6 +107,7 @@ export function ConsoleHeader({
   counts,
   pr,
   compact = false,
+  touch = false,
   onErrors,
   onEnterRoom,
   crossLink,
@@ -118,6 +119,8 @@ export function ConsoleHeader({
   pr?: PullRequestInfo | null;
   /** Narrow (mobile / dock < 800 px): two dense lines. */
   compact?: boolean;
+  /** Phone width: only copy + close in the action group. */
+  touch?: boolean;
   /** Errors count click: errors-only filter. */
   onErrors?: () => void;
   onEnterRoom?: () => void;
@@ -160,7 +163,7 @@ export function ConsoleHeader({
 
   const actions = (
     <div className="flex shrink-0 items-center gap-1.5">
-      {onEnterRoom && (
+      {onEnterRoom && !touch && (
         <button
           type="button"
           className={compact ? `${BTN} px-2` : BTN}
@@ -173,6 +176,7 @@ export function ConsoleHeader({
         </button>
       )}
       {crossLink &&
+        !touch &&
         (crossLink.href ? (
           <a
             className={compact ? `${BTN} px-2` : BTN}

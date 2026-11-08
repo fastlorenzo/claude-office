@@ -215,7 +215,8 @@ export const CallRow = memo(function CallRow({
   const st = STATUS_STYLE[call.status];
   const dur = useDurationLabel(call);
   const compact = density === "compact";
-  const tight = compact || narrow;
+  const tight = compact || narrow || touch;
+  const liveRow = isLive(call.status);
   const target =
     sum.renderer === "diff" ||
     sum.renderer === "write" ||
@@ -231,7 +232,7 @@ export const CallRow = memo(function CallRow({
     .join(", ");
   const errLine =
     call.status === "error" && call.error ? call.error.split("\n")[0] : null;
-  const pad = 10 + row.depth * INDENT_PX;
+  const pad = (touch ? 4 : 10) + row.depth * (touch ? 12 : INDENT_PX);
 
   return (
     // Spec 2.5: listbox options expose their expansion state (aria-expanded).
@@ -271,17 +272,17 @@ export const CallRow = memo(function CallRow({
               e.stopPropagation();
               onToggle(call.id);
             }}
-            className={`-ml-1 flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-white/10 hover:text-slate-200 ${touch ? "h-8 w-8" : "h-5 w-5"}`}
+            className={`-ml-1 flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-white/10 hover:text-slate-200 ${touch ? "h-9 w-7" : "h-5 w-5"}`}
           >
             <ChevronRight
               className={`h-3.5 w-3.5 transition-transform ${row.expanded ? "rotate-90" : ""}`}
             />
           </button>
         ) : (
-          <span className={`-ml-1 shrink-0 ${touch ? "w-8" : "w-5"}`} />
+          <span className={`-ml-1 shrink-0 ${touch ? "w-7" : "w-5"}`} />
         )}
         <span className="shrink-0 font-mono text-xs tabular-nums text-slate-500">
-          {compact ? time.slice(0, 5) : time}
+          {tight ? time.slice(0, 5) : time}
         </span>
         <span
           title={[v.name, v.type].filter(Boolean).join(" · ")}
@@ -293,13 +294,15 @@ export const CallRow = memo(function CallRow({
             aria-hidden
           />
         </span>
-        <span className="flex shrink-0 items-center gap-1.5">
+        <span
+          className={`flex min-w-0 items-center gap-1.5 ${tight ? "max-w-[45%] shrink" : "shrink-0"}`}
+        >
           <ToolGlyph
             name={call.toolName}
-            className="h-3.5 w-3.5 text-slate-400"
+            className="h-3.5 w-3.5 shrink-0 text-slate-400"
           />
           <span
-            className={`text-[13px] font-semibold text-slate-100 ${compact ? "" : "min-w-[3.5rem]"}`}
+            className={`truncate text-[13px] font-semibold text-slate-100 ${tight ? "" : "min-w-[3.5rem]"}`}
           >
             {sum.label}
           </span>
@@ -325,7 +328,7 @@ export const CallRow = memo(function CallRow({
                 {sv.shortId}
               </span>
             )}
-            {row.childCount > 0 && (
+            {row.childCount > 0 && !touch && (
               <span className="shrink-0 text-xs text-slate-400">
                 {t("console.nCalls", { count: row.childCount })}
               </span>
@@ -352,7 +355,7 @@ export const CallRow = memo(function CallRow({
         {showAgentChip && v.kind !== "main" && compact && (
           <AgentChip v={v} max="max-w-[7rem]" />
         )}
-        {sum.stat && !compact && (
+        {sum.stat && !tight && (
           <span className="shrink-0 font-mono text-xs tabular-nums">
             {sum.stat.startsWith("+") ? (
               <>
@@ -368,10 +371,10 @@ export const CallRow = memo(function CallRow({
         )}
         {waiting && (
           <span className="shrink-0 text-xs font-semibold text-amber-300">
-            {compact ? t("console.waitingShort") : t("console.waitingForYou")}
+            {tight ? t("console.waitingShort") : t("console.waitingForYou")}
           </span>
         )}
-        {!compact &&
+        {!tight &&
           (call.status === "denied" || call.status === "interrupted") && (
             <span
               className="shrink-0 text-xs text-slate-500"
@@ -382,11 +385,11 @@ export const CallRow = memo(function CallRow({
               {statusLabel}
             </span>
           )}
-        {dur && (
+        {dur && (!touch || liveRow) && (
           <span
             className={`shrink-0 text-right font-mono text-xs tabular-nums ${
               waiting ? "text-amber-300" : "text-slate-400"
-            } ${compact ? "" : "min-w-[3rem]"}`}
+            } ${tight ? "" : "min-w-[3rem]"}`}
           >
             {dur}
           </span>
@@ -398,7 +401,7 @@ export const CallRow = memo(function CallRow({
       {errLine && (
         <div
           className="flex items-center gap-1.5 truncate pb-1 pr-3 font-mono text-xs text-rose-300"
-          style={{ paddingLeft: pad + (touch ? 40 : 28) }}
+          style={{ paddingLeft: pad + (touch ? 30 : 28) }}
           title={call.error ?? undefined}
         >
           <CornerDownRight className="h-3 w-3 shrink-0 text-rose-400/70" />
@@ -441,7 +444,7 @@ export const MarkerRow = memo(function MarkerRow({
       className={`relative flex items-center gap-2 pr-3 ${touch ? "min-h-[44px]" : "min-h-[30px]"} ${
         user ? "bg-cyan-400/[0.05]" : "bg-orange-400/[0.05]"
       } ${onOpen ? "cursor-pointer hover:bg-white/[0.05]" : ""}`}
-      style={{ paddingLeft: touch ? 42 : 30 }}
+      style={{ paddingLeft: touch ? 32 : 30 }}
       title={entry.text.slice(0, 600)}
     >
       <span
@@ -450,7 +453,7 @@ export const MarkerRow = memo(function MarkerRow({
         style={{ background: user ? "#22D3EE" : MAIN_COLOR }}
       />
       <span className="shrink-0 font-mono text-xs tabular-nums text-slate-500">
-        {density === "compact" ? time.slice(0, 5) : time}
+        {density === "compact" || touch ? time.slice(0, 5) : time}
       </span>
       {user ? (
         <User className="h-3.5 w-3.5 shrink-0 text-cyan-300" aria-hidden />
@@ -486,7 +489,7 @@ export const ResultRow = memo(function ResultRow({
 }): ReactNode {
   const { t } = useTranslation();
   const v = agentVisual(agent.id, agent, t("console.mainAgent"));
-  const pad = 10 + depth * INDENT_PX;
+  const pad = (touch ? 4 : 10) + depth * (touch ? 12 : INDENT_PX);
   const dur =
     agent.startedAt && agent.endedAt
       ? formatDuration(Date.parse(agent.endedAt) - Date.parse(agent.startedAt))
@@ -512,7 +515,7 @@ export const ResultRow = memo(function ResultRow({
           background: `${v.color}66`,
         }}
       />
-      <span className={`-ml-1 shrink-0 ${touch ? "w-8" : "w-5"}`} />
+      <span className={`-ml-1 shrink-0 ${touch ? "w-7" : "w-5"}`} />
       <CornerDownRight
         className="h-3.5 w-3.5 shrink-0"
         style={{ color: v.color }}

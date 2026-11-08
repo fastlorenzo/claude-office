@@ -167,9 +167,14 @@ const AgentNodeRow = memo(function AgentNodeRow({
           {v.name}
         </span>
         <span
-          className="ml-auto flex shrink-0 items-center gap-1"
+          className="ml-auto flex shrink-0 items-center gap-1.5"
           title={stateLabel}
         >
+          {elapsed !== null && elapsed > 0 && (
+            <span className="font-mono text-xs tabular-nums text-slate-500">
+              {formatDuration(elapsed)}
+            </span>
+          )}
           <StateGlyph st={st} />
         </span>
       </div>
@@ -187,11 +192,6 @@ const AgentNodeRow = memo(function AgentNodeRow({
         {node.errors > 0 && (
           <span className="text-rose-400">
             · {t("console.nErrors", { count: node.errors })}
-          </span>
-        )}
-        {elapsed !== null && elapsed > 0 && (
-          <span className="ml-auto font-mono tabular-nums">
-            {formatDuration(elapsed)}
           </span>
         )}
       </div>

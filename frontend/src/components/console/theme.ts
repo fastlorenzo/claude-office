@@ -104,7 +104,7 @@ const KIND_ICON: Record<AgentKind, LucideIcon> = {
 
 function shortNative(node: AgentNode | undefined, id: string): string | null {
   if (node?.nativeId) return node.nativeId.slice(0, 7);
-  if (id === "main") return null;
+  if (!id.startsWith("subagent_")) return null;
   const tail = id.replace(/^subagent_(toolu_)?/, "");
   return tail ? tail.slice(-7) : null;
 }
@@ -133,7 +133,9 @@ export function agentVisual(
       ? mainLabel
       : node?.name && node.name !== id
         ? node.name
-        : `${kind === "background" ? "bg" : "agent"} ${shortId ?? id}`;
+        : kind === "background"
+          ? `bg ${shortId ?? id}`
+          : `agent ${shortId ?? id}`;
   return {
     kind,
     color,
