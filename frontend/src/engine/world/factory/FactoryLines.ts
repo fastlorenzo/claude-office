@@ -52,6 +52,7 @@ import { Cells } from "./Cell";
 import { Conveyors } from "./Conveyors";
 import { DOCK, Dock, addDockColliders } from "./Dock";
 import type { Factory, FactoryPart } from "./Factory";
+import { syncFactoryColliders } from "./factoryColliders";
 import { FactorySync, type FactorySyncStats } from "./factorySync";
 import {
   conveyorPaths,
@@ -428,6 +429,7 @@ export class FactoryLines implements FactoryPart {
     const { list, meta } = stationRows(fl, this.models);
     this.stationMeta = meta;
     this.stations.setStations(list);
+    syncFactoryColliders(this.ctx.colliders, fl, list);
     this.stationOrder = orderStations(list).order;
     this.cells.setCells(fl.cells, this.models);
     if (this.vis) this.setVisibility(this.vis);
