@@ -173,6 +173,9 @@ export function createScreenTexture(
     Texture.TRILINEAR_SAMPLINGMODE,
   );
   dt.anisotropicFilteringLevel = 8;
+  // Named in the `?drawdbg=1` texture breakdown (internal textures are anonymous).
+  const internal = dt.getInternalTexture();
+  if (internal) internal.label = name;
   dt.hasAlpha = alpha;
   dt.wrapU = Texture.CLAMP_ADDRESSMODE;
   dt.wrapV = Texture.CLAMP_ADDRESSMODE;

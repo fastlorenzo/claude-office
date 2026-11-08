@@ -91,7 +91,7 @@ export function largestTextures(
   for (const t of engine.getLoadedTexturesCache()) {
     if (seen.has(t)) continue;
     seen.add(t);
-    const name = (t.label || t.url || `src${t.source}`).slice(-40);
+    const name = (t.label || t.url || `src${t.source}`).slice(-60);
     out.push({
       name,
       mb: Math.round((textureBytes(t) / 1048576) * 10) / 10,
