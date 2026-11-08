@@ -19,8 +19,5 @@
     ],
     // Backend schema mirror: kept whole on purpose.
     "src/engine/contracts.ts": ["types"],
-    // In flight in another workstream (WS4 owns Workpieces); remove this line
-    // once its zero-importer exports are gone.
-    "src/engine/world/factory/Workpieces.ts": ["exports", "types"],
   },
 }

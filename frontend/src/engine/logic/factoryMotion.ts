@@ -129,6 +129,7 @@ const MERGING = new Set<Mode>([
   "shipped",
 ]);
 
+const NO_EVENTS: MotionEvent[] = [];
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 const smooth = (x: number) => {
   const c = clamp01(x);
@@ -255,6 +256,39 @@ export class FactoryMotion {
     this.events = [];
     return { pieces, events };
   }
+
+  /**
+   * `step` for the per-frame render path: the returned array and its piece
+   * objects are reused by the next call (no per-frame allocation). Callers
+   * must not keep them across frames; use `step` for snapshots.
+   */
+  stepPooled(dtMs: number): MotionFrame {
+    const dt = Number.isFinite(dtMs)
+      ? Math.min(MOTION.MAX_DT_MS, Math.max(0, dtMs))
+      : 0;
+    const out = this.pooled;
+    let n = 0;
+    for (const p of this.pieces.values()) {
+      this.advance(p, dt);
+      let o = out[n];
+      if (!o) {
+        o = { id: p.id, segmentPath: "lane", t: 0, phase: p.mode, fade: 0 };
+        out.push(o);
+      }
+      this.writeOutput(p, o);
+      n++;
+    }
+    out.length = n;
+    this.pooledFrame.pieces = out;
+    if (this.events.length) {
+      this.pooledFrame.events = this.events;
+      this.events = [];
+    } else this.pooledFrame.events = NO_EVENTS;
+    return this.pooledFrame;
+  }
+
+  private readonly pooled: PieceMotion[] = [];
+  private readonly pooledFrame: MotionFrame = { pieces: [], events: [] };
 
   get size(): number {
     return this.pieces.size;
@@ -417,14 +451,25 @@ export class FactoryMotion {
   }
 
   private output(p: PieceState): PieceMotion {
-    const e = (ms: number) => clamp01(p.elapsed / ms);
-    const o: PieceMotion = {
+    return this.writeOutput(p, {
       id: p.id,
       segmentPath: "lane",
       t: 0,
       phase: p.mode,
       fade: p.fade,
-    };
+    });
+  }
+
+  /** Fill `o` (fresh or pooled) with the piece's current motion. */
+  private writeOutput(p: PieceState, o: PieceMotion): PieceMotion {
+    o.id = p.id;
+    o.segmentPath = "lane";
+    o.t = 0;
+    o.phase = p.mode;
+    o.fade = p.fade;
+    if (o.laneIndex !== undefined) o.laneIndex = undefined;
+    if (o.queueSlot !== undefined) o.queueSlot = undefined;
+    if (o.fromT !== undefined) o.fromT = undefined;
     switch (p.mode) {
       case "rack":
       case "queued":
@@ -436,7 +481,7 @@ export class FactoryMotion {
         o.segmentPath = "queue";
         o.laneIndex = p.lane;
         o.queueSlot = p.slot;
-        o.t = smooth(e(MOTION.ENTER_MS));
+        o.t = smooth(clamp01(p.elapsed / MOTION.ENTER_MS));
         break;
       case "lane":
         o.laneIndex = p.lane;
@@ -446,7 +491,7 @@ export class FactoryMotion {
         o.segmentPath = "rework";
         o.laneIndex = p.lane;
         o.fromT = p.fromT;
-        o.t = smooth(e(MOTION.REWORK_MS));
+        o.t = smooth(clamp01(p.elapsed / MOTION.REWORK_MS));
         break;
       case "rework-wait":
         o.segmentPath = "rework";
@@ -458,21 +503,22 @@ export class FactoryMotion {
         o.segmentPath = "rework";
         o.laneIndex = p.lane;
         o.fromT = p.fromT;
-        o.t = 1 - smooth(e(MOTION.RETURN_MS));
+        o.t = 1 - smooth(clamp01(p.elapsed / MOTION.RETURN_MS));
         break;
       case "gate":
         o.laneIndex = p.lane;
         o.fromT = p.fromT;
-        o.t = p.fromT + (1 - p.fromT) * smooth(e(MOTION.GATE_MS));
+        o.t =
+          p.fromT + (1 - p.fromT) * smooth(clamp01(p.elapsed / MOTION.GATE_MS));
         break;
       case "trunk":
         o.segmentPath = "trunk";
         o.laneIndex = p.lane;
-        o.t = e(MOTION.TRUNK_MS);
+        o.t = clamp01(p.elapsed / MOTION.TRUNK_MS);
         break;
       case "main":
         o.segmentPath = "main";
-        o.t = e(MOTION.MAIN_MS);
+        o.t = clamp01(p.elapsed / MOTION.MAIN_MS);
         break;
       case "qc":
         o.segmentPath = "main";
@@ -480,7 +526,7 @@ export class FactoryMotion {
         break;
       case "dock":
         o.segmentPath = "dock";
-        o.t = e(MOTION.DOCK_MS);
+        o.t = clamp01(p.elapsed / MOTION.DOCK_MS);
         break;
       case "shipped":
         o.segmentPath = "dock";
@@ -490,7 +536,7 @@ export class FactoryMotion {
         o.segmentPath = "scrap";
         o.laneIndex = p.lane;
         o.fromT = p.fromT;
-        o.t = smooth(e(MOTION.SCRAP_MS));
+        o.t = smooth(clamp01(p.elapsed / MOTION.SCRAP_MS));
         break;
       case "scrapped":
         o.segmentPath = "scrap";

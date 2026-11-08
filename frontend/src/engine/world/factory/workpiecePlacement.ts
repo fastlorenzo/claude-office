@@ -143,7 +143,18 @@ export function queueSlot(
 // Colours
 // ---------------------------------------------------------------------------
 
+const rgbCache = new Map<string, [number, number, number]>();
+
+/** `#rrggbb` → linear-ish 0..1 triple (cached: a handful of state colours). */
 export function hexToRgb(hex: string): [number, number, number] {
+  const hit = rgbCache.get(hex);
+  if (hit) return hit;
+  const v = parseHex(hex);
+  if (rgbCache.size < 256) rgbCache.set(hex, v);
+  return v;
+}
+
+function parseHex(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
   if (!m) return [0.6, 0.6, 0.6];
   const n = parseInt(m[1], 16);
@@ -309,19 +320,51 @@ export function packPieces(
   out.ghost.c = grow(out.ghost.c, n * 4);
   for (let i = 0; i < n; i++) {
     const r = pieces[i];
-    const { x, y, z, yaw } = r.placed;
-    writeMatrix(out.pallet, i * 16, x, y, z, yaw);
     const rgb = hexToRgb(r.color);
     // band (status ring light)
     const bi = out.band.count++;
-    writeMatrix(out.band.m, bi * 16, x, y, z, yaw);
-    out.band.c.set([rgb[0], rgb[1], rgb[2], 1], bi * 4);
+    setRgba(out.band.c, bi * 4, rgb);
+    if (r.draft) {
+      setRgba(out.ghost.c, out.ghost.count++ * 4, rgb);
+    } else {
+      const b = out.bodies[r.variant];
+      setRgba(b.c, b.count++ * 4, bodyTint(r.color));
+    }
+  }
+  out.band.count = n;
+  writePackedMatrices(pieces, out);
+  return out;
+}
+
+function setRgba(a: Float32Array, at: number, c: readonly number[]): void {
+  a[at] = c[0];
+  a[at + 1] = c[1];
+  a[at + 2] = c[2];
+  a[at + 3] = 1;
+}
+
+/**
+ * Matrices only, in the routing `packPieces` established (pallet / band in
+ * input order, bodies per variant, drafts as ghosts). The moving-pieces fast
+ * path: same pieces and looks, new poses — no colours, no allocation.
+ */
+export function writePackedMatrices(
+  pieces: readonly ResolvedPiece[],
+  out: Packed,
+): void {
+  const bodyAt = BODY_CURSOR;
+  bodyAt.fill(0);
+  let gi = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    const r = pieces[i];
+    const { x, y, z, yaw } = r.placed;
+    writeMatrix(out.pallet, i * 16, x, y, z, yaw);
+    writeMatrix(out.band.m, i * 16, x, y, z, yaw);
     if (r.draft) {
       const d = BODY_DIMS[r.variant];
-      const gi = out.ghost.count++;
       writeMatrix(
         out.ghost.m,
-        gi * 16,
+        gi++ * 16,
         x,
         y + PALLET_TOP + d.h / 2,
         z,
@@ -330,18 +373,14 @@ export function packPieces(
         d.h,
         d.d,
       );
-      out.ghost.c.set([rgb[0], rgb[1], rgb[2], 1], gi * 4);
     } else {
-      const b = out.bodies[r.variant];
-      const k = b.count++;
-      writeMatrix(b.m, k * 16, x, y + PALLET_TOP, z, yaw);
-      const t = bodyTint(r.color);
-      b.c.set([t[0], t[1], t[2], 1], k * 4);
+      const k = bodyAt[r.variant]++;
+      writeMatrix(out.bodies[r.variant].m, k * 16, x, y + PALLET_TOP, z, yaw);
     }
   }
-  out.band.count = n;
-  return out;
 }
+
+const BODY_CURSOR = new Uint32Array(4);
 
 /** Tag LOD from distance with hysteresis: 0 hidden, 1 number only, 2 number + title. */
 export function tagLod(dist: number, prev: number): 0 | 1 | 2 {

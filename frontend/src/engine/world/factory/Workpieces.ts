@@ -53,6 +53,7 @@ import {
   PALLET_TOP,
   packPieces,
   pieceSignature,
+  writePackedMatrices,
   resolvePiece,
   signaturesChanged,
   splitTag,
@@ -60,27 +61,18 @@ import {
   writeMatrix,
   type Packed,
   type PieceInstance,
+  type Placed,
   type ResolvedPiece,
   type Vec3,
 } from "./workpiecePlacement";
 
-export type {
-  PathResolver,
-  PieceInstance,
-  PieceSize,
-  Placed,
-  Vec3,
-} from "./workpiecePlacement";
-export {
-  BELT_HEIGHT,
-  QUEUE_STACK_STEP,
-  queueSlot,
-  samplePolyline,
-  variantForSize,
-} from "./workpiecePlacement";
+export type { PieceInstance, PieceSize, Vec3 } from "./workpiecePlacement";
 
 export interface WorkpiecesOptions {
-  /** Max pieces that can show a tag (atlas cells). Default 160. */
+  /**
+   * Tag atlas cells: tags shown at once (plates exist only within 10 m;
+   * cells are assigned on demand, nearest first). Default 64 (1024×1280).
+   */
   maxTags?: number;
   /** Belt surface above a lane path's floor level. Default 0.85 m. */
   beltHeight?: number;
@@ -90,8 +82,10 @@ export interface WorkpieceStats {
   pieces: number;
   /** Meshes currently enabled with at least one instance (= draw calls). */
   draws: number;
-  /** thinInstanceSetBuffer calls since creation. */
+  /** thinInstanceSetBuffer calls (new GPU buffers) since creation. */
   bufferWrites: number;
+  /** In-place buffer updates (moving pieces, tag positions) since creation. */
+  bufferUpdates: number;
   /** Atlas cell redraws since creation. */
   textDraws: number;
   /** Tag plates currently shown. */
@@ -104,7 +98,15 @@ export interface WorkpieceStats {
 
 type Part =
   | { k: "b"; w: number; h: number; d: number; x: number; y: number; z: number }
-  | { k: "c"; r: number; h: number; x: number; y: number; z: number; rz?: number };
+  | {
+      k: "c";
+      r: number;
+      h: number;
+      x: number;
+      y: number;
+      z: number;
+      rz?: number;
+    };
 
 const box = (
   w: number,
@@ -154,7 +156,8 @@ function build(name: string, scene: Scene, parts: Part[]): Mesh {
 /** Pallet 0.8 x 0.6 m, deck top at PALLET_TOP. */
 function palletParts(): Part[] {
   const p: Part[] = [];
-  for (let i = -2; i <= 2; i++) p.push(box(0.8, 0.025, 0.1, 0, 0.115, i * 0.125));
+  for (let i = -2; i <= 2; i++)
+    p.push(box(0.8, 0.025, 0.1, 0, 0.115, i * 0.125));
   for (const z of [-0.25, 0, 0.25]) p.push(box(0.8, 0.09, 0.07, 0, 0.025, z));
   for (const x of [-0.34, 0, 0.34]) p.push(box(0.1, 0.025, 0.6, x, 0, 0));
   return p;
@@ -176,10 +179,17 @@ function bodyParts(variant: number): Part[] {
   switch (variant) {
     case 0: {
       // Crate: plank box with corner battens and a lid frame.
-      const p: Part[] = [box(0.5, 0.38, 0.4, 0, 0, 0), box(0.54, 0.03, 0.44, 0, 0.37, 0)];
+      const p: Part[] = [
+        box(0.5, 0.38, 0.4, 0, 0, 0),
+        box(0.54, 0.03, 0.44, 0, 0.37, 0),
+      ];
       for (const sx of [-1, 1])
-        for (const sz of [-1, 1]) p.push(box(0.035, 0.38, 0.035, sx * 0.255, 0, sz * 0.205));
-      p.push(box(0.52, 0.03, 0.02, 0, 0.17, 0.21), box(0.52, 0.03, 0.02, 0, 0.17, -0.21));
+        for (const sz of [-1, 1])
+          p.push(box(0.035, 0.38, 0.035, sx * 0.255, 0, sz * 0.205));
+      p.push(
+        box(0.52, 0.03, 0.02, 0, 0.17, 0.21),
+        box(0.52, 0.03, 0.02, 0, 0.17, -0.21),
+      );
       return p;
     }
     case 1: {
@@ -191,7 +201,8 @@ function bodyParts(variant: number): Part[] {
         box(0.34, 0.02, 0.3, 0.05, 0.32, 0),
       ];
       for (const sx of [-1, 1])
-        for (const sz of [-1, 1]) p.push(cyl(0.022, 0.03, sx * 0.25, 0.3, sz * 0.17));
+        for (const sz of [-1, 1])
+          p.push(cyl(0.022, 0.03, sx * 0.25, 0.3, sz * 0.17));
       return p;
     }
     case 2: {
@@ -232,10 +243,18 @@ function plateMesh(scene: Scene): Mesh {
   const m = new Mesh("wpTag", scene);
   const vd = new VertexData();
   vd.positions = [
-    -PLATE_W / 2, -PLATE_H / 2, 0,
-    PLATE_W / 2, -PLATE_H / 2, 0,
-    PLATE_W / 2, PLATE_H / 2, 0,
-    -PLATE_W / 2, PLATE_H / 2, 0,
+    -PLATE_W / 2,
+    -PLATE_H / 2,
+    0,
+    PLATE_W / 2,
+    -PLATE_H / 2,
+    0,
+    PLATE_W / 2,
+    PLATE_H / 2,
+    0,
+    -PLATE_W / 2,
+    PLATE_H / 2,
+    0,
   ];
   vd.uvs = [0, 0, 1, 0, 1, 1, 0, 1];
   vd.indices = [0, 1, 2, 0, 2, 3];
@@ -364,7 +383,12 @@ function drawCell(
 }
 
 function ghostTexture(scene: Scene): DynamicTexture {
-  const t = new DynamicTexture("wpGhostTex", { width: 64, height: 64 }, scene, true);
+  const t = new DynamicTexture(
+    "wpGhostTex",
+    { width: 64, height: 64 },
+    scene,
+    true,
+  );
   t.hasAlpha = true;
   const ctx = t.getContext() as unknown as CanvasRenderingContext2D;
   ctx.clearRect(0, 0, 64, 64);
@@ -380,7 +404,6 @@ function ghostTexture(scene: Scene): DynamicTexture {
 // ---------------------------------------------------------------------------
 // Pool
 // ---------------------------------------------------------------------------
-
 
 export class Workpieces {
   private readonly scene: Scene;
@@ -416,7 +439,7 @@ export class Workpieces {
   constructor(scene: Scene, opts: WorkpiecesOptions = {}) {
     this.scene = scene;
     this.beltHeight = opts.beltHeight ?? BELT_HEIGHT;
-    this.maxTags = Math.max(8, opts.maxTags ?? 160);
+    this.maxTags = Math.max(8, opts.maxTags ?? 64);
     this.slotKey = new Array<string>(this.maxTags).fill("");
     for (let i = this.maxTags - 1; i >= 0; i--) this.freeSlots.push(i);
 
@@ -489,7 +512,13 @@ export class Workpieces {
     this.tag.material = this.tagMat;
     this.tag.renderingGroupId = 0;
 
-    for (const m of [this.pallet, ...this.bodies, this.band, this.ghost, this.tag]) {
+    for (const m of [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+      this.tag,
+    ]) {
       m.setEnabled(false);
     }
     this.uploadEmpty();
@@ -511,17 +540,55 @@ export class Workpieces {
   /** Replace the full piece set. A no-op (no buffer writes) when nothing changed. */
   set(pieces: PieceInstance[]): void {
     this.lastInput = pieces;
-    const resolved = pieces.map((p) => resolvePiece(p, this.queue, this.beltHeight));
+    const resolved = pieces.map((p) =>
+      resolvePiece(p, this.queue, this.beltHeight),
+    );
     const sigs = new Map<string, string>();
     for (const r of resolved) sigs.set(r.id, pieceSignature(r));
     if (!signaturesChanged(this.sigs, sigs)) return;
     this.sigs = sigs;
+    // Keep the LOD of pieces that stay (tag hysteresis, slot ownership).
+    const prevLod = new Map<string, number>();
+    this.resolved.forEach((r, i) => prevLod.set(r.id, this.lods[i] ?? 0));
     this.resolved = resolved;
     this.upload(resolved);
     this.syncSlots(resolved);
-    this.drawTags();
+    this.drawTags(); // text / look changes of pieces holding a cell
     this.lods = new Uint8Array(resolved.length);
+    resolved.forEach((r, i) => (this.lods[i] = prevLod.get(r.id) ?? 0));
     this.updateLod(undefined, true);
+  }
+
+  /**
+   * Moving-pieces fast path: the same pieces (ids, order, looks) as the last
+   * `set`, new lane poses (path frame; the belt height is added). Writes the
+   * matrices into the existing arrays and flags the existing GPU buffers — no
+   * new buffers, no signature strings, no allocation. Returns false when the
+   * piece count does not match (call `set`).
+   */
+  move(poses: readonly Placed[]): boolean {
+    const rs = this.resolved;
+    const pk = this.packed;
+    if (!pk || poses.length !== rs.length || this.disposed) return false;
+    const h = this.beltHeight;
+    for (let i = 0; i < rs.length; i++) {
+      const p = poses[i];
+      const q = rs[i].placed;
+      q.x = p.x;
+      q.y = p.y + h;
+      q.z = p.z;
+      q.yaw = p.yaw;
+    }
+    writePackedMatrices(rs, pk);
+    for (const m of this.poolMeshes)
+      if (m.thinInstanceCount > 0) {
+        m.thinInstanceBufferUpdated("matrix");
+        this.updates++;
+      }
+    // Signatures are now stale: the next `set` rewrites everything.
+    this.sigs = new Map();
+    this.updateLod(undefined, false, true);
+    return true;
   }
 
   stats(): WorkpieceStats {
@@ -529,13 +596,20 @@ export class Workpieces {
       pieces: this.resolved.length,
       draws: this.draws,
       bufferWrites: this.writes,
+      bufferUpdates: this.updates,
       textDraws: this.textDraws,
       tagsVisible: this.tagCount,
     };
   }
 
-  /** Camera-distance LOD; also runs every frame via the scene (cheap, no writes unless the visible set changes). */
-  updateLod(cam?: Vec3, force = false): void {
+  /**
+   * Camera-distance LOD; also runs every frame via the scene (cheap, no
+   * writes unless the visible set changes). Atlas cells are assigned to
+   * pieces entering tag range (a cell keeps its text after the piece leaves,
+   * so coming back costs nothing unless another piece took it). `moved`:
+   * the pieces moved, visible plates must follow.
+   */
+  updateLod(cam?: Vec3, force = false, moved = false): void {
     if (this.disposed) return;
     const c = cam ?? this.scene.activeCamera?.globalPosition;
     if (!c) return;
@@ -544,21 +618,51 @@ export class Workpieces {
     const rs = this.resolved;
     if (this.lods.length !== rs.length) this.lods = new Uint8Array(rs.length);
     let changed = force;
+    let cells = false;
     for (let i = 0; i < rs.length; i++) {
       const r = rs[i];
-      const slot = this.slotOf.get(r.id);
       let lod = 0;
-      if (slot !== undefined && r.tag !== "") {
+      if (r.tag !== "") {
         const p = r.placed;
-        lod = tagLod(Math.hypot(p.x - c.x, p.y + 0.7 - c.y, p.z - c.z), this.lods[i]);
+        lod = tagLod(
+          Math.hypot(p.x - c.x, p.y + 0.7 - c.y, p.z - c.z),
+          this.lods[i],
+        );
+        if (lod > 0 && !this.slotOf.has(r.id)) {
+          if (this.acquireSlot(r.id)) cells = true;
+          else lod = 0; // atlas full of nearer tags
+        }
       }
       if (lod !== this.lods[i]) {
         this.lods[i] = lod;
         changed = true;
       }
     }
-    if (!changed) return;
-    this.uploadTags();
+    if (cells) this.drawTags();
+    if (changed) this.uploadTags();
+    else if (moved && this.tagCount > 0) {
+      this.writeTags();
+      this.tag.thinInstanceBufferUpdated("matrix");
+      this.updates++;
+    }
+  }
+
+  /** A cell for `id`: a free one, else one held by a piece out of range. */
+  private acquireSlot(id: string): boolean {
+    let slot = this.freeSlots.pop();
+    if (slot === undefined) {
+      const rs = this.resolved;
+      for (let i = 0; i < rs.length && slot === undefined; i++) {
+        if (this.lods[i] > 0) continue;
+        const s = this.slotOf.get(rs[i].id);
+        if (s === undefined) continue;
+        this.slotOf.delete(rs[i].id);
+        slot = s;
+      }
+    }
+    if (slot === undefined) return false;
+    this.slotOf.set(id, slot);
+    return true;
   }
 
   /**
@@ -613,7 +717,13 @@ export class Workpieces {
   dispose(): void {
     this.disposed = true;
     this.scene.onBeforeRenderObservable.remove(this.obs);
-    for (const m of [this.pallet, ...this.bodies, this.band, this.ghost, this.tag]) {
+    for (const m of [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+      this.tag,
+    ]) {
       m.dispose(false, false);
     }
     for (const m of this.mats) m.dispose();
@@ -625,23 +735,51 @@ export class Workpieces {
   // -- internals ------------------------------------------------------------
 
   private textDraws = 0;
+  private updates = 0;
   private readonly camV = new Vector3();
 
-  private setBuf(mesh: Mesh, kind: string, data: Float32Array, stride: number): void {
+  private get poolMeshes(): Mesh[] {
+    return (this.poolList ??= [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+    ]);
+  }
+  private poolList: Mesh[] | null = null;
+
+  private setBuf(
+    mesh: Mesh,
+    kind: string,
+    data: Float32Array,
+    stride: number,
+  ): void {
     mesh.thinInstanceSetBuffer(kind, data, stride, false);
     this.writes++;
   }
 
   private uploadEmpty(): void {
     const e = new Float32Array(16);
-    for (const m of [this.pallet, ...this.bodies, this.band, this.ghost, this.tag]) {
+    for (const m of [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+      this.tag,
+    ]) {
       m.thinInstanceSetBuffer("matrix", e, 16, false);
     }
     this.tag.thinInstanceSetBuffer("atlas", new Float32Array(4), 4, false);
     for (const m of [...this.bodies, this.band, this.ghost]) {
       m.thinInstanceSetBuffer("color", new Float32Array(4), 4, false);
     }
-    for (const m of [this.pallet, ...this.bodies, this.band, this.ghost, this.tag]) {
+    for (const m of [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+      this.tag,
+    ]) {
       m.thinInstanceCount = 0;
     }
   }
@@ -649,7 +787,12 @@ export class Workpieces {
   private upload(rs: ResolvedPiece[]): void {
     const pk = packPieces(rs, this.packed);
     this.packed = pk;
-    const set = (mesh: Mesh, count: number, m: Float32Array, c?: Float32Array) => {
+    const set = (
+      mesh: Mesh,
+      count: number,
+      m: Float32Array,
+      c?: Float32Array,
+    ) => {
       if (count > 0) {
         this.setBuf(mesh, "matrix", m, 16);
         if (c) this.setBuf(mesh, "color", c, 4);
@@ -661,23 +804,19 @@ export class Workpieces {
     pk.bodies.forEach((b, i) => set(this.bodies[i], b.count, b.m, b.c));
     set(this.band, pk.band.count, pk.band.m, pk.band.c);
     set(this.ghost, pk.ghost.count, pk.ghost.m, pk.ghost.c);
-    this.draws = [this.pallet, ...this.bodies, this.band, this.ghost].filter((m) =>
-      m.isEnabled(false),
+    this.draws = [this.pallet, ...this.bodies, this.band, this.ghost].filter(
+      (m) => m.isEnabled(false),
     ).length;
   }
 
+  /** Release the cells of pieces that left (or lost their tag). */
   private syncSlots(rs: ResolvedPiece[]): void {
-    const live = new Set(rs.map((r) => r.id));
+    const live = new Set<string>();
+    for (const r of rs) if (r.tag !== "") live.add(r.id);
     for (const [id, slot] of this.slotOf) {
       if (live.has(id)) continue;
       this.slotOf.delete(id);
-      this.slotKey[slot] = "";
       this.freeSlots.push(slot);
-    }
-    for (const r of rs) {
-      if (r.tag === "" || this.slotOf.has(r.id)) continue;
-      const slot = this.freeSlots.pop();
-      if (slot !== undefined) this.slotOf.set(r.id, slot);
     }
   }
 
@@ -696,7 +835,8 @@ export class Workpieces {
     if (dirty) this.atlas.update(true);
   }
 
-  private uploadTags(): void {
+  /** Plate matrices + atlas cells of the visible tags (in place). */
+  private writeTags(): number {
     const rs = this.resolved;
     let n = 0;
     for (let i = 0; i < rs.length; i++) if (this.lods[i] > 0) n++;
@@ -711,11 +851,30 @@ export class Workpieces {
       const r = rs[i];
       const p = r.placed;
       const top = p.y + PALLET_TOP + BODY_DIMS[r.variant].h + 0.28;
-      writeMatrix(this.tagM, k * 16, p.x, top, p.z, 0, 1, lod === 2 ? 1 : 0.55, 1);
+      writeMatrix(
+        this.tagM,
+        k * 16,
+        p.x,
+        top,
+        p.z,
+        0,
+        1,
+        lod === 2 ? 1 : 0.55,
+        1,
+      );
       const slot = this.slotOf.get(r.id) ?? 0;
-      this.tagA.set([slot % COLS, Math.floor(slot / COLS), lod, 0], k * 4);
+      const o = k * 4;
+      this.tagA[o] = slot % COLS;
+      this.tagA[o + 1] = Math.floor(slot / COLS);
+      this.tagA[o + 2] = lod;
+      this.tagA[o + 3] = 0;
       k++;
     }
+    return n;
+  }
+
+  private uploadTags(): void {
+    const n = this.writeTags();
     this.tagCount = n;
     if (n > 0) {
       this.setBuf(this.tag, "matrix", this.tagM, 16);
@@ -723,8 +882,12 @@ export class Workpieces {
     }
     this.tag.thinInstanceCount = n;
     this.tag.setEnabled(n > 0);
-    this.draws = [this.pallet, ...this.bodies, this.band, this.ghost, this.tag].filter(
-      (m) => m.isEnabled(false),
-    ).length;
+    this.draws = [
+      this.pallet,
+      ...this.bodies,
+      this.band,
+      this.ghost,
+      this.tag,
+    ].filter((m) => m.isEnabled(false)).length;
   }
 }

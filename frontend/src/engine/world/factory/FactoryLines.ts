@@ -37,7 +37,11 @@ import {
   tagFactoryMesh,
 } from "@/engine/interaction/factoryTargets";
 import type { FactoryLayout } from "@/engine/layout/factoryLayout";
-import { FactoryMotion, type MotionPhase } from "@/engine/logic/factoryMotion";
+import {
+  FactoryMotion,
+  type MotionFrame,
+  type MotionPhase,
+} from "@/engine/logic/factoryMotion";
 import type {
   FactoryModel,
   LineModel,
@@ -67,7 +71,7 @@ import {
 import { orderStations, type StationInstance } from "./stationPlan";
 import { Stations } from "./Stations";
 import { Workpieces } from "./Workpieces";
-import type { PieceInstance } from "./workpiecePlacement";
+import type { PieceInstance, Placed } from "./workpiecePlacement";
 
 export interface FactoryLinesContext {
   scene: Scene;
@@ -100,6 +104,8 @@ export interface FactoryLinesStats {
     workpieces: number;
     cells: number;
   };
+  /** In-place workpiece buffer updates (moving pieces / tag plates). */
+  bufferUpdates: { workpieces: number };
   truck: string;
 }
 
@@ -231,6 +237,7 @@ export class FactoryLines implements FactoryPart {
         workpieces: w?.bufferWrites ?? 0,
         cells: k?.bufferWrites ?? 0,
       },
+      bufferUpdates: { workpieces: w?.bufferUpdates ?? 0 },
       truck: this.truckT < 0 ? "parked" : `away ${Math.round(this.truckT)}s`,
     };
   }
@@ -509,17 +516,31 @@ export class FactoryLines implements FactoryPart {
     } else this.piecesDirty = true;
   }
 
+  /**
+   * Motion → pool. Per frame: pooled motion snapshots (no allocation), a
+   * numeric change signature; when only poses changed (same pieces, same
+   * looks, same order) the pool's `move` rewrites matrices in place; any
+   * structural change (piece in / out, look, draft, placement null) goes
+   * through the full `set` (signatures, colours, tags).
+   */
   private stepPieces(dt: number): void {
     const wp = this.workpieces;
     if (!wp) return;
     const dtMs = dt * 1000;
-    const frames: [string, ReturnType<FactoryMotion["step"]>][] = [];
+    const frames = this.frameBuf;
+    let nf = 0;
     let sig = 0;
     let n = 0;
     for (const [id, m] of this.motions) {
-      const f = m.step(dtMs);
-      frames.push([id, f]);
-      for (const e of f.events) if (e.type === "shipped") this.departTruck();
+      const f = m.stepPooled(dtMs);
+      let e = frames[nf];
+      if (!e) frames.push((e = { id, f }));
+      else {
+        e.id = id;
+        e.f = f;
+      }
+      nf++;
+      for (const ev of f.events) if (ev.type === "shipped") this.departTruck();
       for (const p of f.pieces) {
         n++;
         sig +=
@@ -530,12 +551,19 @@ export class FactoryLines implements FactoryPart {
             (p.laneIndex ?? 0) * 17);
       }
     }
+    frames.length = nf;
     sig = sig * 31 + n;
     if (!this.piecesDirty && sig === this.frameSig) return;
+    const dirty = this.piecesDirty;
     this.piecesDirty = false;
     this.frameSig = sig;
-    const out: PieceInstance[] = [];
-    for (const [lineId, f] of frames) {
+    // Poses (+ the piece / look sequence they belong to).
+    const poses = this.poseBuf;
+    const ids = this.idBuf;
+    const looks = this.lookBuf;
+    let k = 0;
+    let same = !dirty;
+    for (const { id: lineId, f } of frames) {
       const ctx = this.ctxs.get(lineId);
       if (!ctx) continue;
       const slots = waitSlots(f.pieces);
@@ -544,23 +572,43 @@ export class FactoryLines implements FactoryPart {
         if (!look) continue;
         const placed = placeMotion(ctx, pm, slots);
         if (!placed) continue;
-        out.push({
-          id: pm.id,
-          t: 0,
-          lanePath: () => placed,
-          ...pieceLook(look.w),
-        });
+        if (same && (ids[k] !== pm.id || looks[k] !== look.w)) same = false;
+        ids[k] = pm.id;
+        looks[k] = look.w;
+        poses[k] = placed;
+        k++;
       }
+    }
+    if (same && k !== this.poseCount) same = false;
+    this.poseCount = k;
+    ids.length = looks.length = poses.length = k;
+    this.pieceUpdates++;
+    if (same && wp.move(poses)) return;
+    const out: PieceInstance[] = [];
+    for (let i = 0; i < k; i++) {
+      const placed = poses[i];
+      out.push({
+        id: ids[i],
+        t: 0,
+        lanePath: () => placed,
+        ...pieceLook(looks[i]),
+      });
     }
     // Forget looks of pieces that left both the model and the motion.
     if (this.looks.size > out.length * 2 + 64) {
-      const live = new Set(out.map((p) => p.id));
+      const live = new Set(ids);
       for (const id of [...this.looks.keys()])
         if (!live.has(id)) this.looks.delete(id);
     }
     wp.set(out);
-    this.pieceUpdates++;
   }
+
+  /** Reused per-frame buffers for stepPieces. */
+  private readonly frameBuf: { id: string; f: MotionFrame }[] = [];
+  private readonly poseBuf: Placed[] = [];
+  private readonly idBuf: string[] = [];
+  private readonly lookBuf: Workpiece[] = [];
+  private poseCount = -1;
 
   // -------------------------------------------------------------------------
   // Interaction targets
