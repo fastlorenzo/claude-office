@@ -18,6 +18,7 @@ import {
   LocationChip,
   StatsChip,
   EnterBanner,
+  TeleportFade,
   ConnectionBanner,
 } from "./hud/Overlays";
 import { useCampusConnection } from "./hud/connectionStatus";
@@ -180,6 +181,7 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
 
       <InteractionPrompt />
       <EnterBanner />
+      <TeleportFade />
 
       {!isMobile && (
         <div

@@ -25,6 +25,7 @@ import {
   VertexData,
 } from "@/engine/babylon";
 import type { CellLayout } from "@/engine/layout/factoryLayout";
+import { getFactoryLive } from "@/engine/logic/factoryLive";
 import type { LineModel } from "@/engine/logic/factoryModel";
 import {
   factoryTarget,
@@ -299,7 +300,7 @@ export class Cells {
         );
       }
       if (!model) continue;
-      const line = boardLine(model);
+      const line = boardLine(model, getFactoryLive()?.demo ?? false);
       const key = `${pose}#${line.text}|${line.dot}`;
       if (key === b.key) continue;
       b.key = key;

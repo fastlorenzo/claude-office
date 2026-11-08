@@ -162,6 +162,7 @@ export function WorldCanvas({
             useWorldUiStore.getState().setCameraMode(m),
           ),
           w.on("fly", (f) => useWorldUiStore.getState().setFlying(f)),
+          w.on("teleport", () => useWorldUiStore.getState().pulseFade()),
           w.on("layout", (l) => useWorldUiStore.getState().setLayout(l)),
           w.on("action", ({ action, target, screenPos }) => {
             const store = useWorldUiStore.getState();

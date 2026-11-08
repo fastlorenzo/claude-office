@@ -112,6 +112,7 @@ import {
 } from "./controlRoomPlan";
 import { buildControlShell } from "./ControlRoomShell";
 import { isLocale } from "@/i18n";
+import { setWorldLocale, worldT } from "./worldLocale";
 import { lowerTiles, lowerWallKey, wallClock } from "./controlRoomWall";
 
 /** Backlight of a wall feed tile with no room bound. */
@@ -534,7 +535,10 @@ export class ControlRoom {
     this.labels = labels;
     this.projects = projects ?? null;
     // Canvas text language; a change bumps opsLocaleRev (part of every key).
-    if (locale && isLocale(locale)) setOpsLocale(locale);
+    if (locale && isLocale(locale)) {
+      setOpsLocale(locale);
+      setWorldLocale(locale);
+    }
     this.dirty = true;
   }
 
@@ -1572,7 +1576,7 @@ export class ControlRoom {
             label: f.room!.name,
             status: row?.status ?? ("ended" as const),
             phase: row
-              ? `${row.phaseLabel}${n > 1 ? ` · ${n} sessions` : ""}`
+              ? `${row.phaseLabel}${n > 1 ? ` · ${worldT("hud.overview.sessionCount", { count: n })}` : ""}`
               : null,
           },
         };

@@ -791,6 +791,8 @@ export interface WorldEvents {
   /** Free-fly / noclip camera on or off. */
   fly: boolean;
   layout: BuildingLayout;
+  /** The player was moved by `World.teleport` (minimap travel, R unstuck). */
+  teleport: void;
 }
 
 export interface WorldOptions {

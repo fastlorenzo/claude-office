@@ -176,6 +176,18 @@ body {
     transform: translate(-50%, 0);
   }
 }
+@keyframes hud-fade {
+  0% {
+    opacity: 0;
+  }
+  30%,
+  45% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
 @keyframes hud-pulse {
   0%,
   100% {

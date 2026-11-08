@@ -29,43 +29,45 @@ import {
 } from "@/engine/layout/factoryLayout";
 import { v3 } from "@/engine/util/MeshBatcher";
 import { drawWayfinding } from "@/engine/world/architecture";
+import { onWorldLocale, worldT } from "@/engine/world/worldLocale";
+import type { TranslationKey } from "@/i18n";
 
 export interface SignFace {
-  title: string;
-  sub: string;
+  titleKey: TranslationKey;
+  subKey: TranslationKey;
   arrow: string;
 }
 
 /** Every sign face in the world (atlas slot order). */
 export const SIGN_FACES = {
   factoryDown: {
-    title: "Factory floor",
-    sub: "Offices →  ·  Control room →",
+    titleKey: "world.sign.factory",
+    subKey: "world.sign.sub.factoryDown",
     arrow: "↓",
   },
   spineDown: {
-    title: "Factory floor",
-    sub: "Spine stair · production lines",
+    titleKey: "world.sign.factory",
+    subKey: "world.sign.sub.spine",
     arrow: "↓",
   },
   officesUp: {
-    title: "Offices",
-    sub: "Reception · Control room",
+    titleKey: "world.sign.offices",
+    subKey: "world.sign.sub.officesUp",
     arrow: "↑",
   },
   controlRoom: {
-    title: "Control room",
-    sub: "Offices · end of the hall",
+    titleKey: "world.sign.controlRoom",
+    subKey: "world.sign.sub.controlRoom",
     arrow: "↑",
   },
   reception: {
-    title: "Reception",
-    sub: "Exit · stairs and lift",
+    titleKey: "world.sign.reception",
+    subKey: "world.sign.sub.reception",
     arrow: "↑",
   },
   receptionExit: {
-    title: "Reception · Exit",
-    sub: "Stairs and lift to the offices",
+    titleKey: "world.sign.receptionExit",
+    subKey: "world.sign.sub.receptionExit",
     arrow: "",
   },
 } as const satisfies Record<string, SignFace>;
@@ -230,15 +232,28 @@ export function buildSignMesh(
     true,
   );
   const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-  ctx.clearRect(0, 0, SW * COLS, SH * ROWS);
-  used.forEach((id, i) => {
-    const f: SignFace = SIGN_FACES[id];
-    ctx.save();
-    ctx.translate((i % COLS) * SW, Math.floor(i / COLS) * SH);
-    drawWayfinding(ctx, SW, SH, f.title, f.sub, f.arrow);
-    ctx.restore();
-  });
-  tex.update(true);
+  const paint = () => {
+    ctx.clearRect(0, 0, SW * COLS, SH * ROWS);
+    used.forEach((id, i) => {
+      const f: SignFace = SIGN_FACES[id];
+      ctx.save();
+      ctx.translate((i % COLS) * SW, Math.floor(i / COLS) * SH);
+      drawWayfinding(
+        ctx,
+        SW,
+        SH,
+        worldT(f.titleKey),
+        worldT(f.subKey),
+        f.arrow,
+      );
+      ctx.restore();
+    });
+    tex.update(true);
+  };
+  paint();
+  // Baked once, re-baked when the UI language changes.
+  const off = onWorldLocale(paint);
+  tex.onDisposeObservable.add(off);
   tex.wrapU = Texture.CLAMP_ADDRESSMODE;
   tex.wrapV = Texture.CLAMP_ADDRESSMODE;
   tex.anisotropicFilteringLevel = 8;

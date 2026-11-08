@@ -4,6 +4,7 @@
  * (hung with ≥ 2.1 m headroom over their floor).
  */
 import { describe, expect, it } from "vitest";
+import en from "@/i18n/en";
 import { LAYOUT } from "@/engine/contracts";
 import {
   allocatePods,
@@ -84,6 +85,6 @@ describe("sign faces", () => {
     // drawWayfinding: title font = 0.32 of the plate height.
     expect(0.32 * SIGN_H).toBeGreaterThanOrEqual(0.1);
     for (const f of Object.values(SIGN_FACES))
-      expect(f.title.length).toBeGreaterThan(0);
+      expect(en[f.titleKey].length).toBeGreaterThan(0);
   });
 });

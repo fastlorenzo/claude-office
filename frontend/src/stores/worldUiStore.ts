@@ -67,6 +67,8 @@ interface WorldUiState {
   peerPopup: PeerPopupTarget | null;
   /** Short-lived "Entered <room>" banner. */
   banner: { id: number; text: string } | null;
+  /** Bumped on every teleport; the HUD fade overlay restarts on change. */
+  fadeSeq: number;
   /** Bumped to re-create the world after an error (never reset). */
   worldEpoch: number;
   /** First-run controls card visible (see ControlsCard). */
@@ -79,6 +81,8 @@ interface WorldUiState {
   /** Replace the open panels (capped at {@link MAX_OPEN_PANELS}). */
   setPanels: (panels: HudPanel[]) => void;
   showBanner: (text: string) => void;
+  /** Start the teleport fade-to-black (no-op visually under reduced motion). */
+  pulseFade: () => void;
   clearBanner: (id?: number) => void;
   /** Clear the error and ask WorldView to build a fresh world. */
   retryWorld: () => void;
@@ -145,6 +149,7 @@ const INITIAL = {
   ready: false,
   peerPopup: null,
   banner: null as { id: number; text: string } | null,
+  fadeSeq: 0,
   controlsOpen: false,
   opsOpen: false,
   opsFocus: null as string | null,
@@ -175,6 +180,7 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
 
   setPanels: (panels) => set(withPanels(panels.slice(-MAX_OPEN_PANELS))),
   showBanner: (text) => set({ banner: { id: ++bannerSeq, text } }),
+  pulseFade: () => set((s) => ({ fadeSeq: s.fadeSeq + 1 })),
   clearBanner: (id) =>
     set((s) =>
       s.banner && (id === undefined || s.banner.id === id)

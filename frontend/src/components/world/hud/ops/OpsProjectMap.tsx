@@ -6,7 +6,6 @@ import {
   STATUS_COLORS,
   type CampusProject,
   type CampusSession,
-  type CheckState,
 } from "@/engine/contracts";
 import {
   layoutProjectMap,
@@ -15,18 +14,10 @@ import {
   type MapDot,
   type P,
 } from "@/engine/logic/projectMap";
+import { CI_COLORS } from "@/engine/logic/statusPalette";
 
 const VB_W = 1000;
 const VB_H = 430;
-
-const CI_COLOR: Record<CheckState, string> = {
-  success: "#22C55E",
-  failure: "#EF4444",
-  running: "#F59E0B",
-  queued: "#94A3B8",
-  cancelled: "#64748B",
-  none: "#64748B",
-};
 
 const pathD = (pts: readonly P[]) =>
   pts
@@ -158,7 +149,7 @@ export function OpsProjectMap({
               >
                 {l.name}
                 {l.ci && (
-                  <tspan dx={10} fill={CI_COLOR[l.ci]} className="text-[14px]">
+                  <tspan dx={10} fill={CI_COLORS[l.ci]} className="text-[14px]">
                     {t(`ops.ci.${l.ci}`)}
                   </tspan>
                 )}
@@ -225,7 +216,7 @@ export function OpsProjectMap({
             textAnchor="middle"
             className="fill-sky-400 text-[20px] font-bold"
           >
-            OPS
+            {t("ops.map.hub")}
           </text>
         </g>
         {(map.moreLines > 0 || map.moreNodes > 0) && (

@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getTranslation, isLocale, type TranslationKey } from "../src/i18n";
 import en from "../src/i18n/en";
@@ -168,5 +170,36 @@ describe("getTranslation", () => {
         expect(esResult.length, `es t("${key}") is empty`).toBeGreaterThan(0);
       }
     });
+  });
+});
+
+// ─── English literals in components/world/** (U8) ───────────────────────
+
+describe("no English literals in components/world", () => {
+  const root = join(__dirname, "../src/components/world");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((n) => {
+      const p = join(dir, n);
+      return statSync(p).isDirectory() ? walk(p) : /\.tsx$/.test(n) ? [p] : [];
+    });
+  // Key caps and brand marks are universal, not prose.
+  const ALLOWED = new Set(["Esc", "Tab", "Enter", "Shift", "Space", "WASD"]);
+  const TEXT = />\s*([A-Za-z][A-Za-z ,.'·/&!?-]{2,})\s*<\//g;
+  const ATTR =
+    /\b(?:title|aria-label|placeholder|alt|label)="([A-Za-z][^"{}]+)"/g;
+
+  it("JSX text and accessible attributes go through t()", () => {
+    const hits: string[] = [];
+    for (const f of walk(root)) {
+      const src = readFileSync(f, "utf8");
+      for (const re of [TEXT, ATTR]) {
+        for (const m of src.matchAll(re)) {
+          const text = m[1].trim();
+          if (/^[a-z]+$/.test(text) || ALLOWED.has(text)) continue;
+          hits.push(`${f.slice(root.length + 1)}: ${text}`);
+        }
+      }
+    }
+    expect(hits).toEqual([]);
   });
 });

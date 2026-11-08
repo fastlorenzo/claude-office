@@ -15,6 +15,13 @@ import {
   type OpsModel,
 } from "@/engine/logic/opsModel";
 import { OPS_THEME } from "@/engine/screens/opsCanvas";
+import { worldT } from "@/engine/world/worldLocale";
+import type { TranslationKey } from "@/i18n";
+
+type Translate = (
+  key: TranslationKey,
+  params?: Record<string, string | number>,
+) => string;
 
 export interface KpiTile {
   label: string;
@@ -32,51 +39,53 @@ export interface FeedCaptionKey {
   phase: string | null;
 }
 
-const NO_FEED = "status line off";
-
 /** KPI tiles either side of the feeds (left: sessions/cost, right: activity). */
-export function lowerTiles(m: OpsModel): { left: KpiTile[]; right: KpiTile[] } {
+export function lowerTiles(
+  m: OpsModel,
+  t: Translate = worldT,
+): { left: KpiTile[]; right: KpiTile[] } {
+  const noFeed = t("ops.c.kpi.noFeed");
   const us = m.usage;
   const act = m.activity;
   const pct = (w: typeof us.fiveHour) => (w ? fmtPct(w.usedPct) : "—");
   return {
     left: [
       {
-        label: "Live sessions",
+        label: t("ops.c.kpi.live"),
         value: String(m.counts.live),
-        sub: `${m.counts.subagents} subagents`,
+        sub: t("ops.c.kpi.subagents", { n: m.counts.subagents }),
       },
       {
-        label: "Needs you",
+        label: t("ops.c.needsYou"),
         value: String(m.counts.needs_you),
         color: m.counts.needs_you ? OPS_THEME.amber : undefined,
       },
       {
-        label: "Cost today",
+        label: t("ops.costToday"),
         value: fmtUsd(us.costTodayUsd),
-        sub: us.costTodayUsd == null ? NO_FEED : undefined,
+        sub: us.costTodayUsd == null ? noFeed : undefined,
       },
       {
-        label: "5-hour limit",
+        label: t("ops.c.kpi.limit5"),
         value: pct(us.fiveHour),
-        sub: us.fiveHour ? undefined : NO_FEED,
+        sub: us.fiveHour ? undefined : noFeed,
       },
     ],
     right: [
       {
-        label: "Events / min",
+        label: t("ops.c.kpi.events"),
         value: act.eventsLastMin != null ? String(act.eventsLastMin) : "—",
       },
-      { label: "Tool calls", value: fmtCount(act.toolCalls) },
+      { label: t("ops.toolCalls"), value: fmtCount(act.toolCalls) },
       {
-        label: "Tests failing",
+        label: t("ops.c.kpi.testsFailing"),
         value: act.testFailures != null ? String(act.testFailures) : "—",
         color: (act.testFailures ?? 0) > 0 ? OPS_THEME.red : undefined,
       },
       {
-        label: "7-day limit",
+        label: t("ops.c.kpi.limit7"),
         value: pct(us.sevenDay),
-        sub: us.sevenDay ? undefined : NO_FEED,
+        sub: us.sevenDay ? undefined : noFeed,
       },
     ],
   };

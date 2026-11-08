@@ -383,7 +383,7 @@ export function OverviewStrip({
       onMouseLeave={() => setHover(false)}
       className={`pointer-events-auto absolute top-[4.5rem] flex gap-1.5 ${
         portrait
-          ? "left-3 right-[4.5rem] flex-row overflow-x-auto pb-1"
+          ? "left-3 right-[4.5rem] snap-x snap-proximity flex-row overflow-x-auto pb-1.5 [mask-image:linear-gradient(to_right,#000_calc(100%-28px),transparent)] [scrollbar-color:rgba(148,163,184,0.6)_transparent] [scrollbar-width:thin]"
           : "left-3 max-h-[calc(100%-10.5rem)] flex-col overflow-y-auto pr-1"
       }`}
     >
@@ -391,7 +391,7 @@ export function OverviewStrip({
         <section
           key={b.id}
           aria-label={b.name}
-          className={`flex gap-1.5 ${portrait ? "flex-row" : "flex-col"}`}
+          className={`flex gap-1.5 ${portrait ? "shrink-0 snap-start flex-row" : "flex-col"}`}
         >
           {!dotsOnly && (
             <div

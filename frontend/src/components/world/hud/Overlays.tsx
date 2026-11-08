@@ -11,6 +11,7 @@ import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
 import { getWorld } from "../worldRef";
 import { GLASS, LABEL } from "./glass";
+import { usePrefersReducedMotion } from "./reducedMotion";
 import { Keycap } from "./Keycap";
 import { HINT_ORDER, PANELS } from "./panels";
 import type { ConnectionStatus } from "./connectionStatus";
@@ -62,9 +63,16 @@ export function InteractionPrompt(): ReactNode {
         </span>
         <span className="h-1 w-1 rounded-full bg-slate-600" />
         <span className="max-w-[16rem] truncate text-sm font-semibold text-white">
-          {target.roomLabel}
+          {target.kind === "lift"
+            ? t(target.stop === 1 ? "world.lift.l1" : "world.lift.g")
+            : target.roomLabel}
         </span>
       </div>
+      {target.kind === "lift" && (
+        <div className="mb-1.5 text-center text-xs text-slate-300">
+          {t("world.lift.hint")}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5">
         {actions.map((a) => (
           <span
@@ -325,6 +333,20 @@ export function ClickToLook({ isMobile }: { isMobile: boolean }): ReactNode {
 // ============================================================================
 // ENTER BANNER (top-centre, auto-hides)
 // ============================================================================
+
+/** ~250 ms fade-to-black over a teleport; reduced motion gets an instant cut. */
+export function TeleportFade(): ReactNode {
+  const seq = useWorldUiStore((s) => s.fadeSeq);
+  const reduce = usePrefersReducedMotion();
+  if (seq === 0 || reduce) return null;
+  return (
+    <div
+      key={seq}
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-[60] bg-black opacity-0 animate-[hud-fade_250ms_ease-in-out_forwards]"
+    />
+  );
+}
 
 export function EnterBanner(): ReactNode {
   const banner = useWorldUiStore((s) => s.banner);

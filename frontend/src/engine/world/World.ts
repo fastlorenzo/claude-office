@@ -1326,6 +1326,7 @@ class World implements IWorld {
 
   teleport(to: TeleportTarget): void {
     if (!this.player) return;
+    this.events.emit("teleport", undefined); // HUD fade (worldUiStore.fadeSeq)
     this.player.frozen = false;
     const fl = this.factoryLayout;
     if (to === "floor") {

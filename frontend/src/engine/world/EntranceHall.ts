@@ -63,6 +63,7 @@ import {
   wallWithOpenings,
 } from "@/engine/world/architecture";
 import { LiftController, type LiftLevel } from "@/engine/world/entranceLift";
+import { onWorldLocale, worldT } from "@/engine/world/worldLocale";
 import { forecourtBoxes } from "@/engine/world/forecourtColliders";
 import {
   buildSignMesh,
@@ -1068,6 +1069,14 @@ export class EntranceHall {
       drawDirectory,
     );
     this.textures.push(tex);
+    // Re-bake on a language change (the board text is localised).
+    const off = onWorldLocale(() => {
+      const c = tex.getContext() as unknown as CanvasRenderingContext2D;
+      c.clearRect(0, 0, 1024, 640);
+      drawDirectory(c, 1024, 640);
+      tex.update(true);
+    });
+    tex.onDisposeObservable?.add(off);
     // 2.2 × 1.375 m, centre 1.75 m: the row titles are ~0.17 m tall,
     // legible from the spawn just inside the doors (≈ 5 m) and from the
     // forecourt outside them.
@@ -1286,7 +1295,7 @@ function drawDirectory(
   ctx.fillStyle = "#A5A19A";
   ctx.textBaseline = "middle";
   ctx.font = `600 ${Math.round(h * 0.08)}px ${FONT_STACK}`;
-  ctx.fillText("DIRECTORY", w * 0.17, h * 0.17);
+  ctx.fillText(worldT("world.dir.title"), w * 0.17, h * 0.17);
   ctx.fillStyle = "#3A3B3E";
   ctx.fillRect(w * 0.06, h * 0.28, w * 0.88, 3);
   const row = (y: number, title: string, sub: string, arrow: string) => {
@@ -1303,6 +1312,16 @@ function drawDirectory(
     ctx.fillText(arrow, w * 0.94, y + h * 0.04);
     ctx.textAlign = "left";
   };
-  row(h * 0.43, "Offices · Reception", "Level 1 · stairs or lift", "↑");
-  row(h * 0.74, "Factory floor", "Production lines · dock", "→");
+  row(
+    h * 0.43,
+    worldT("world.dir.offices"),
+    worldT("world.dir.officesSub"),
+    "↑",
+  );
+  row(
+    h * 0.74,
+    worldT("world.sign.factory"),
+    worldT("world.dir.factorySub"),
+    "→",
+  );
 }

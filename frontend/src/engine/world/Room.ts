@@ -344,6 +344,8 @@ export class Room {
       todoDone: done,
       todoTotal: cs?.todos.length ?? 0,
       gitBranch: cs?.gitBranch ?? null,
+      costUsd: cs?.telemetry?.costUsd ?? null,
+      tokens: cs?.telemetry?.contextTokens ?? null,
     });
   }
 
