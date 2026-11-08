@@ -23,6 +23,7 @@ from app.core.jsonl_parser import get_first_user_prompt, get_last_assistant_resp
 from app.core.path_utils import is_safe_transcript_path
 from app.core.state_machine import StateMachine, resolve_agent_for_stop
 from app.core.summary_service import get_summary_service
+from app.core.tool_calls import handback_native
 from app.core.transcript_poller import get_transcript_poller
 from app.models.agents import Agent, AgentState, BossState
 from app.models.common import BubbleContent, BubbleType
@@ -33,6 +34,7 @@ from app.models.events import (
     BackgroundTaskEvent,
     EventDataBase,
     EventType,
+    PromptEvent,
     ToolEvent,
 )
 
@@ -174,7 +176,7 @@ async def handle_subagent_info(
     if poller and tree_id is not None:
         # The tree remembers agents the office already let go: an async agent
         # resumed after a turn end keeps being polled under its own id.
-        await poller.start_polling(tree_id, event.session_id, transcript_path, from_start=True)
+        await poller.start_polling(tree_id, event.session_id, transcript_path)
     elif poller:
         for agent_id, agent in sm.agents.items():
             if agent.native_id == native_agent_id and not await poller.is_polling(agent_id):
@@ -182,9 +184,7 @@ async def handle_subagent_info(
                     f"Starting transcript polling for {agent_id} "
                     f"(native: {native_agent_id}) at {transcript_path}"
                 )
-                await poller.start_polling(
-                    agent_id, event.session_id, transcript_path, from_start=True
-                )
+                await poller.start_polling(agent_id, event.session_id, transcript_path)
                 break
 
     # Also enrich the freshly synthesised agent (its native_id was already set
@@ -226,7 +226,7 @@ async def handle_agent_link(
     ensure_transcript_poller_fn()
     poller = get_transcript_poller()
     if poller and not await poller.is_polling(agent_id):
-        await poller.start_polling(agent_id, event.session_id, transcript_path, from_start=True)
+        await poller.start_polling(agent_id, event.session_id, transcript_path)
 
 
 async def handle_subagent_stop(
@@ -258,7 +258,10 @@ async def handle_subagent_stop(
     poll_id = resolved.agent_id if resolved else None
     poll_id = poll_id or sm.agent_tree.resolve_native(event.data.native_agent_id)
     poller = get_transcript_poller()
-    if poller and poll_id and event.data.source != "zombie":
+    # Synthetic stops leave polling alone: a zombie guess may be wrong, a
+    # transcript-end stop already ended it, and after a hand-back the poller
+    # drains the tail and ends itself (``TranscriptPoller._check_completion``).
+    if poller and poll_id and event.data.source not in ("zombie", "transcript_end", "handback"):
         poller.schedule_stop(poll_id)
 
     if not resolved:
@@ -459,8 +462,15 @@ async def discover_native_link(sm: StateMachine, event: AnyEvent) -> AgentEvent 
     replays it first) for the caller to persist and apply, or None.
     """
     data = event.data
-    if isinstance(event, BackgroundTaskEvent):
-        native = event.data.background_task_id
+    if data.source == "link":
+        # A link record itself (replayed by a restore) is not a new discovery.
+        return None
+    if isinstance(event, BackgroundTaskEvent | PromptEvent):
+        native = (
+            event.data.background_task_id
+            if isinstance(event, BackgroundTaskEvent)
+            else handback_native(event.data.prompt)
+        )
         main = data.transcript_path
         agent_path = (
             str(Path(main).with_suffix("") / "subagents" / f"agent-{native}.jsonl")

@@ -1277,7 +1277,7 @@ async def test_poller_no_zombie_while_tool_in_flight_and_resumes_offset(
         seen.append(e)
 
     poller = TranscriptPoller(collect)
-    await poller.start_polling(SUB, "ws2-test", str(path), from_start=True)
+    await poller.start_polling(SUB, "ws2-test", str(path))
     state = poller._sessions[SUB]  # pyright: ignore[reportPrivateUsage]
     # The poll loop's own first read races a manual _check (both read the same
     # offset): let the loop read it, then run one more check, which must not
@@ -1309,9 +1309,10 @@ async def test_poller_no_zombie_while_tool_in_flight_and_resumes_offset(
                 }
             )
         )
-    await poller.start_polling(SUB, "ws2-test", str(path), from_start=True)
+    await poller.start_polling(SUB, "ws2-test", str(path))
     state = poller._sessions[SUB]  # pyright: ignore[reportPrivateUsage]
-    state.active_tool_ids.add("toolu_long")
+    # The in-flight call is carried over the restart (its post still pairs).
+    assert state.active_tool_ids == {"toolu_long"}
     await poller._check(SUB, state)  # pyright: ignore[reportPrivateUsage]
     assert [e.event_type for e in seen] == ["pre_tool_use", "post_tool_use"]
     await poller.stop_all()

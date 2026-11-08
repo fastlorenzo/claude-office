@@ -72,6 +72,7 @@ from app.models.campus import CampusState
 from app.models.common import TodoItem
 from app.models.events import (
     AgentEvent,
+    AgentEventData,
     AnyEvent,
     BackgroundTaskEvent,
     EventAdapter,
@@ -340,6 +341,17 @@ class EventProcessor:
             )
             if known is not None and known.agent_id == event.data.agent_id and redundant:
                 return
+        # A transcript-end stop for an agent already finished (its hook stop,
+        # hand-back or notification came first) adds nothing: not persisted.
+        if (
+            isinstance(event, AgentEvent)
+            and event.event_type == EventType.SUBAGENT_STOP
+            and event.data.source == "transcript_end"
+        ):
+            sm = self.sessions.get(event.session_id)
+            node = sm.agent_tree.get(event.data.agent_id or "") if sm is not None else None
+            if node is None or (node.ended_at is not None and node.state in ("done", "error")):
+                return
         # tool_name is family-specific (ToolEvent); getattr keeps this log line
         # safe for non-tool polled events (AgentEvent thinking/text updates).
         tool_name = getattr(event.data, "tool_name", None)
@@ -521,6 +533,17 @@ class EventProcessor:
     ) -> None:
         assert isinstance(event, PromptEvent), "dispatch routes USER_PROMPT_SUBMIT only"
         await handle_user_prompt_submit(sm, event, agent_id, entry_id)
+        handed_back = sm.last_console.handed_back
+        if handed_back and handed_back in sm.agents:
+            # A hand-back is the subagent's end even when no SubagentStop
+            # follows: the office lets it go now (CLEANUP is persisted).
+            stop = AgentEvent(
+                event_type=EventType.SUBAGENT_STOP,
+                session_id=event.session_id,
+                timestamp=event.timestamp,
+                data=AgentEventData(agent_id=handed_back, source="handback"),
+            )
+            await handle_subagent_stop(sm, stop, self._persist_synthetic_event)
 
     async def _enrich_pre_tool_use(
         self, sm: StateMachine, event: AnyEvent, agent_id: str, entry_id: str, summary: str
@@ -1007,10 +1030,14 @@ class EventProcessor:
                     continue
                 if sm is None:
                     continue
+                published = False
                 async with self._sessions_lock:
                     if sid not in self.sessions:
                         self.sessions[sid] = sm
                         restored += 1
+                        published = True
+                if published:
+                    await self._resume_restored_polls(sid, sm)
             if restored:
                 logger.info(f"Campus restore: restored {restored} active session(s) from DB")
             return restored
@@ -1064,24 +1091,50 @@ class EventProcessor:
             self._ensure_transcript_poller()
             poller = get_transcript_poller()
             if poller is not None:
-                await poller.start_polling(agent_id, event.session_id, path, from_start=True)
-                if event.event_type != EventType.SUBAGENT_INFO:
-                    poller.schedule_stop(agent_id, delay=5.0)
+                # A native start keeps polling; a stop, notification or
+                # hand-back only backfills what was missed while unlinked.
+                await poller.start_polling(
+                    agent_id,
+                    event.session_id,
+                    path,
+                    until_eof=event.event_type != EventType.SUBAGENT_INFO,
+                )
 
-    async def _backfill_linked(self, session_id: str, links: list[AgentEvent]) -> None:
-        """Read the transcripts of agents linked during a restore from the start."""
-        if not links:
+    @staticmethod
+    def _plan_restored_polls(sm: StateMachine, main_transcript: str | None) -> None:
+        """Note which subagent transcripts to read after a restore.
+
+        Every subagent with a native id is read from the start (a backend
+        restart forgets the read offsets): calls missed while the backend was
+        down, reloading or not polling are backfilled, deduplicated by
+        ``tool_use_id``. Live agents keep being polled; finished ones are read
+        once. Started by ``_resume_restored_polls`` once the machine is
+        published, so the polled events dedupe against it.
+        """
+        sm.restored_polls = []
+        if not main_transcript:
+            return
+        subagents = Path(main_transcript).with_suffix("") / "subagents"
+        for node in sm.agent_tree.nodes():
+            if node.kind == "subagent" and node.native_id:
+                path = str(subagents / f"agent-{node.native_id}.jsonl")
+                sm.restored_polls.append((node.id, path, node.ended_at is not None))
+
+    async def _resume_restored_polls(self, session_id: str, sm: StateMachine) -> None:
+        """Start the transcript reads planned by ``_plan_restored_polls``."""
+        plan, sm.restored_polls = sm.restored_polls, []
+        if not plan:
             return
         self._ensure_transcript_poller()
         poller = get_transcript_poller()
         if poller is None:
             return
-        for link in links:
-            agent_id = link.data.agent_id
-            path = link.data.agent_transcript_path
-            if agent_id and path:
-                await poller.start_polling(agent_id, session_id, path, from_start=True)
-                poller.schedule_stop(agent_id, delay=10.0)
+        settings = get_settings()
+        for agent_id, path, finished in plan:
+            local = Path(settings.translate_path(path)).expanduser()
+            if not await asyncio.to_thread(local.exists):
+                continue
+            await poller.start_polling(agent_id, session_id, path, until_eof=finished)
 
     async def _persist_record(self, event: AnyEvent) -> None:
         """Persist a backend-made event row with the event's own timestamp."""
@@ -1178,11 +1231,15 @@ class EventProcessor:
             fut.set_result(None)
             raise
 
+        published = False
         async with self._sessions_lock:
             self._restores_in_progress.pop(session_id, None)
             if restored is not None and session_id not in self.sessions:
                 self.sessions[session_id] = restored
+                published = True
         fut.set_result(None)
+        if published and restored is not None:
+            await self._resume_restored_polls(session_id, restored)
         return restored
 
     @staticmethod
@@ -1239,7 +1296,7 @@ class EventProcessor:
 
             sm = StateMachine()
             skipped_count = 0
-            restored_links: list[AgentEvent] = []
+            main_transcript: str | None = None
             for rec in events:
                 try:
                     try:
@@ -1266,7 +1323,7 @@ class EventProcessor:
                     if link is not None:
                         await self._persist_record(link)
                         sm.transition(link)
-                        restored_links.append(link)
+                    main_transcript = evt.data.transcript_path or main_transcript
                     sm.transition(evt)
                     await self._refresh_titles(sm, evt.data.transcript_path, evt.session_id)
 
@@ -1381,7 +1438,13 @@ class EventProcessor:
             sm.last_event_at = last_ts if last_ts.tzinfo else last_ts.replace(tzinfo=UTC)
             sm.todos = await load_tasks(session_id)
             logger.debug(f"Restored {len(sm.todos)} tasks for session {session_id}")
-            await self._backfill_linked(session_id, restored_links)
+            # Office agents whose console node has ended are gone (rows from
+            # before hand-backs released them carry no CLEANUP).
+            for aid in list(sm.agents):
+                node = sm.agent_tree.get(aid)
+                if node is not None and node.ended_at is not None:
+                    sm.remove_agent(aid)
+            self._plan_restored_polls(sm, main_transcript)
 
             return sm
 
@@ -1396,6 +1459,7 @@ class EventProcessor:
         if sm is not None:
             async with self._sessions_lock:
                 self.sessions[session_id] = sm
+            await self._resume_restored_polls(session_id, sm)
 
     async def _persist_event(
         self,

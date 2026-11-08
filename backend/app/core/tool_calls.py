@@ -42,6 +42,7 @@ __all__ = [
     "ToolCallTracker",
     "build_input_preview",
     "build_target",
+    "handback_native",
 ]
 
 ApplyOutcome = Literal["created", "updated", "merged_duplicate", "ignored"]
@@ -63,6 +64,10 @@ _SPAWN_TOOLS = ("Task", "Agent")
 _NATIVE_ID = re.compile(r"^a[0-9a-f]{16}$")
 _AGENT_NOTIFICATION = re.compile(r'^Agent "(.+?)" ')
 _WAITING_MARK = "waiting on its own background work"
+# The main agent receiving a subagent's final report: the prompt starts with
+# ``<agent-message from="<native id>">`` then ``[Subagent hand-back] ...``
+# (hook prompts are truncated, so only the "[Subag" prefix is relied on).
+_HANDBACK = re.compile(r'^\s*<agent-message from="(a[0-9a-f]{16})">\s*\[Subag')
 _BACKGROUND_LOOKBACK = 500
 _ENDED: frozenset[str] = frozenset({"ok", "error", "denied", "interrupted"})
 _STDERR_MARK = "--- stderr ---"
@@ -209,6 +214,19 @@ def _notification_agent_description(summary: str | None) -> str | None:
     return match.group(1) if match else None
 
 
+def handback_native(prompt: str | None) -> str | None:
+    """Native id of the subagent whose hand-back report this prompt delivers."""
+    if not prompt:
+        return None
+    match = _HANDBACK.match(prompt)
+    return match.group(1) if match else None
+
+
+def _is_bare_name(node: AgentNode) -> bool:
+    """A name that is only a placeholder (its id, or just its agent type)."""
+    return node.name in (node.id, node.agent_type)
+
+
 def _specificity(agent_id: str) -> int:
     return 0 if agent_id == "main" else 1
 
@@ -227,6 +245,8 @@ class ApplyResult:
     agent_id: str | None = None
     calls: list[ToolCall] = field(default_factory=lambda: cast(list[ToolCall], []))
     nodes: list[AgentNode] = field(default_factory=lambda: cast(list[AgentNode], []))
+    # Subagent this event finished through its hand-back (the office lets it go).
+    handed_back: str | None = None
 
     def touch_call(self, call: ToolCall) -> None:
         if all(c is not call for c in self.calls):
@@ -351,6 +371,10 @@ class ToolCallTracker:
         # Calls closed by inference (orphaned "running" at turn / agent /
         # session end): a late real post still settles them.
         self._closed_by_inference: set[str] = set()
+        # Agents whose hand-back reached the main agent (done until new work),
+        # and hand-backs from a native id not linked yet (native -> time).
+        self._handed_back: set[str] = set()
+        self._pending_handback: dict[str, str] = {}
 
     # -- read API (WS3) -----------------------------------------------------
 
@@ -403,6 +427,9 @@ class ToolCallTracker:
             self._on_background(event, ts, result)
         elif et == EventType.USER_PROMPT_SUBMIT:
             self._set_main_state("working", ts, result)
+            native = handback_native(getattr(event.data, "prompt", None))
+            if native:
+                self._on_handback(native, ts, result)
         elif et == EventType.STOP:
             self._infer_denied("main", ts, result)
             self._close_orphans("main", ts, result)
@@ -461,6 +488,10 @@ class ToolCallTracker:
         """Record native->agent and re-resolve every call waiting on that caller."""
         if not self.tree.link(agent_id, native_id, result):
             return
+        handed_back_at = self._pending_handback.pop(native_id, None)
+        node = self.tree.get(agent_id)
+        if handed_back_at is not None and node is not None:
+            self._finish_handed_back(node, handed_back_at, result)
         waiting = [cid for cid, nid in self._pending_caller.items() if nid == native_id]
         for cid in waiting:
             call = self._calls.get(cid)
@@ -520,6 +551,10 @@ class ToolCallTracker:
             # New work after its stop: it was resumed (or never really died).
             node.state = "running"
             node.ended_at = None
+            self._handed_back.discard(node.id)
+        if node.kind != "main" and (node.started_at is None or ts < node.started_at):
+            # A backfilled transcript reveals earlier work than first seen.
+            node.started_at = ts
         if status in ("running", "waiting_permission"):
             node.current_activity = self._activity_text(call)
             self._activity_call[agent_id] = call_id
@@ -889,8 +924,17 @@ class ToolCallTracker:
             # A finished agent, or an async one whose real SubagentStop /
             # task-notification is authoritative: the poller's guess is moot.
             return
+        finished = node.ended_at is not None and node.state in ("done", "error")
+        if data.source == "transcript_end":
+            if finished:
+                return
+            # The poller saw the transcript end (later than it did): the end
+            # time is the agent's last recorded activity.
+            ts = self._last_activity(node.id, ts)
         node.state = "zombie" if zombie else ("error" if data.success is False else "done")
-        node.ended_at = ts
+        if not finished:
+            # A second stop (hook after hand-back) keeps the first end time.
+            node.ended_at = ts
         node.current_activity = None
         preview = data.tool_output or data.result_summary
         if preview:
@@ -953,9 +997,18 @@ class ToolCallTracker:
                     rev=1,
                 )
                 self.tree.add_node(node, result)
-            elif data.agent_type and not node.agent_type:
-                node.agent_type = data.agent_type
-                self.tree.bump(node, result)
+            else:
+                changed = False
+                if data.agent_type and not node.agent_type:
+                    node.agent_type = data.agent_type
+                    changed = True
+                if data.agent_name and _is_bare_name(node):
+                    # Created bare by its (backfilled) calls before the link:
+                    # the link carries the spawn's description.
+                    node.name = _clip(data.agent_name, 200)
+                    changed = True
+                if changed:
+                    self.tree.bump(node, result)
             self._learn_link(node.id, data.native_agent_id, ts, result)
             if data.source == "link":
                 result.outcome = "updated"
@@ -968,6 +1021,7 @@ class ToolCallTracker:
         if node.ended_at is not None or node.state in ("zombie", "waiting"):
             node.state = "running"
             node.ended_at = None
+            self._handed_back.discard(node.id)
             changed = True
         if data.agent_type and not node.agent_type:
             node.agent_type = data.agent_type
@@ -975,6 +1029,51 @@ class ToolCallTracker:
         if changed:
             self.tree.bump(node, result)
             result.outcome = "updated"
+
+    def _last_activity(self, agent_id: str, default: str) -> str:
+        """Latest start/end time among *agent_id*'s calls, capped at *default*."""
+        latest: str | None = None
+        for call in self._calls.values():
+            if call.agent_id != agent_id:
+                continue
+            stamp = call.ended_at or call.started_at
+            if latest is None or stamp > latest:
+                latest = stamp
+        return min(latest, default) if latest else default
+
+    def _on_handback(self, native: str, ts: str, result: ApplyResult) -> None:
+        """The main agent received *native*'s final report: that agent is done."""
+        resolved = self.tree.resolve_native(native)
+        node = self.tree.get(resolved) if resolved else None
+        if node is None:
+            # Not linked yet (a legacy spawn): settled when the link is learned.
+            self._pending_handback.setdefault(native, ts)
+            return
+        self._finish_handed_back(node, ts, result)
+
+    def _finish_handed_back(self, node: AgentNode, ts: str, result: ApplyResult) -> None:
+        """Mark *node* done by its hand-back (spawn call ``ok``, nothing left open).
+
+        A later "waiting on its own background work" notification does not
+        reopen it; new work (a resume) does.
+        """
+        if node.kind != "subagent":
+            return
+        self._handed_back.add(node.id)
+        result.handed_back = node.id
+        if node.ended_at is None or node.state not in ("done", "error"):
+            node.state = "done"
+            node.ended_at = ts
+        node.current_activity = None
+        self.tree.bump(node, result)
+        self._infer_denied(node.id, ts, result)
+        self._close_orphans(node.id, ts, result)
+        call = self._calls.get(node.spawn_tool_use_id) if node.spawn_tool_use_id else None
+        if call is not None and call.status in ("running", "spawned", "waiting_permission"):
+            self._set_status(call, "ok", result)
+            call.ended_at = ts
+            call.duration_ms = _ms_between(call.started_at, ts)
+            self._bump(call, result)
 
     def _agent_for_notification(
         self,
@@ -1011,6 +1110,9 @@ class ToolCallTracker:
     ) -> None:
         """Fold an agent's task-notification into its node (no extra node)."""
         waiting = bool(summary) and _WAITING_MARK in (summary or "")
+        if waiting and node.id in self._handed_back:
+            # Its report was already delivered: it is done, not waiting.
+            return
         if status == "failed":
             node.state = "error"
             node.ended_at = node.ended_at or ts

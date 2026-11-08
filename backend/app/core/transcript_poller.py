@@ -25,9 +25,25 @@ logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 1.0
 
-# Hard upper bound — even if no zombie detection ever fires, give up after
-# this long. Kept high so legitimate long-running subagents are not killed.
-INACTIVITY_TIMEOUT = timedelta(minutes=10)
+# Hard upper bound: stop polling a transcript that has not grown for this
+# long. A resume (native SubagentStart) restarts polling at the kept offset.
+# Kept high: a quiet stretch (long thinking, a long build, background work)
+# must not end polling while the agent still works.
+INACTIVITY_TIMEOUT = timedelta(minutes=60)
+
+# Completion (``source="transcript_end"`` stop): the transcript's last turn
+# ended with a hand-back (a tool_result flagged ``toolEndsTurn``, e.g.
+# SubagentHandback) and the file has been quiet this long ...
+HANDBACK_QUIET = timedelta(seconds=5)
+# ... or with a final assistant message (no tool_use) and the subagent's
+# ``.meta.json`` says ``finished`` and the file has been quiet this long.
+FINAL_QUIET = timedelta(minutes=10)
+
+# At most this much transcript is read per poll tick (line-aligned), so a
+# backfill of a large transcript never loads it whole.
+MAX_READ_BYTES = 4 * 1024 * 1024
+
+_FINAL_STOP_REASONS = ("end_turn", "stop_sequence")
 
 
 def _zombie_timeout() -> timedelta:
@@ -47,6 +63,18 @@ def _record_time(record: dict[str, Any]) -> datetime | None:
     return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
 
 
+def _meta_finished(transcript: Path) -> bool:
+    """Whether ``agent-<id>.meta.json`` next to *transcript* says ``finished``."""
+    try:
+        raw = json.loads(transcript.with_suffix(".meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(raw, dict) and cast(dict[str, Any], raw).get("finished") is True
+
+
+TurnEnd = str | None  # "handback" | "final" | None (mid-turn / unknown)
+
+
 @dataclass
 class PolledAgent:
     """Tracks state for a polled subagent transcript."""
@@ -57,8 +85,17 @@ class PolledAgent:
     file_position: int = 0
     last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
     active_tool_ids: set[str] = field(default_factory=lambda: set[str]())
+    # Nested Task/Agent calls in flight: active (no zombie) but no post row.
+    spawn_tool_ids: set[str] = field(default_factory=lambda: set[str]())
     last_thinking_hash: int = 0
     last_text_hash: int = 0
+    # How the last turn in the file ended (see ``_track_turn``).
+    turn_end: TurnEnd = None
+    # Reading old content from the start: thinking/text bubbles are skipped.
+    catching_up: bool = False
+    # One-shot backfill of a finished agent: stop once the file is read.
+    until_eof: bool = False
+    zombie_reported: bool = False
 
 
 class TranscriptPoller(BasePoller[PolledAgent]):
@@ -79,6 +116,9 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         # Last read offset per agent, kept across stop/start: an async agent
         # stops at every turn end and resumes later (SubagentStart again).
         self._positions: dict[str, int] = {}
+        # The last poll state per agent: a restart carries its in-flight tool
+        # ids and turn end over (the posts of calls read before the stop).
+        self._last_state: dict[str, PolledAgent] = {}
         # Deferred stops (see ``schedule_stop``), cancelled by a restart.
         self._pending_stops: dict[str, asyncio.Task[None]] = {}
 
@@ -105,18 +145,28 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         agent_id: str,
         session_id: str,
         transcript_path: str,
-        from_start: bool = False,
+        until_eof: bool = False,
     ) -> None:
         """Start (or keep) polling a subagent's transcript file.
 
-        Resumes from the last offset read for this agent. A first start reads
-        from the beginning when *from_start* (re-emitted calls merge into the
-        ones already tracked), otherwise from the current end of file.
+        Resumes from the last offset read for this agent. A first start (the
+        transcript discovered, linked or relinked, or a backend restart) reads
+        it from the beginning: calls already tracked are deduplicated by
+        ``tool_use_id`` downstream, and the ones missed are backfilled.
+
+        *until_eof* makes it a one-shot backfill (a finished agent): polling
+        ends once the file has been read. A plain start on an agent being
+        backfilled turns it back into normal polling.
         """
         pending = self._pending_stops.pop(agent_id, None)
         if pending is not None:
             pending.cancel()
         if await self.is_polling(agent_id):
+            if not until_eof:
+                async with self._lock:
+                    current = self._sessions.get(agent_id)
+                    if current is not None:
+                        current.until_eof = False
             return
         settings = get_settings()
         translated_path = settings.translate_path(transcript_path)
@@ -132,36 +182,74 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             agent_id=agent_id,
             session_id=session_id,
             transcript_path=path,
+            until_eof=until_eof,
         )
         known = self._positions.get(agent_id)
+        previous = self._last_state.get(agent_id)
         if known is not None:
             agent.file_position = known
-        elif not from_start and path.exists():
-            agent.file_position = path.stat().st_size
+            if previous is not None:
+                agent.active_tool_ids = set(previous.active_tool_ids)
+                agent.spawn_tool_ids = set(previous.spawn_tool_ids)
+                agent.turn_end = previous.turn_end
+        else:
+            agent.catching_up = True
+        self._last_state[agent_id] = agent
 
         await self._register_polling(agent_id, agent, task_name=f"poll_{agent_id}")
         logger.info(f"Started polling agent {agent_id} at {transcript_path}")
 
     async def _check(self, key: str, state: PolledAgent) -> None:
-        """Poll one iteration: zombie check, inactivity check, content read.
+        """Poll one iteration: read new content, then completion / zombie / timeout.
 
-        On zombie detection, emits a synthetic SUBAGENT_STOP and removes the
-        state so the loop terminates — guaranteeing the synthetic event is
-        dispatched exactly once even if the state machine's cleanup path
-        never calls ``stop_polling``.
+        Completion: the transcript's last turn ended (a hand-back, or a final
+        message with ``.meta.json`` ``finished``), nothing is in flight and the
+        file has been quiet long enough: emits one synthetic SUBAGENT_STOP
+        (``source="transcript_end"``) and ends polling (the offset is kept, so
+        a resume carries on from there).
 
-        On hard inactivity timeout, removes the state so the loop terminates.
+        Zombie: no growth past the zombie threshold, nothing in flight and no
+        clean turn end: emits one synthetic SUBAGENT_STOP (``source="zombie"``)
+        but keeps polling. The guess is often wrong (long thinking, an async
+        agent between turns), and its later calls must still be read.
+
+        Hard inactivity timeout: ends polling.
         """
+        events = await self._read_new_content(state)
+        if events:
+            state.zombie_reported = False
+        for event in events:
+            try:
+                await self._event_callback(event)
+            except Exception as e:
+                logger.warning(f"Error processing polled event: {e}")
+
+        if await self._check_completion(key, state):
+            return
+
+        if state.until_eof and not state.catching_up:
+            # One-shot backfill done (catching_up clears at end of file).
+            async with self._lock:
+                if self._sessions.get(key) is state:
+                    self._sessions.pop(key, None)
+            return
+
         inactivity = datetime.now(UTC) - state.last_activity
         zombie_timeout = _zombie_timeout()
+        in_flight = bool(state.active_tool_ids or state.spawn_tool_ids)
 
-        # Zombie detection: emit a synthetic SubagentStop so the
-        # state machine can clean up the orphaned agent. This
-        # covers cases where Claude Code never sends SubagentStop
-        # itself (rate-limit, crash, user interrupt, ...).
+        # Zombie detection: emit a synthetic SubagentStop so the state machine
+        # can clean up the orphaned agent. This covers cases where Claude Code
+        # never sends SubagentStop itself (rate-limit, crash, user interrupt).
         # A tool call still in flight (a long build, a wait on a lock) is not
-        # a dead agent: only the hard timeout below may end its polling.
-        if inactivity > zombie_timeout and not state.active_tool_ids:
+        # a dead agent, and a hand-back is a clean end (completion covers it).
+        if (
+            inactivity > zombie_timeout
+            and not in_flight
+            and not state.zombie_reported
+            and state.turn_end != "handback"
+        ):
+            state.zombie_reported = True
             zombie_event = self._build_zombie_stop_event(state)
             logger.warning(
                 f"Agent {key} appears to be a zombie "
@@ -174,29 +262,56 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                 await self._event_callback(zombie_event)
             except Exception as e:
                 logger.warning(f"Error dispatching synthetic SubagentStop: {e}")
-            # Remove state so the loop exits and we do not keep emitting
-            # zombie events every tick. The state machine's SUBAGENT_STOP
-            # handler normally calls stop_polling(key); popping here
-            # guarantees termination even if that path fails.
-            async with self._lock:
-                self._sessions.pop(key, None)
             return
 
-        # Hard fallback: if the zombie callback also failed for
-        # any reason, eventually stop the loop so we do not poll
-        # forever.
+        # Hard fallback: do not poll a silent file forever.
         if inactivity > INACTIVITY_TIMEOUT:
             logger.debug(f"Agent {key} timed out due to inactivity")
             async with self._lock:
-                self._sessions.pop(key, None)
-            return
+                if self._sessions.get(key) is state:
+                    self._sessions.pop(key, None)
 
-        events = await self._read_new_content(state)
-        for event in events:
+    async def _check_completion(self, key: str, state: PolledAgent) -> bool:
+        """Emit the transcript-end stop and end polling once the agent is done."""
+        if state.turn_end is None or state.active_tool_ids or state.spawn_tool_ids:
+            return False
+        path = state.transcript_path
+
+        def _quiet_and_finished() -> tuple[timedelta, bool]:
             try:
-                await self._event_callback(event)
-            except Exception as e:
-                logger.warning(f"Error processing polled event: {e}")
+                mtime = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+            except OSError:
+                return timedelta(0), False
+            quiet = datetime.now(UTC) - mtime
+            finished = state.turn_end == "final" and quiet >= FINAL_QUIET and _meta_finished(path)
+            return quiet, finished
+
+        quiet, finished = await asyncio.to_thread(_quiet_and_finished)
+        done = (state.turn_end == "handback" and quiet >= HANDBACK_QUIET) or finished
+        if not done:
+            return False
+        logger.info(f"Agent {key} transcript ended ({state.turn_end}); ending its polling")
+        try:
+            await self._event_callback(self._build_end_stop_event(state))
+        except Exception as e:
+            logger.warning(f"Error dispatching transcript-end SubagentStop: {e}")
+        async with self._lock:
+            if self._sessions.get(key) is state:
+                self._sessions.pop(key, None)
+        return True
+
+    def _build_end_stop_event(self, agent: PolledAgent) -> AgentEvent:
+        """Synthetic SUBAGENT_STOP for a transcript that ended cleanly."""
+        return AgentEvent(
+            event_type=EventType.SUBAGENT_STOP,
+            session_id=agent.session_id,
+            timestamp=datetime.now(UTC),
+            data=AgentEventData(
+                agent_id=agent.agent_id,
+                agent_transcript_path=str(agent.transcript_path),
+                source="transcript_end",
+            ),
+        )
 
     def _build_zombie_stop_event(self, agent: PolledAgent) -> AgentEvent:
         """Build a synthetic SUBAGENT_STOP for an agent we believe has crashed."""
@@ -227,26 +342,36 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             path = agent.transcript_path
             position = agent.file_position
 
-            def _read_sync() -> tuple[str, int] | None:
+            def _read_sync() -> tuple[str, int, bool] | None:
                 current_size = path.stat().st_size
                 if current_size <= position:
                     return None
-                with open(path, encoding="utf-8") as f:
+                with open(path, "rb") as f:
                     f.seek(position)
-                    data = f.read()
-                    return data, f.tell()
+                    raw = f.read(MAX_READ_BYTES)
+                at_eof = position + len(raw) >= current_size
+                if not at_eof:
+                    # Line-aligned: the partial last line is read next tick.
+                    cut = raw.rfind(b"\n")
+                    if cut < 0:
+                        return None
+                    raw = raw[: cut + 1]
+                return raw.decode("utf-8", errors="replace"), position + len(raw), at_eof
 
             result = await asyncio.to_thread(_read_sync)
             if result is None:
+                agent.catching_up = False
                 return events
 
-            new_content, new_position = result
+            new_content, new_position, at_eof = result
             agent.file_position = new_position
             self._positions[agent.agent_id] = new_position
 
             if new_content.strip():
                 agent.last_activity = datetime.now(UTC)
                 events = self._parse_content(agent, new_content)
+            if at_eof:
+                agent.catching_up = False
 
         except OSError as e:
             logger.warning(f"Error reading transcript for {agent.agent_id}: {e}")
@@ -267,10 +392,20 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             except json.JSONDecodeError:
                 continue
 
+            if not isinstance(record, dict):
+                continue
+            record = cast(dict[str, Any], record)
             record_type = record.get("type")
             stamp = _record_time(record)
-            message: dict[str, Any] = record.get("message", {})
-            content_blocks: list[Any] = message.get("content", [])
+            raw_message = record.get("message")
+            message: dict[str, Any] = (
+                cast(dict[str, Any], raw_message) if isinstance(raw_message, dict) else {}
+            )
+            raw_blocks = message.get("content")
+            content_blocks: list[Any] = (
+                cast(list[Any], raw_blocks) if isinstance(raw_blocks, list) else []
+            )
+            self._track_turn(agent, record, message, content_blocks)
 
             if record_type == "assistant" and message.get("role") == "assistant":
                 for item in content_blocks:
@@ -281,10 +416,16 @@ class TranscriptPoller(BasePoller[PolledAgent]):
 
                     if block_type == "tool_use":
                         event = self._create_pre_tool_use_event(agent, block, stamp)
+                        tool_id: str = block.get("id", "")
                         if event:
                             events.append(event)
-                            tool_id: str = block.get("id", "")
                             agent.active_tool_ids.add(tool_id)
+                        elif block.get("name") in ("Task", "Agent") and tool_id:
+                            agent.spawn_tool_ids.add(tool_id)
+
+                    elif agent.catching_up:
+                        # Old thoughts are not news: no bubbles while catching up.
+                        continue
 
                     elif block_type == "thinking":
                         thinking_text: str = block.get("thinking", "")
@@ -318,8 +459,33 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                             if event:
                                 events.append(event)
                             agent.active_tool_ids.discard(tool_use_id)
+                        agent.spawn_tool_ids.discard(tool_use_id)
 
         return events
+
+    @staticmethod
+    def _track_turn(
+        agent: PolledAgent,
+        record: dict[str, Any],
+        message: dict[str, Any],
+        blocks: list[Any],
+    ) -> None:
+        """Note how the latest turn in the transcript ended.
+
+        ``"handback"``: a tool_result flagged ``toolEndsTurn`` (the agent's
+        report was delivered). ``"final"``: an assistant message without
+        tool_use whose stop reason ends the turn. Any other assistant or user
+        message means the agent is mid-turn. Bookkeeping records
+        (api-request, attachments, system) leave it unchanged.
+        """
+        record_type = record.get("type")
+        types = [cast(dict[str, Any], b).get("type") for b in blocks if isinstance(b, dict)]
+        if record_type == "assistant" and message.get("role") == "assistant":
+            final = "tool_use" not in types and message.get("stop_reason") in _FINAL_STOP_REASONS
+            agent.turn_end = "final" if final else None
+        elif record_type == "user" and message.get("role") == "user":
+            ends = "tool_result" in types and record.get("toolEndsTurn") is True
+            agent.turn_end = "handback" if ends else None
 
     def _create_pre_tool_use_event(
         self, agent: PolledAgent, block: dict[str, Any], stamp: datetime | None = None

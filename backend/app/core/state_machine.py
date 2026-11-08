@@ -462,26 +462,31 @@ def _handle_subagent_stop(sm: "StateMachine", event: AnyEvent) -> None:
             sm.stopped_native.pop(next(iter(sm.stopped_native)))
 
     if resolved:
-        agent_id = resolved.agent_id
-        stopping_agent = resolved.agent
-        stopping_agent.state = AgentState.WAITING
-        if agent_id not in sm.handin_queue:
-            sm.handin_queue.append(agent_id)
-
+        _office_agent_departs(sm, resolved.agent_id)
         sm.boss_state = BossState.IDLE
 
-        if not sm.agents:
-            sm.phase = OfficePhase.WORKING
 
-        # Subagent tool-use crediting (formerly a full-file transcript read
-        # here) moved to the async handler `handle_subagent_stop` in
-        # agent_handler.py — see ARC-003. Replay (which only calls
-        # transition()) no longer credits the safety-sign counter; cosmetic
-        # only, the counter is not persisted.
-        sm.whiteboard.record_agent_stop(agent_id)
+def _office_agent_departs(sm: "StateMachine", agent_id: str) -> None:
+    """Send a finished subagent to the hand-in queue (stop, or its hand-back)."""
+    stopping_agent = sm.agents.get(agent_id)
+    if stopping_agent is None:
+        return
+    stopping_agent.state = AgentState.WAITING
+    if agent_id not in sm.handin_queue:
+        sm.handin_queue.append(agent_id)
 
-        agent_name = stopping_agent.name or f"Agent-{agent_id[-4:]}"
-        sm.whiteboard.add_news_item("agent", f"{agent_name} completed their task!")
+    if not sm.agents:
+        sm.phase = OfficePhase.WORKING
+
+    # Subagent tool-use crediting (formerly a full-file transcript read
+    # here) moved to the async handler `handle_subagent_stop` in
+    # agent_handler.py — see ARC-003. Replay (which only calls
+    # transition()) no longer credits the safety-sign counter; cosmetic
+    # only, the counter is not persisted.
+    sm.whiteboard.record_agent_stop(agent_id)
+
+    agent_name = stopping_agent.name or f"Agent-{agent_id[-4:]}"
+    sm.whiteboard.add_news_item("agent", f"{agent_name} completed their task!")
 
 
 def _handle_cleanup(sm: "StateMachine", event: AnyEvent) -> None:
@@ -697,6 +702,11 @@ class StateMachine:
     # native subagent id -> epoch of its last SubagentStop (liveness: a background
     # agent may be resumed after it handed back a report; see subagent_liveness).
     stopped_native: dict[str, float] = field(default_factory=_empty_float_dict)
+    # Subagent transcripts a restore planned to (re)read: (agent id, path,
+    # finished). Consumed by EventProcessor once the machine is published.
+    restored_polls: list[tuple[str, str, bool]] = field(
+        default_factory=lambda: cast(list[tuple[str, str, bool]], [])
+    )
     # One-line description of the latest tool call ("Running make checkall").
     latest_activity: str | None = None
     # Live tool tracking for the campus phase (main agent only): the current /
@@ -958,6 +968,11 @@ class StateMachine:
                     exc_info=True,
                 )
                 raise
+        handed_back = self.last_console.handed_back
+        if handed_back and handed_back in self.agents and handed_back not in self.handin_queue:
+            # The main agent received its report: the office lets it go even
+            # when no SubagentStop follows (async agents).
+            _office_agent_departs(self, handed_back)
         if self.agents:
             self.tool_calls.sync_colors(
                 {aid: a.color for aid, a in self.agents.items()}, self.last_console
