@@ -631,6 +631,16 @@ export class Exterior {
     const shadow = newBuf();
     const gy = GROUND_Y - 0.06; // under the factory floor (y = GROUND_Y)
     const g = GROUND_Y;
+    // Walkable surfaces sit within 1 cm of the walk colliders' top (GROUND_Y)
+    // so feet neither float nor sink; layers stay 5 mm apart (no z-fight).
+    const LAYER = {
+      grass: g - 0.03,
+      strip: g - 0.02,
+      asphalt: g - 0.015,
+      gravel: g - 0.015,
+      concrete: g - 0.01,
+      paint: g - 0.005,
+    } as const;
 
     // --- Ground ------------------------------------------------------------
     const grassAt =
@@ -652,22 +662,22 @@ export class Exterior {
     tiled(
       ground,
       { x0: -half, x1: half, z0: cz - half, z1: cz + half },
-      gy,
+      LAYER.grass,
       TILE_GRASS,
       grassAt(false),
     );
     const stripe = (x: number, z: number): RGB =>
       mul(grassAt(true)(x, z), Math.floor(z / 3.2) % 2 === 0 ? 1.0 : 0.93);
     for (const s of plan.strips)
-      tiled(ground, s, gy + 0.02, TILE_GRASS, stripe);
+      tiled(ground, s, LAYER.strip, TILE_GRASS, stripe);
     const asphaltAt = (x: number, z: number): RGB =>
       mul(ASPHALT, 0.86 + 0.28 * vnoise(x, z, 9, 5));
     for (const a of plan.asphalt)
-      tiled(ground, a, gy + 0.03, TILE_ASPHALT, asphaltAt);
+      tiled(ground, a, LAYER.asphalt, TILE_ASPHALT, asphaltAt);
     const concreteAt = (x: number, z: number): RGB =>
       mul(CONCRETE, 0.93 + 0.14 * vnoise(x, z, 14, 6));
     for (const c of plan.concrete)
-      tiled(ground, c, gy + 0.04, TILE_CONCRETE, concreteAt);
+      tiled(ground, c, LAYER.concrete, TILE_CONCRETE, concreteAt);
     for (const s of plan.sheds) {
       const pad = {
         x0: s.x - s.w / 2 - 3,
@@ -675,7 +685,7 @@ export class Exterior {
         z0: s.z - s.d / 2 - 3,
         z1: s.z + s.d / 2 + 3,
       };
-      tiled(ground, pad, gy + 0.03, TILE_GRAVEL, (x, z) =>
+      tiled(ground, pad, LAYER.gravel, TILE_GRAVEL, (x, z) =>
         mul([0.62, 0.6, 0.56], 0.85 + 0.3 * vnoise(x, z, 6, 7)),
       );
     }
@@ -689,10 +699,10 @@ export class Exterior {
       quad(
         ground,
         [
-          [p.x0, gy + 0.06, p.z0],
-          [p.x1, gy + 0.06, p.z0],
-          [p.x1, gy + 0.06, p.z1],
-          [p.x0, gy + 0.06, p.z1],
+          [p.x0, LAYER.paint, p.z0],
+          [p.x1, LAYER.paint, p.z0],
+          [p.x1, LAYER.paint, p.z1],
+          [p.x0, LAYER.paint, p.z1],
         ],
         c,
         [paintUV, paintUV, paintUV, paintUV],
@@ -706,10 +716,10 @@ export class Exterior {
       quad(
         ground,
         [
-          [x, gy + 0.06, plaza.z0 + 0.4],
-          [x + 1.2, gy + 0.06, plaza.z0 + 0.4],
-          [x + 1.2, gy + 0.06, plaza.z0 + 2.8],
-          [x, gy + 0.06, plaza.z0 + 2.8],
+          [x, LAYER.paint, plaza.z0 + 0.4],
+          [x + 1.2, LAYER.paint, plaza.z0 + 0.4],
+          [x + 1.2, LAYER.paint, plaza.z0 + 2.8],
+          [x, LAYER.paint, plaza.z0 + 2.8],
         ],
         mul(PAINT_W, 0.85),
         [paintUV, paintUV, paintUV, paintUV],

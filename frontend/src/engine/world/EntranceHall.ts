@@ -280,6 +280,19 @@ export class EntranceHall {
     const d = zw - z0;
     // Floor (quartz terrazzo) + collider.
     b.box("quartz", v3(0, -0.05, cz), v3(x1 - x0 + 0.4, 0.1, d + 0.2));
+    // Threshold plate through the factory door (G6): from the lobby face of
+    // the shared wall to just past its factory face, over the epoxy's edge
+    // (no gap to the ground below; 2 mm proud, no lip for the feet).
+    {
+      const fd = e.factoryDoor;
+      const za = zw - 0.02;
+      const zb = fd.z + 0.04;
+      b.box(
+        "blackMetal",
+        v3(fd.x, -0.049, (za + zb) / 2),
+        v3(fd.width, 0.102, zb - za),
+      );
+    }
     this.col(new Vector3(0, -0.1, cz), new Vector3(x1 - x0, 0.2, d));
     // Entrance mat.
     b.rbox("charcoal", v3(e.doors.x, 0.006, z0 + 1.1), v3(3.8, 0.012, 1.7), {
@@ -324,8 +337,9 @@ export class EntranceHall {
           v3(cx + s * 0.031, ch / 2 - 0.3, z),
           v3(0.004, ch + 0.3, 0.02),
         );
-      // Graphite slats on the lobby side of the side walls (low wainscot).
-      b.box("wallDark", v3(s * (x1 - 0.01), 0.06, cz), v3(0.02, 0.12, d));
+      // 100 mm charcoal skirting (15 mm proud) with a shadow gap above (G14).
+      b.box("charcoal", v3(s * (x1 - 0.0075), 0.05, cz), v3(0.015, 0.1, d));
+      b.box("shadowGap", v3(s * (x1 - 0.002), 0.106, cz), v3(0.004, 0.012, d));
     }
     // Shared north wall with the factory door (both faces finished).
     const fd = e.factoryDoor;
@@ -572,6 +586,12 @@ export class EntranceHall {
         v3(xm, yt - 0.02, zr + dir * (going / 2 - 0.01)),
         v3(inner, 0.04, going + 0.02),
       );
+      // 30 mm dark anodised nosing on the tread's front edge (R13).
+      b.box(
+        "blackMetal",
+        v3(xm, yt - 0.004, zr + dir * (going - 0.015)),
+        v3(inner, 0.012, 0.031),
+      );
     }
     // Side stringers: top 4 cm above the nosing line, STAIR_D below it.
     for (const x of [xa + STRINGER_T / 2, xb - STRINGER_T / 2])
@@ -742,6 +762,15 @@ export class EntranceHall {
     const xLandIn = s > 0 ? L.x0 + 0.012 : L.x1 - 0.012;
     this.levelRail(b, "z", xLandIn, L.z0 + 0.02, L.z1, ly);
     this.levelRail(b, "x", L.z0 + 0.03, L.x0, L.x1, ly);
+    // Wall string: charcoal skirting following the lower flight along the
+    // side wall, and round the landing's wall side (G14).
+    const xSk = s > 0 ? lo.x1 + 0.0425 : lo.x0 - 0.0425;
+    this.pitched(b, "blackMetal", fl, xSk, 0.16, -0.06, 0.015);
+    b.box(
+      "charcoal",
+      v3(xSk, ly + 0.05, (L.z0 + L.z1) / 2),
+      v3(0.015, 0.1, L.z1 - L.z0),
+    );
     // Wall handrail over the lower flight's outer edge (oak on brackets).
     this.pitched(b, "oak", fl, xWall, RAIL_TOP + 0.025, RAIL_TOP - 0.025, 0.05);
     for (const t of [0.15, 0.5, 0.85]) {
@@ -950,17 +979,19 @@ export class EntranceHall {
         v3(c - a, 0.35, g.z1 - g.z0),
       );
     }
-    // Steel edge beams framing the glass strip + downstand at the open edge.
+    // Steel edge beams framing the glass strip (inside its opening, bottoms
+    // 2 cm below the soffit band: no coplanar faces) + a real downstand at
+    // the open edge (0.75 deep, below the band's bottom) (G8).
     for (const s of [-1, 1])
       b.box(
         "blackMetal",
-        v3(s * (strip + 0.03), UP - 0.25, (g.z0 + g.z1) / 2),
-        v3(0.06, 0.4, g.z1 - g.z0),
+        v3(s * (strip - 0.03), UP - 0.26, (g.z0 + g.z1) / 2),
+        v3(0.06, 0.42, g.z1 - g.z0),
       );
     b.box(
       "blackMetal",
-      v3(0, UP - 0.3, g.z1 - 0.15),
-      v3(g.x1 - g.x0, 0.3, 0.3),
+      v3(0, UP - 0.45, g.z1 - 0.145),
+      v3(g.x1 - g.x0, 0.6, 0.31),
     );
     // Slab-edge LED strips (light the factory floor under the gallery).
     for (const x of [-9, -4.5, 4.5, 9])

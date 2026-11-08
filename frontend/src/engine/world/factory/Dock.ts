@@ -1029,16 +1029,9 @@ export class Dock {
       hexColor("#f4f8ff"),
     );
 
-    // ---- Interior wall LED cove (soft top light).
-    led.span(
-      -W2 + 0.3,
-      wallTop - 0.5,
-      -D,
-      -W2 + 0.34,
-      wallTop - 0.46,
-      -wallT,
-      hexColor("#eaf2ff"),
-    );
+    // (No interior wall cove: the single 4 cm strip on the west wall read as
+    // a stray black member along the wall head (G11); cove light belongs to
+    // the dock lighting pass.)
 
     const mm = matte.build("dock:matte", scene);
     const me = metal.build("dock:metal", scene);

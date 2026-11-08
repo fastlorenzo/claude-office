@@ -294,7 +294,9 @@ export class Building {
       colliders,
       g,
       "floorLobby",
-      rectMinusHoles({ x0: -halfW - 0.5, x1: halfW + 0.5, z0, z1: 0 }, [
+      // Edge flush with the side walls' outer cladding (halfW + 0.2 wall
+      // + 0.06 cladding): no lip beyond the fascia (G7).
+      rectMinusHoles({ x0: -halfW - 0.26, x1: halfW + 0.26, z0, z1: 0 }, [
         ...entrance.stairs.map((st) => st.rect),
         entrance.lift.rect,
         strip,
@@ -306,9 +308,9 @@ export class Building {
     });
     for (const sx of [-1, 1])
       b.box(
-        "blackMetal",
-        v3(sx * (SPINE_GLASS_W / 2 + 0.02), -0.01, (strip.z0 + strip.z1) / 2),
-        v3(0.04, 0.022, strip.z1 - strip.z0),
+        "aluminium",
+        v3(sx * (SPINE_GLASS_W / 2 + 0.03), -0.0125, (strip.z0 + strip.z1) / 2),
+        v3(0.06, 0.035, strip.z1 - strip.z0),
       );
     b.box(
       "ceiling",
@@ -504,6 +506,16 @@ export class Building {
         { a0: entrance.gallery.z0 + 0.2, a1: -T - 0.2, y0: 0.04, y1: H - 0.06 },
       ];
       wallWithOpenings(b, colliders, g, "wall", "z", wx, T, z0, -T, H, gal);
+      // Skirting on the solid stretch between the stair opening and the
+      // gallery glazing (G14).
+      const sk0 = Math.max(...entrance.stairs.map((st) => st.rect.z1));
+      const sk1 = gal[0].a0;
+      if (sk1 - sk0 > 0.1)
+        b.box(
+          "wallDark",
+          v3(-halfW + 0.0075, 0.05, (sk0 + sk1) / 2),
+          v3(0.015, 0.1, sk1 - sk0),
+        );
       for (const o of gal) {
         part.fixtures.push(
           ...windowUnit(b, "z", wx, o, { pitch: 1.5, inward: 1, wallT: T }),
@@ -606,19 +618,26 @@ export class Building {
       );
       glowRing.position.set(x, y - 0.02, z);
       b.add("lightPanel", glowRing, true);
+      // Three 8 mm drop rods to ceiling roses on the raft (R13).
       for (let k = 0; k < 3; k++) {
         const a = (k / 3) * Math.PI * 2 + 0.3;
+        const cx = x + Math.cos(a) * d * 0.5;
+        const cz = z + Math.sin(a) * d * 0.5;
         b.cylinder(
           "blackMetal",
-          v3(
-            x + Math.cos(a) * d * 0.5,
-            (y + raftY) / 2,
-            z + Math.sin(a) * d * 0.5,
-          ),
+          v3(cx, (y + raftY) / 2, cz),
           raftY - y,
-          0.004,
-          0.004,
-          4,
+          0.008,
+          0.008,
+          6,
+        );
+        b.cylinder(
+          "blackMetal",
+          v3(cx, raftY - 0.0125, cz),
+          0.025,
+          0.09,
+          0.09,
+          12,
         );
       }
       part.fixtures.push(
@@ -770,18 +789,29 @@ export class Building {
       thickness: 0.04,
       seeThrough: true,
     });
-    // Steel edge profiles framing the glass.
+    // 60 mm aluminium kerbs framing the structural glass, 5 mm proud of
+    // the floor (R2 / R13: the strip reads as glass, not a painted road).
     for (const sx of [-1, 1])
       b.box(
-        "blackMetal",
-        v3(sx * (SPINE_GLASS_W / 2 + 0.02), -0.01, (L - TOWER_BAY_D) / 2),
-        v3(0.04, 0.022, L - TOWER_BAY_D),
+        "aluminium",
+        v3(sx * (SPINE_GLASS_W / 2 + 0.03), -0.0125, (L - TOWER_BAY_D) / 2),
+        v3(0.06, 0.035, L - TOWER_BAY_D),
       );
     b.box(
-      "blackMetal",
-      v3(0, -0.01, L - TOWER_BAY_D - 0.02),
-      v3(hallHalf * 2, 0.022, 0.04),
+      "aluminium",
+      v3(0, -0.0125, L - TOWER_BAY_D - 0.03),
+      v3(hallHalf * 2, 0.035, 0.06),
     );
+    // Threshold strips where the finishes change (G14): reception terrazzo →
+    // hall microcement at z = 0 (either side of the glass strip), tower-bay
+    // glass → control-room floor at the hall end.
+    for (const sx of [-1, 1])
+      b.box(
+        "aluminium",
+        v3((sx * (hallHalf + SPINE_GLASS_W / 2 + 0.06)) / 2, -0.0125, 0),
+        v3(hallHalf - SPINE_GLASS_W / 2 - 0.06, 0.035, 0.05),
+      );
+    b.box("aluminium", v3(0, -0.0125, L - 0.02), v3(hallHalf * 2, 0.035, 0.05));
     // Rails on the open sides (the room fronts close the outer side).
     for (const h of stairHoles)
       railOpening(b, colliders, g, h, [
@@ -789,7 +819,9 @@ export class Building {
         ...(Math.abs(h.x1 - hallHalf) < 0.01 ? (["x1"] as const) : []),
         ...(Math.abs(h.x0 + hallHalf) < 0.01 ? (["x0"] as const) : []),
       ]);
-    b.box("ceiling", v3(0, H + 0.05, L / 2), v3(hallHalf * 2 + 0.4, 0.1, L));
+    // The hall ceiling stops at the glass fronts (±hallHalf): the room
+    // ceilings start there (no coplanar overlap, G9).
+    b.box("ceiling", v3(0, H + 0.05, L / 2), v3(hallHalf * 2, 0.1, L));
     // Twin recessed LED slots.
     for (const x of [-1.75, 1.75])
       part.fixtures.push(

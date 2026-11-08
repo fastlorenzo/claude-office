@@ -111,6 +111,19 @@ function bayArchitecture(b: ArtBatcher, door: boolean): FixturePoint[] {
   b.box("glass", v3(d - gf / 2, -0.02, 0), v3(gf, 0.04, w));
   b.box("blackMetal", v3(d - gf, -0.01, 0), v3(0.03, 0.02, w));
   b.box("ceiling", v3(d / 2, H + 0.05, 0), v3(d, 0.1, w));
+  // Roof upstands (G14): parapets over the outer wall and the glass front,
+  // with a dark coping (seen from the balconies' height and in fly mode).
+  for (const [xa, xb] of [
+    [-0.1, 0.1],
+    [d, d + OUTER_WALL_T],
+  ]) {
+    b.box("ceiling", v3((xa + xb) / 2, H + 0.25, 0), v3(xb - xa, 0.3, w));
+    b.box(
+      "blackMetal",
+      v3((xa + xb) / 2, H + 0.415, 0),
+      v3(xb - xa + 0.04, 0.03, w),
+    );
+  }
   b.box("shadowGap", v3(d - 0.012, H - 0.003, 0), v3(0.024, 0.006, w));
   // Balcony outside the outer glazing (wall face at d + 0.2): oak deck to
   // the balcony edge + continuous glass balustrade. No underside detail (the

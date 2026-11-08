@@ -94,8 +94,15 @@ export const HALL = {
   WALL_T: 0.3,
   PLINTH_H: 1.2,
   TRUSS_D: 1.6,
-  /** South-wall opening the entrance building fills (|x| ≤ halfW, floor → h). */
-  ENTRANCE_OPENING: { halfW: 13.35, h: 6.25 },
+  /**
+   * South-wall opening the entrance building fills (|x| ≤ halfW, floor → h):
+   * the entrance block's outer side-wall faces (half width + its 0.2 wall)
+   * and the reception ceiling's top (6 + 0.1) — no slit, no slot (G10).
+   */
+  ENTRANCE_OPENING: {
+    halfW: (LAYOUT.HALL_W + 2 * LAYOUT.ROOM_D) / 2 + 0.2,
+    h: LAYOUT.LOBBY_H + 0.1,
+  },
   /** Opening in the north wall the dock fills (half width, height). */
   DOCK_OPENING: { halfW: 16, h: 7 },
   /** Rooflight strips (|x| ranges) over the outer part of every cell. */
@@ -605,9 +612,10 @@ export class FactoryHall {
     const T = HALL.WALL_T;
     const zA = this.zSouth;
     const zB = max.z;
-    // Side walls (inner face at |x| = OX).
+    // Side walls (inner face at |x| = OX); they stop at the north wall's
+    // outer face (zB).
     for (const s of [-1, 1])
-      this.wall(b, "z", s * (OX + T / 2), zA - T, zB + T, fy, RY + 0.15, fy);
+      this.wall(b, "z", s * (OX + T / 2), zA - T, zB, fy, RY + 0.15, fy);
     // South wall: the entrance building (ground lobby + reception gallery)
     // draws the shared wall in |x| ≤ 13.35 up to 6.25 (factory door,
     // reception glazing); the shell closes the rest.
@@ -616,9 +624,11 @@ export class FactoryHall {
     this.wall(b, "x", zs, -OX, -eo.halfW, fy, RY + 0.15, fy);
     this.wall(b, "x", zs, eo.halfW, OX, fy, RY + 0.15, fy);
     this.wall(b, "x", zs, -eo.halfW, eo.halfW, eo.h, RY + 0.15, fy);
-    // North wall: the dock's door wall fills the central opening.
+    // North wall: the dock's door wall fills the central opening. Both
+    // share the plane zB − T … zB (the dock draws its wall at local
+    // −0.3 … 0 from zB), so the inner faces line up (G11).
     const d = HALL.DOCK_OPENING;
-    const zn = zB + T / 2;
+    const zn = zB - T / 2;
     this.wall(b, "x", zn, -OX, -d.halfW, fy, RY + 0.15, fy);
     this.wall(b, "x", zn, d.halfW, OX, fy, RY + 0.15, fy);
     this.wall(b, "x", zn, -d.halfW, d.halfW, fy + d.h, RY + 0.15, fy);
@@ -704,7 +714,7 @@ export class FactoryHall {
     }
     // Profiled deck (galvanised underside) with the rooflight holes.
     const roof = rectMinusHoles(
-      { x0: -OX - T, x1: OX + T, z0: zA - T, z1: zB + T },
+      { x0: -OX - T, x1: OX + T, z0: zA - T, z1: zB },
       sky,
     );
     for (const r of roof)
@@ -980,15 +990,16 @@ export class FactoryHall {
         v3(s * (front + 0.15), (HALL.SOFFIT_TOP + U - 0.3) / 2, (L - 0.2) / 2),
         v3(0.3, HALL.SOFFIT_TOP - U + 0.3, L - 0.2),
       );
-    // Glass strip edge beams + ribs; tower-bay grillage.
+    // Glass strip edge beams (inside the strip's opening, their bottoms
+    // 2 cm below the soffit: no coplanar faces) + ribs; tower-bay grillage.
     for (const s of [-1, 1])
       b.box(
         "steelPainted",
-        v3(s * (gw + 0.08), -0.28, bayZ / 2),
-        v3(0.16, 0.32, bayZ),
+        v3(s * (gw - 0.08), (-0.12 + HALL.SOFFIT_BOT - 0.02) / 2, bayZ / 2),
+        v3(0.16, -0.12 - HALL.SOFFIT_BOT + 0.02, bayZ),
       );
     for (let z = 1.2; z < bayZ - 0.1; z += 1.2)
-      b.box("steelPainted", v3(0, -0.22, z), v3(gw * 2, 0.2, 0.08));
+      b.box("steelPainted", v3(0, -0.22, z), v3(gw * 2 - 0.32, 0.2, 0.08));
     if (L - bayZ > 0.5) {
       for (let z = bayZ; z <= L + 1e-6; z += 1.0)
         b.box(
@@ -1239,6 +1250,29 @@ export class FactoryHall {
       ])
         steelPost(b, this.ctx.colliders, G, X(x), Z(o), fy, y - 0.19);
     }
+  }
+
+  /**
+   * The main line's tail (R14): a drive / tail-pulley housing with a yellow
+   * end-stop where the belt starts (one metre before the first feeder
+   * joins), instead of the belt ending in open air.
+   */
+  private buildMainLineEnd(b: ArtBatcher, fl: FactoryLayout): void {
+    if (!fl.cells.length) return;
+    const fy = fl.floorY;
+    const z0 = Math.min(...fl.cells.map((c) => c.trunk.feederZ)) - 1;
+    const h = 1.0;
+    const d = 0.55;
+    const zc = z0 - 0.06 - d / 2;
+    b.box("steelPainted", v3(0, fy + h / 2, zc), v3(1.3, h, d));
+    b.box("galvanised", v3(0, fy + h - 0.02, zc), v3(1.34, 0.04, d + 0.04));
+    for (const s of [-1, 1])
+      b.box("blackMetal", v3(s * 0.69, fy + 0.62, zc), v3(0.06, 0.3, 0.3));
+    this.paint(b, PAINT.yellow, () =>
+      // End-stop band on the housing's south face.
+      b.box("paint", v3(0, fy + 0.55, zc - d / 2 - 0.01), v3(1.3, 0.25, 0.02)),
+    );
+    this.col(new Vector3(0, fy + h / 2, zc), new Vector3(1.4, h, d + 0.05));
   }
 
   /**
