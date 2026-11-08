@@ -62,6 +62,7 @@ import {
   wallWithOpenings,
 } from "@/engine/world/architecture";
 import { LiftController, type LiftLevel } from "@/engine/world/entranceLift";
+import { forecourtBoxes } from "@/engine/world/forecourtColliders";
 
 export interface EntranceHallContext {
   scene: Scene;
@@ -1106,22 +1107,11 @@ export class EntranceHall {
     place("plant", 8.6, e.rect.z0 + 0.8, 0.4, 1.0, PLANTER_SOIL_Y.planter);
   }
 
-  /** Walkable forecourt (the yard has no colliders) with an invisible fence. */
+  /** Walkable forecourt up to the drawn fence (see forecourtColliders). */
   private buildForecourt(b: ArtBatcher): void {
     void b;
-    const z1 = this.e.rect.z1;
-    const z0 = this.e.rect.z0 - 34;
-    const hx = 34;
-    this.col(
-      new Vector3(0, -0.1, (z0 + z1) / 2),
-      new Vector3(hx * 2, 0.2, z1 - z0),
-    );
-    this.col(new Vector3(0, 1, z0), new Vector3(hx * 2, 2, 0.2));
-    for (const s of [-1, 1])
-      this.col(
-        new Vector3(s * hx, 1, (z0 + z1) / 2),
-        new Vector3(0.2, 2, z1 - z0),
-      );
+    for (const f of forecourtBoxes(this.e))
+      this.col(new Vector3(...f.center), new Vector3(...f.size));
   }
 
   // -------------------------------------------------------------------------

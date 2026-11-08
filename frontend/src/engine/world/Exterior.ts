@@ -34,6 +34,11 @@ import { rng } from "@/engine/art/random";
 import type { Lighting } from "@/engine/fx/Lighting";
 import { LAYOUT } from "@/engine/contracts";
 import { FACTORY } from "@/engine/layout/factoryLayout";
+import { Colliders } from "@/engine/physics/Colliders";
+import {
+  EXTERIOR_PROPS_GROUP,
+  exteriorPropBoxes,
+} from "@/engine/world/forecourtColliders";
 import {
   GROUND_Y,
   planExterior,
@@ -607,6 +612,18 @@ export class Exterior {
     this.fpKey = this.footprintKey();
     const plan = planExterior(fp);
     this.plan = plan;
+    // Cars and trees in the walkable forecourt get collider boxes.
+    const cols = Colliders.of(this.scene);
+    if (cols) {
+      cols.disposeGroup(EXTERIOR_PROPS_GROUP);
+      for (const p of exteriorPropBoxes(plan))
+        cols.addBox(
+          EXTERIOR_PROPS_GROUP,
+          new Vector3(p.x, p.y, p.z),
+          new Vector3(p.sx, p.sy, p.sz),
+          p.yaw,
+        );
+    }
     const ground = newBuf();
     const build = newBuf();
     const props = newBuf();
@@ -1467,6 +1484,7 @@ export class Exterior {
 
   dispose(): void {
     this.disposed = true;
+    Colliders.of(this.scene)?.disposeGroup(EXTERIOR_PROPS_GROUP);
     for (const m of this.near) m.dispose(false, false);
     for (const o of this.owned) o.dispose();
     this.probe?.dispose();
