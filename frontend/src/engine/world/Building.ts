@@ -57,7 +57,6 @@ import {
   rectMinusHoles,
   type PlanRect,
   downlight,
-  drawSpark,
   FONT_STACK,
   glassPartition,
   makeTexture,
@@ -97,6 +96,27 @@ export const SPINE_GLASS_W = 1.6;
 export const TOWER_BAY_D = 4;
 /** Balcony door clear width in the outer glazing. */
 export const BALCONY_DOOR_W = 1.4;
+/** Slab-edge fascia depth under the hall floor edge at empty bays. */
+const SLAB_EDGE_H = 0.4;
+
+/** Contiguous bay runs covered by project rooms, per side. */
+function roomRuns(
+  layout: BuildingLayout,
+): { side: "east" | "west"; b0: number; b1: number }[] {
+  const out: { side: "east" | "west"; b0: number; b1: number }[] = [];
+  for (const side of ["east", "west"] as const) {
+    const spans = layout.projects
+      .filter((p) => p.slot.side === side)
+      .map((p) => [p.slot.bay, p.slot.bay + p.slot.span] as const)
+      .sort((a, b) => a[0] - b[0]);
+    for (const [b0, b1] of spans) {
+      const last = out[out.length - 1];
+      if (last && last.side === side && last.b1 === b0) last.b1 = b1;
+      else out.push({ side, b0, b1 });
+    }
+  }
+  return out;
+}
 
 /** Control-room door LED line (on the bulkhead over the door). */
 const CONTROL_LED_Y = 2.82;
@@ -1006,7 +1026,10 @@ export class Building {
       side: p.slot.side,
       z: p.balcony.door.z,
     }));
-    const key = `${layout.bays}|${layout.sides.join(",")}|${doors
+    const runs = roomRuns(layout);
+    const key = `${layout.bays}|${runs
+      .map((r) => `${r.side}:${r.b0}-${r.b1}`)
+      .join(",")}|${doors
       .map((d) => `${d.side}:${d.z.toFixed(2)}`)
       .sort()
       .join(",")}`;
@@ -1018,18 +1041,20 @@ export class Building {
     const part = emptyPart();
     const b = new ArtBatcher(scene, materials, g, 15);
     const H = LAYOUT.WALL_H;
-    const L = layout.hall.length;
     const outer = layout.hall.width / 2 + LAYOUT.ROOM_D;
     const pitch = LAYOUT.ROOM_W;
     const T = 0.2;
     const half = BALCONY_DOOR_W / 2;
-    for (const sx of [-1, 1]) {
-      const side = sx > 0 ? "east" : "west";
-      if (!layout.sides.includes(side)) continue;
+    // Only where rooms stand: an empty slot has no room box to close.
+    for (const run of runs) {
+      const sx = run.side === "east" ? 1 : -1;
+      const side = run.side;
+      const r0 = run.b0 * pitch;
+      const r1 = run.b1 * pitch;
       const doorZ = doors.filter((d) => d.side === side).map((d) => d.z);
       const wins: Opening[] = [];
       const gaps: Opening[] = [];
-      for (let bay = 0; bay < layout.bays; bay++) {
+      for (let bay = run.b0; bay < run.b1; bay++) {
         const z0 = bay * pitch + 0.12;
         const z1 = (bay + 1) * pitch - 0.12;
         const dz = doorZ.find((z) => z > z0 && z < z1);
@@ -1042,7 +1067,7 @@ export class Building {
         gaps.push({ a0: dz - half, a1: dz + half, y0: 0, y1: DOOR_H });
       }
       const wx = sx * (outer + T / 2);
-      wallWithOpenings(b, null, g, "wall", "z", wx, T, 0, L, H, [
+      wallWithOpenings(b, null, g, "wall", "z", wx, T, r0, r1, H, [
         ...wins,
         ...gaps,
       ]);
@@ -1074,7 +1099,7 @@ export class Building {
         );
       }
       // Colliders: solid except the door gaps (glass blocks, but not sight).
-      let z = 0;
+      let z = r0;
       for (const o of [...gaps].sort((p, q) => p.a0 - q.a0)) {
         if (o.a0 > z)
           colliders.addBox(
@@ -1091,11 +1116,11 @@ export class Building {
         );
         z = o.a1;
       }
-      if (L > z)
+      if (r1 > z)
         colliders.addBox(
           g,
-          new Vector3(wx, H / 2, (z + L) / 2),
-          new Vector3(T, H, L - z),
+          new Vector3(wx, H / 2, (z + r1) / 2),
+          new Vector3(T, H, r1 - z),
           0,
           { seeThrough: true },
         );
@@ -1130,56 +1155,53 @@ export class Building {
     const b = new ArtBatcher(scene, materials, g, 9);
     const H = LAYOUT.WALL_H;
     const hallHalf = LAYOUT.HALL_W / 2;
-    const pitch = LAYOUT.ROOM_W + LAYOUT.ROOM_GAP;
-    const felt = materials.felt("#7F8A80");
-    const signs: { x: number; z: number; yaw: number }[] = [];
+    const pitch = LAYOUT.ROOM_W;
+    const T = 0.2;
     for (const s of slots) {
       const sx = s.side === "east" ? 1 : -1;
       const z0 = s.bay * pitch;
       const len = s.span * pitch;
+      const z1 = z0 + len;
       const zc = z0 + len / 2;
-      // Plaster front closing the free run (+ end returns to the outer wall).
-      b.box("wall", v3(sx * (hallHalf + 0.06), H / 2, zc), v3(0.16, H, len));
-      b.box(
-        "skirting",
-        v3(sx * (hallHalf - 0.025), 0.035, zc),
-        v3(0.01, 0.07, len),
-      );
+      // The spine's own exterior wall: full-height curtain wall per bay
+      // (same rhythm and cladding as the rooms' outer walls), looking down
+      // on the empty cell. No room front, frames or bulkheads here.
+      const wx = sx * (hallHalf + T / 2);
+      const wins: Opening[] = [];
+      for (let bay = s.bay; bay < s.bay + s.span; bay++)
+        wins.push({
+          a0: bay * pitch + 0.12,
+          a1: (bay + 1) * pitch - 0.12,
+          y0: 0.04,
+          y1: H - 0.06,
+        });
+      wallWithOpenings(b, null, g, "wall", "z", wx, T, z0, z1, H, wins);
+      for (const o of wins)
+        windowUnit(b, "z", wx, o, {
+          pitch: 1.2,
+          inward: sx > 0 ? -1 : 1,
+          wallT: T,
+          portals: false,
+        });
       colliders.addBox(
         g,
-        new Vector3(sx * (hallHalf + 0.06), H / 2, zc),
-        new Vector3(0.16, H, len),
+        new Vector3(wx, H / 2, zc),
+        new Vector3(T, H, len),
+        0,
+        { seeThrough: true },
       );
-      // Felt panel cluster framing the "Available" plate (runs ≥ 1 bay).
-      const fw = Math.min(4.1, len - 0.6);
+      // Slab-edge fascia under the wall (finishes the hall floor edge seen
+      // from the factory) + a short soffit return under the floor edge.
       b.box(
-        "shadowGap",
-        v3(sx * (hallHalf - 0.024), 1.5, zc),
-        v3(0.008, 2.3, fw),
+        "wallFeature",
+        v3(sx * (hallHalf + T / 2), -SLAB_EDGE_H / 2, zc),
+        v3(T + 0.02, SLAB_EDGE_H, len),
       );
-      b.slats(
-        felt,
-        zc - fw / 2 + 0.05,
-        zc + fw / 2 - 0.05,
-        0.62,
-        0.016,
-        (a) => ({
-          c: v3(sx * (hallHalf - 0.04), 1.5, a),
-          s: v3(0.03, 2.2, 0.62),
-        }),
-        0.008,
+      b.box(
+        "ceiling",
+        v3(sx * (hallHalf - 0.4), -SLAB_EDGE_H + 0.02, zc),
+        v3(0.8, 0.04, len),
       );
-      b.rbox(
-        "blackMetal",
-        v3(sx * (hallHalf - 0.07), 1.6, zc),
-        v3(0.03, 1.08, 1.08),
-        { r: 0.006 },
-      );
-      signs.push({
-        x: sx * (hallHalf - 0.087),
-        z: zc,
-        yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2,
-      });
       if (len >= 4) {
         const px = sx * (hallHalf - 0.6);
         const pz = zc + Math.min(2.6, len / 2 - 0.6);
@@ -1192,7 +1214,6 @@ export class Building {
         assets.instantiate(
           "plantTall",
           null,
-    const fb = buildFactoryLayout(layout).bounds;
           {
             position: { x: px, y: PLANTER_SOIL_Y.planterTall, z: pz },
             yaw: s.bay,
@@ -1201,21 +1222,9 @@ export class Building {
         );
       }
     }
-    this.finish(part, b.build());
-    if (signs.length) {
-      const tex = makeTexture(scene, "available", 512, 512, (c, w, h) =>
-        drawAvailable(c, w, h),
-      );
-      part.textures.push(tex);
-      for (const s of signs) {
-        const p = texturedPlane(scene, "availableSign", tex, 1.0, 1.0, {
-          emissive: 0.75,
-        });
-        p.position.set(s.x, 1.6, s.z);
-        p.rotation.y = s.yaw;
-        part.meshes.push(p);
-      }
-    }
+    const meshes = b.build({ receiveShadows: true });
+    markExteriorGlass(meshes);
+    this.finish(part, meshes);
     for (const m of part.meshes) {
       m.computeWorldMatrix(true);
       m.freezeWorldMatrix();
@@ -1346,23 +1355,4 @@ function drawLiftBand(
   ctx.fillStyle = "#8E8A84";
   ctx.font = `500 ${Math.round(h * 0.42)}px ${FONT_STACK}`;
   ctx.fillText(`${FLOOR_NO} · SKY LOBBY`, h * 0.4, h * 0.54);
-}
-
-function drawAvailable(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-): void {
-  ctx.fillStyle = "#151618";
-  ctx.fillRect(0, 0, w, h);
-  drawSpark(ctx, w / 2, h * 0.36, h * 0.14, "#D97757");
-  ctx.fillStyle = "#F2EFEA";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `500 ${Math.round(h * 0.11)}px ${FONT_STACK}`;
-  ctx.fillText("Available", w / 2, h * 0.64);
-  ctx.fillStyle = "#8E8A84";
-  ctx.font = `400 ${Math.round(h * 0.05)}px ${FONT_STACK}`;
-  ctx.fillText("Start a Claude Code session", w / 2, h * 0.76);
-  ctx.fillText("to move in", w / 2, h * 0.83);
 }
