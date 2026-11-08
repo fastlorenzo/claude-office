@@ -401,6 +401,23 @@ export class PostFx {
    * Glass panes are transparent but glossy: left in the G-buffer they act as
    * mirrors for SSR (black windows) and darken under SSAO. Opaque only.
    */
+  private leanGBuffer(): void {
+    // Linear depth is read as .r only (SSAO, SSR): one 32-bit channel. Normals
+    // fit half float. Two RGBA32F targets (32 B/px) become R32F + RGBA16F (12 B/px).
+    this.scene.enableGeometryBufferRenderer(1, undefined, {
+      0: {
+        // GeometryBufferRenderer.DEPTH_TEXTURE_TYPE
+        textureType: Constants.TEXTURETYPE_FLOAT,
+        textureFormat: Constants.TEXTUREFORMAT_RED,
+      },
+      1: {
+        // NORMAL_TEXTURE_TYPE
+        textureType: HDR,
+        textureFormat: Constants.TEXTUREFORMAT_RGBA,
+      },
+    });
+  }
+
   private opaqueGBuffer(): void {
     const g = this.scene.geometryBufferRenderer;
     if (g) g.renderTransparentMeshes = false;
@@ -451,6 +468,7 @@ export class PostFx {
         const o = plan.ssao;
         if (!o || !SSAO2RenderingPipeline.IsSupported) return null;
         // Geometry-buffer path: the prepass path produced blotchy AO with effect layers.
+        this.leanGBuffer();
         const ssao = new SSAO2RenderingPipeline(
           "ssao",
           scene,
@@ -477,6 +495,7 @@ export class PostFx {
       case "ssr": {
         const o = plan.ssr;
         if (!o) return null;
+        this.leanGBuffer();
         const ssr = new SSRRenderingPipeline("ssr", scene, [cam], true, HDR);
         if (!ssr.isSupported) {
           ssr.dispose();
