@@ -50,6 +50,7 @@ import type { Lighting } from "@/engine/fx/Lighting";
 import type { PostFx } from "@/engine/fx/PostFx";
 import type { Materials } from "@/engine/materials/Materials";
 import type { Colliders } from "@/engine/physics/Colliders";
+import { addDeckColliders } from "@/engine/world/controlRoomColliders";
 import { ArtBatcher } from "@/engine/art/geometry";
 import { v3 } from "@/engine/util/MeshBatcher";
 import {
@@ -1113,6 +1114,8 @@ export class ControlRoom {
         new Vector3(pw * 2, 1.2, 0.1),
       );
     }
+    // Walkable decks: tier riser + supervisor platform (slabs and ramps).
+    addDeckColliders(colliders, GROUP, p);
 
     const built = b.build({ receiveShadows: true });
     for (const m of built) {
