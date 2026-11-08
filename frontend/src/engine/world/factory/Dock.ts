@@ -1063,9 +1063,11 @@ export class Dock {
         albedo: 0.82,
         grime: true,
         env: 0.45,
-        // Rough enough (> 0.8) to stay out of SSR: glossy walls smeared the
-        // bright door openings into streaks.
-        roughFactor: 1.7,
+        // Constant 0.9 roughness, soft relief: ORM roughness variation let
+        // SSR smear the bright door openings into radial streaks.
+        roughFactor: 0.9,
+        flatRough: true,
+        bumpLevel: 0.3,
       }) ?? mk("dock:matteMat", 0.88, 0.45);
     this.metal.material =
       mats?.forVertexColors("steelPainted", { albedo: 0.9, env: 0.7 }) ??

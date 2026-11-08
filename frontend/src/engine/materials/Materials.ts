@@ -174,6 +174,8 @@ interface SurfaceSpec {
   detailAngle?: number;
   /** Strong grime detail (dirt, scuffs, roughness contrast) instead of wax. */
   grime?: boolean;
+  /** Constant roughness (ignore the ORM green channel). */
+  flatRough?: boolean;
   /** Keep the flat albedo colour (only normal + ORM from the role's set). */
   noAlbedoMap?: boolean;
   /** Procedural normal map instead of the set's (sandwich-panel profile). */
@@ -733,10 +735,13 @@ export class Materials {
       grime?: boolean;
       env?: number;
       roughFactor?: number;
+      /** Constant roughness = roughFactor (no ORM roughness variation). */
+      flatRough?: boolean;
+      bumpLevel?: number;
     } = {},
   ): PBRMaterial {
     const albedo = opts.albedo ?? 0.8;
-    const k = `vc:${key}:${albedo}:${opts.grime ? 1 : 0}:${opts.roughFactor ?? ""}`;
+    const k = `vc:${key}:${albedo}:${JSON.stringify(opts)}`;
     const hit = this.cache.get(k);
     if (hit) return hit;
     const base = SURFACES[key];
@@ -750,6 +755,8 @@ export class Materials {
       tint: undefined,
       env: opts.env ?? base.env,
       roughFactor: opts.roughFactor ?? base.roughFactor,
+      bumpLevel: opts.bumpLevel ?? base.bumpLevel,
+      flatRough: opts.flatRough,
       grime: opts.grime,
     };
     const mat = this.build(k, spec);
@@ -1004,7 +1011,7 @@ export class Materials {
     mat.invertNormalMapY = true;
     mat.metallicTexture = this.tex(asset, "orm", false, scale);
     mat.useAmbientOcclusionFromMetallicTextureRed = true;
-    mat.useRoughnessFromMetallicTextureGreen = true;
+    mat.useRoughnessFromMetallicTextureGreen = !spec.flatRough;
     mat.useMetallnessFromMetallicTextureBlue = true;
     mat.roughness = spec.roughFactor ?? 1;
     mat.metallic = spec.metalFactor ?? spec.metallic ?? 0;

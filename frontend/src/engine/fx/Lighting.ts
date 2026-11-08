@@ -487,19 +487,13 @@ export class Lighting {
     if (!this.sunShadow || this.sunShadow.mapSize !== p.sun) {
       this.sunShadow?.dispose();
       const sg = new ShadowGenerator(p.sun, this.sun, true, undefined, true);
-      if (q === "high" || q === "ultra") {
-        // Rendered once, so PCSS costs only shading: penumbrae widen away
-        // from the mullion / frame that casts them, as real daylight does.
-        sg.useContactHardeningShadow = true;
-        sg.contactHardeningLightSizeUVRatio = 0.012;
-        sg.filteringQuality = ShadowGenerator.QUALITY_HIGH;
-      } else {
-        sg.usePercentageCloserFiltering = true;
-        sg.filteringQuality =
-          q === "low"
-            ? ShadowGenerator.QUALITY_LOW
-            : ShadowGenerator.QUALITY_MEDIUM;
-      }
+      // PCF (not PCSS): contact hardening on this render-once map left the
+      // whole lobby unoccluded under SwiftShader (WS5 L1 shots).
+      sg.usePercentageCloserFiltering = true;
+      sg.filteringQuality =
+        q === "low"
+          ? ShadowGenerator.QUALITY_LOW
+          : ShadowGenerator.QUALITY_HIGH;
       // Closed static geometry: render back faces only into the map, which
       // removes acne / sawtooth bands on thin frames and metal door leaves.
       sg.forceBackFacesOnly = true;
