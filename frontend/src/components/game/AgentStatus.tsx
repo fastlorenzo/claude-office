@@ -1,13 +1,17 @@
 /**
- * AgentStatus - Active agents panel
+ * AgentStatus - the T panel and the 2D sidebar agents panel.
  *
- * Shows detailed agent information including name, state, task, last tool call,
- * and internal game state. Designed for 4 agents visible with scrollbar for more.
+ * Top: the agent tree (main agent at the root, subagents nested under the
+ * agent that spawned them, each with its colour, icon, name and state).
+ * Below: the office characters' game state (desk, task, last tool, phase).
  */
 
 "use client";
 
+import { useState } from "react";
 import { useGameStore, selectAgents } from "@/stores/gameStore";
+import { AgentTree } from "@/components/console/AgentTree";
+import { useSelectedAgents } from "@/components/console/selectedAgents";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -85,6 +89,8 @@ function formatState(state: string): string {
 export function AgentStatus() {
   const { t } = useTranslation();
   const agents = useGameStore(useShallow(selectAgents));
+  const tree = useSelectedAgents();
+  const [picked, setPicked] = useState<string[]>([]);
   const agentArray = Array.from(agents.values());
 
   // Sort by number for consistent ordering
@@ -94,7 +100,7 @@ export function AgentStatus() {
     <div className="flex flex-col bg-slate-950 border border-slate-800 rounded-lg overflow-hidden font-mono text-xs h-full">
       {/* Header */}
       <div className="bg-slate-900 px-3 py-2 border-b border-slate-800 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2 text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+        <div className="flex items-center gap-2 text-slate-300 font-bold uppercase tracking-wider text-xs">
           <Users size={14} className="text-blue-400" />
           {t("agentStatus.title")}
         </div>
@@ -102,14 +108,28 @@ export function AgentStatus() {
           <span className="text-2xl font-bold text-slate-200 tabular-nums">
             {agentArray.length}
           </span>
-          <span className="text-slate-500 text-[10px]">
+          <span className="text-slate-500 text-xs">
             {t("agentStatus.agents", { count: agentArray.length })}
           </span>
         </div>
       </div>
 
-      {/* Agent list - scrollable, fills remaining height */}
+      {/* Agent tree + characters - scrollable, fills remaining height */}
       <div className="flex-grow overflow-y-auto p-2 space-y-2 min-h-0">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 px-1">
+          {t("agentStatus.tree")}
+        </div>
+        <div className="-mx-1">
+          <AgentTree
+            agents={tree}
+            selected={picked}
+            onPick={(id) => setPicked((cur) => (cur[0] === id ? [] : [id]))}
+            showHeader={false}
+          />
+        </div>
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 px-1 pt-1">
+          {t("agentStatus.gameState")}
+        </div>
         {agentArray.length === 0 ? (
           <div className="text-slate-600 italic p-4 text-center">
             {t("agentStatus.noAgents")}
@@ -118,7 +138,11 @@ export function AgentStatus() {
           agentArray.map((agent) => (
             <div
               key={agent.id}
-              className="bg-slate-900/60 border border-slate-800 rounded-md overflow-hidden hover:border-slate-700 transition-colors"
+              className={`bg-slate-900/60 border rounded-md overflow-hidden hover:border-slate-700 transition-colors ${
+                picked.includes(agent.id)
+                  ? "border-sky-400/50"
+                  : "border-slate-800"
+              }`}
             >
               {/* Agent header with name and color */}
               <div
@@ -129,12 +153,12 @@ export function AgentStatus() {
                   <span className="font-bold text-slate-100 truncate">
                     {agent.name || `${t("agentStatus.agent")} #${agent.number}`}
                   </span>
-                  <span className="text-slate-600 text-[9px] flex-shrink-0">
+                  <span className="text-slate-600 text-xs flex-shrink-0">
                     #{agent.id.slice(0, 7)}
                   </span>
                 </div>
                 {agent.desk && (
-                  <span className="text-slate-500 text-[10px] flex items-center gap-1 flex-shrink-0">
+                  <span className="text-slate-500 text-xs flex items-center gap-1 flex-shrink-0">
                     <MapPin size={10} />
                     {t("agentStatus.desk")} {agent.desk}
                   </span>
@@ -149,7 +173,7 @@ export function AgentStatus() {
                     size={11}
                     className="text-slate-500 mt-0.5 flex-shrink-0"
                   />
-                  <div className="text-slate-300 text-[11px] leading-tight min-w-0">
+                  <div className="text-slate-300 text-xs leading-tight min-w-0">
                     {agent.currentTask ? (
                       <span className="line-clamp-2">{agent.currentTask}</span>
                     ) : (
@@ -166,7 +190,7 @@ export function AgentStatus() {
                     size={11}
                     className="text-slate-500 mt-0.5 flex-shrink-0"
                   />
-                  <div className="text-[11px] leading-tight min-w-0">
+                  <div className="text-xs leading-tight min-w-0">
                     {agent.bubble.content ? (
                       <span className="text-blue-400 line-clamp-2">
                         <span className="mr-1">
@@ -188,7 +212,7 @@ export function AgentStatus() {
                   <div className="flex items-center gap-1">
                     <Activity size={10} className="text-slate-500" />
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-semibold border ${getBackendStateColor(agent.backendState)}`}
+                      className={`px-1.5 py-0.5 rounded text-xs uppercase font-semibold border ${getBackendStateColor(agent.backendState)}`}
                     >
                       {formatState(agent.backendState)}
                     </span>
@@ -198,7 +222,7 @@ export function AgentStatus() {
                   <div className="flex items-center gap-1">
                     <Layers size={10} className="text-slate-500" />
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-medium border ${getPhaseColor(agent.phase)}`}
+                      className={`px-1.5 py-0.5 rounded text-xs font-medium border ${getPhaseColor(agent.phase)}`}
                     >
                       {formatPhase(agent.phase)}
                     </span>
@@ -207,7 +231,7 @@ export function AgentStatus() {
 
                 {/* Queue info (if applicable) */}
                 {agent.queueType && agent.queueIndex >= 0 && (
-                  <div className="text-[9px] text-slate-500 pt-0.5">
+                  <div className="text-xs text-slate-500 pt-0.5">
                     {t("agentStatus.inQueue", {
                       queueType: agent.queueType,
                       position: agent.queueIndex + 1,
