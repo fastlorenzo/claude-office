@@ -19,6 +19,7 @@
  *     that visible set changes.
  */
 import {
+  BoundingInfo,
   Color3,
   Constants,
   CreateBox,
@@ -564,18 +565,22 @@ export class Workpieces {
    * Thin-instance picking: F on a pallet / body / status band resolves the
    * piece id through `fn` (null = not interactable); `null` turns it off.
    * Instance order mirrors `packPieces` (pallet / band = input order, bodies
-   * = pieces of that variant, drafts excluded).
+   * = pieces of that variant, drafts excluded). The pool meshes keep their
+   * base geometry's bounds (no per-frame sync), which Babylon tests before
+   * any instance: `bounds` (world AABB of where pieces can be) makes them
+   * pickable.
    */
-  setPicker(fn: ((id: string) => InteractionTarget | null) | null): void {
+  setPicker(
+    fn: ((id: string) => InteractionTarget | null) | null,
+    bounds?: { min: Vector3; max: Vector3 },
+  ): void {
     const parts: [Mesh, (i: number) => string | undefined][] = [
       [this.pallet, (i) => this.resolved[i]?.id],
       [this.band, (i) => this.resolved[i]?.id],
-      ...this.bodies.map(
-        (m, v): [Mesh, (i: number) => string | undefined] => [
-          m,
-          (i) => this.nthId((r) => !r.draft && r.variant === v, i),
-        ],
-      ),
+      ...this.bodies.map((m, v): [Mesh, (i: number) => string | undefined] => [
+        m,
+        (i) => this.nthId((r) => !r.draft && r.variant === v, i),
+      ]),
     ];
     for (const [mesh, idAt] of parts) {
       if (!fn) {
@@ -583,6 +588,8 @@ export class Workpieces {
         mesh.isPickable = false;
         continue;
       }
+      if (bounds)
+        mesh.setBoundingInfo(new BoundingInfo(bounds.min, bounds.max));
       registerThinResolver(mesh, (_m, i) => {
         const id = idAt(i);
         return id ? fn(id) : null;

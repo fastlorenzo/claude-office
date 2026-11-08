@@ -19,7 +19,7 @@
  * F on a workpiece / station / lane belt / trunk / main line / dock resolves
  * through thin-instance resolvers (lane plates + boards come from `Cells`).
  */
-import type { Scene, Vector3 } from "@/engine/babylon";
+import { BoundingInfo, Vector3, type Scene } from "@/engine/babylon";
 import type {
   BrandingOptions,
   BuildingLayout,
@@ -241,6 +241,7 @@ export class FactoryLines implements FactoryPart {
     if (!this.conveyors) return;
     this.conveyors.setPaths(conveyorPaths(layout));
     this.placeDock();
+    this.applyPickBounds();
     this.applyModel();
   }
 
@@ -324,7 +325,6 @@ export class FactoryLines implements FactoryPart {
     this.stations = new Stations(scene);
     this.workpieces = new Workpieces(scene);
     this.cells = new Cells(scene);
-    this.workpieces.setPicker((id) => this.pieceTarget(id));
     const belt = this.conveyors.meshes()[0];
     registerThinResolver(belt, (_m, i) => this.beltTarget(i), { range: 4 });
     this.stations.meshes().forEach((mesh, p) => {
@@ -337,6 +337,7 @@ export class FactoryLines implements FactoryPart {
       this.conveyors.setPaths(conveyorPaths(this.layout));
       this.placeDock();
     }
+    this.applyPickBounds();
     this.applyModel();
     // Daylight (static) shadows only: the belts, station housings and cell
     // furniture never move; no cascade casters (draw budget).
@@ -345,6 +346,25 @@ export class FactoryLines implements FactoryPart {
       this.stations.casterMeshes()[0],
       ...this.cells.casterMeshes(),
     ]);
+  }
+
+  /**
+   * The pools keep their base geometry's bounds (no per-frame sync) and
+   * Babylon tests the mesh bounds before any thin instance: give every
+   * pickable pool the factory floor's box so F reaches its instances.
+   */
+  private applyPickBounds(): void {
+    const fl = this.layout;
+    if (!fl || !this.workpieces) return;
+    const min = new Vector3(fl.bounds.min.x, fl.floorY - 1, fl.bounds.min.z);
+    const max = new Vector3(fl.bounds.max.x, fl.floorY + 9, fl.bounds.max.z);
+    this.workpieces.setPicker((id) => this.pieceTarget(id), { min, max });
+    const meshes = [
+      this.conveyors?.meshes()[0],
+      ...(this.stations?.meshes() ?? []),
+      ...(this.cells?.meshes() ?? []),
+    ];
+    for (const m of meshes) m?.setBoundingInfo(new BoundingInfo(min, max));
   }
 
   private placeDock(): void {
