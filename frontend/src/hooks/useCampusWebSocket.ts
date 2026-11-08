@@ -5,9 +5,15 @@ import { useCallback, useEffect, useRef } from "react";
 import { useCampusStore } from "@/stores/campusStore";
 import type {
   CampusProject,
+  CampusRevs,
   CampusSession,
   CampusStats,
 } from "@/engine/contracts";
+
+/** Origin refused by the backend: retrying cannot help (D9). */
+export const CLOSE_ORIGIN_REFUSED = 4003;
+/** Backend client cap (8 campus watchers) reached: keep retrying, tell the user. */
+export const CLOSE_TOO_MANY = 4013;
 
 /**
  * Connects to the global `/ws/campus` feed that carries one boss snapshot per
@@ -34,9 +40,8 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
     enabledRef.current = enabled;
   }, [enabled]);
 
-  const setSessions = useCampusStore((s) => s.setSessions);
-  const setStats = useCampusStore((s) => s.setStats);
-  const setProjects = useCampusStore((s) => s.setProjects);
+  const acceptFrame = useCampusStore((s) => s.acceptFrame);
+  const setCloseCode = useCampusStore((s) => s.setCloseCode);
   const setConnected = useCampusStore((s) => s.setConnected);
 
   const connect = useCallback(() => {
@@ -73,15 +78,22 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
             sessions?: CampusSession[];
             stats?: CampusStats | null;
             projects?: CampusProject[] | null;
+            revs?: CampusRevs | null;
+            sentAt?: number | null;
           };
         };
         if (msg.type === "state_update") {
           // Validate the shape before applying so a malformed payload can't
           // throw at render time.
           if (Array.isArray(msg.state?.sessions)) {
-            setSessions(msg.state.sessions);
-            setStats(msg.state.stats ?? null);
-            setProjects(msg.state.projects ?? null);
+            acceptFrame({
+              sessions: msg.state.sessions,
+              stats: msg.state.stats ?? null,
+              projects: msg.state.projects ?? null,
+              revs: msg.state.revs ?? null,
+              sentAt:
+                typeof msg.state.sentAt === "number" ? msg.state.sentAt : null,
+            });
           } else {
             console.warn("[campus WS] ignoring malformed state_update frame");
           }
@@ -96,16 +108,23 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
       console.warn("[campus WS] connection error — will retry");
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event: { code?: number }) => {
       if (connectionIdRef.current !== thisConnectionId) return;
       setConnected(false);
+      const code = typeof event?.code === "number" ? event.code : null;
+      setCloseCode(code);
+      // The origin check will fail again the same way: stop, the banner says why.
+      if (code === CLOSE_ORIGIN_REFUSED) return;
       if (enabledRef.current) {
         // Exponential backoff with random jitter (0–500ms) so many clients
         // don't reconnect in lockstep after a backend restart.
-        const baseDelay = Math.min(
+        let baseDelay = Math.min(
           1000 * Math.pow(2, retryCountRef.current),
           30000,
         );
+        // The backend accepts then closes when its client cap is hit, so the
+        // open resets the backoff: back off explicitly instead (D9).
+        if (code === CLOSE_TOO_MANY) baseDelay = Math.max(baseDelay, 10000);
         const delay = baseDelay + Math.random() * 500;
         retryCountRef.current++;
         reconnectTimeoutRef.current = setTimeout(() => {
@@ -114,7 +133,7 @@ export function useCampusWebSocket({ enabled }: { enabled: boolean }): void {
         }, delay);
       }
     };
-  }, [setConnected, setSessions, setStats, setProjects]);
+  }, [setConnected, setCloseCode, acceptFrame]);
 
   // Expose the latest connect to the reconnect timer.
   useEffect(() => {

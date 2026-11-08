@@ -18,7 +18,9 @@ import {
   LocationChip,
   StatsChip,
   EnterBanner,
+  ConnectionBanner,
 } from "./hud/Overlays";
+import { useCampusConnection } from "./hud/connectionStatus";
 import { HudPanelFrame } from "./hud/HudPanel";
 import { GraphicsPanel } from "./hud/GraphicsPanel";
 import { HelpPanel } from "./hud/HelpPanel";
@@ -147,7 +149,7 @@ function PanelBody({
   }
 }
 
-export function WorldHud(props: WorldHudProps): ReactNode {
+function WorldHudBody(props: WorldHudProps): ReactNode {
   useHudKeys();
   const portrait = usePortrait();
   const panels = useWorldUiStore(selectPanels);
@@ -203,5 +205,22 @@ export function WorldHud(props: WorldHudProps): ReactNode {
 
       <OpsOverlay sessions={props.sessions} />
     </div>
+  );
+}
+
+/** The HUD, dimmed with a banner while the campus feed is down or frozen (D2). */
+export function WorldHud(props: WorldHudProps): ReactNode {
+  const conn = useCampusConnection();
+  return (
+    <>
+      <ConnectionBanner status={conn} />
+      <div
+        className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${
+          conn.kind === "ok" ? "" : "opacity-60"
+        }`}
+      >
+        <WorldHudBody {...props} />
+      </div>
+    </>
   );
 }

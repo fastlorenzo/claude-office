@@ -246,7 +246,13 @@ const RANK: Record<RoomStatus, number> = {
   ended: 3,
 };
 
-const INACTIVE_AGENT = new Set(["completed", "leaving"]);
+/** Same set as the backend's `_INACTIVE_AGENT_STATES` (campus.py) — keep in sync. */
+const INACTIVE_AGENT = new Set([
+  "completed",
+  "leaving",
+  "reporting_done",
+  "in_elevator",
+]);
 
 function projectOf(cs: CampusSession, labels?: ReadonlyMap<string, string>) {
   const p = cs.project?.trim();
@@ -666,8 +672,11 @@ export function buildOpsModel(
   };
   for (const r of rows) {
     counts[r.status] += 1;
-    if (r.status !== "ended") counts.live += 1;
-    counts.subagents += r.subagents;
+    if (r.status !== "ended") {
+      counts.live += 1;
+      // Ended sessions do not count (the backend total skips them too).
+      counts.subagents += r.subagents;
+    }
   }
   if (st && num(st.activeSubagents) != null)
     counts.subagents = st.activeSubagents;

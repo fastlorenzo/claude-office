@@ -5,7 +5,7 @@
  * See docs/design/software-factory.md (section 2 mapping table, section 6).
  *
  * Placement rules, in priority order for one PR:
- *   merged -> trunk (age fade) | closed -> scrap (age fade) | stale (> 7 d) -> holding
+ *   merged -> trunk (age fade) | closed -> scrap (age fade) | stale (backend `pr.stale`, else > 14 d) -> holding
  *   | draft -> rack | any check failure or changes_requested -> rework
  *   | conflicting -> gate (stuck, "MISFIT")
  *   | first station whose check is not yet green -> station
@@ -28,7 +28,11 @@ import { CHECK_COLORS } from "@/engine/contracts";
 // Thresholds (all tunable here)
 // ---------------------------------------------------------------------------
 
-export const STALE_PR_MS = 7 * 24 * 3600 * 1000;
+/**
+ * Fallback only: the backend flags `pr.stale` against `CI_STALE_PR_DAYS`
+ * (default 14), and that flag wins whenever the feed carries it (D4).
+ */
+export const STALE_PR_MS = 14 * 24 * 3600 * 1000;
 /** Merged / closed pieces linger this long (fading) before they vanish. */
 export const RECENT_WINDOW_MS = 24 * 3600 * 1000;
 export const MAX_STATIONS = 6;
@@ -228,7 +232,8 @@ export function classifyCheckKind(name: string): CheckKind {
   return "other";
 }
 
-const STATE_RANK: Record<CheckState, number> = {
+/** The one worst-first ranking of check states (higher is worse). */
+export const STATE_RANK: Record<CheckState, number> = {
   failure: 5,
   running: 4,
   queued: 3,
@@ -421,8 +426,12 @@ function placeOpen(
   nowMs: number,
 ): Placement {
   const updated = parseMs(pr.updatedAt);
-  if (updated !== null && nowMs - updated > STALE_PR_MS) {
-    const days = Math.floor((nowMs - updated) / 86400000);
+  const stale = pr.stale ?? (updated !== null && nowMs - updated > STALE_PR_MS);
+  if (stale) {
+    const days =
+      updated !== null
+        ? Math.max(0, Math.floor((nowMs - updated) / 86400000))
+        : 0;
     return {
       position: { segment: "holding", t: 0 },
       stamp: `AGING ${days}d`,

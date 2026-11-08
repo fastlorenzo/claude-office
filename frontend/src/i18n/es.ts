@@ -795,6 +795,18 @@ const es: Record<TranslationKey, string> = {
   "factory.line.noPipelines": "Sin pipelines recientes.",
   "factory.line.throughput": "Fusionados en 24 h",
   "factory.line.stale": "Mostrando los últimos datos válidos",
+  "conn.reconnecting": "Reconectando — datos de {time}",
+  "conn.connecting": "Conectando con el backend…",
+  "conn.stalled": "Sin actualizaciones — datos de {time}",
+  "conn.tooMany":
+    "Hay demasiados visores conectados al backend (límite 8). Reintentando…",
+  "conn.origin":
+    "El backend rechazó el origen de esta página. Revisa BACKEND_CORS_ORIGINS y recarga.",
+  "factory.line.demo": "DEMO",
+  "factory.line.demoHint": "Datos de demostración, no tus repositorios",
+  "factory.line.ciError": "Error de CI",
+  "factory.line.fetched": "Obtenido",
+  "factory.line.openPr": "Abrir PR #{n} en GitHub",
   "factory.deploy.releases": "Releases",
   "factory.deploy.noReleases": "Aún no hay releases.",
   "factory.deploy.pipelines": "Pipelines de deploy",

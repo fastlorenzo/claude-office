@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useMemo, type ReactNode } from "react";
+import { ExternalLink } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n/en";
 import { lineView, type LineView, type PipelineRow } from "./factoryPanelModel";
@@ -85,8 +86,26 @@ export const LinePanelView = memo(function LinePanelView({
           <Chip color="#ef4444">
             {t("factory.line.failing")} {v.failing}
           </Chip>
+          {v.demo && (
+            <span title={t("factory.line.demoHint")}>
+              <Chip color="#a855f7">{t("factory.line.demo")}</Chip>
+            </span>
+          )}
           {v.stale && <Chip color="#f59e0b">{t("factory.line.stale")}</Chip>}
+          {v.fetched && (
+            <Chip color="#64748b">
+              {t("factory.line.fetched")} <AgoText ago={v.fetched} />
+            </Chip>
+          )}
         </div>
+        {v.ciError && (
+          <p
+            className="mt-2 break-words rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 font-mono text-[11px] text-amber-300"
+            title={v.ciError}
+          >
+            {t("factory.line.ciError")}: {v.ciError}
+          </p>
+        )}
       </div>
       <Section title={`${t("factory.line.prs")} (${v.prs.length})`}>
         {v.prs.length === 0 ? (
@@ -115,6 +134,18 @@ export const LinePanelView = memo(function LinePanelView({
                     {p.stamp}
                   </span>
                 )}
+                {p.url && /^https?:\/\//i.test(p.url) && (
+                  <a
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={t("factory.line.openPr", { n: p.number })}
+                    title={t("factory.line.openPr", { n: p.number })}
+                    className="pointer-events-auto shrink-0 text-slate-500 transition-colors hover:text-white"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </li>
             ))}
           </ul>
@@ -137,7 +168,8 @@ export function LinePanel(): ReactNode {
   const { t } = useTranslation();
   const { data } = useFactoryData();
   const view = useMemo(
-    () => (data ? lineView(data.project, data.line, data.now) : null),
+    () =>
+      data ? lineView(data.project, data.line, data.now, data.demo) : null,
     [data],
   );
   if (!view) return <Empty>{t("factory.none")}</Empty>;

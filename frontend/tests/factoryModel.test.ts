@@ -319,16 +319,16 @@ describe("workpiece placement", () => {
     expect(w.position.segment).toBe("scrap");
     expect(w.fade).toBeLessThan(1);
   });
-  it("stale > 7 d -> holding with AGING stamp", () => {
+  it("stale > 14 d -> holding with AGING stamp", () => {
     const w = piece(
       project([pr(1, GREEN, { updatedAt: ago(STALE_PR_MS + 5 * D) })]),
       1,
     );
     expect(w.position.segment).toBe("holding");
-    expect(w.stamp).toBe("AGING 12d");
+    expect(w.stamp).toBe("AGING 19d");
     expect(w.stale).toBe(true);
   });
-  it("just under 7 d is not stale", () => {
+  it("just under 14 d is not stale", () => {
     const w = piece(
       project([pr(1, GREEN, { updatedAt: ago(STALE_PR_MS - H) })]),
       1,
@@ -688,7 +688,7 @@ describe("lanes", () => {
         pr(1, [], { draft: true }),
         pr(2, GREEN, { state: "merged", mergedAt: ago(H) }),
         pr(3, GREEN, { state: "closed", closedAt: ago(H) }),
-        pr(4, RUN, { updatedAt: ago(8 * D) }),
+        pr(4, RUN, { updatedAt: ago(15 * D) }),
         pr(5, RUN),
       ],
       undefined,

@@ -20,6 +20,7 @@ import {
   type CheckState,
   type RoomStatus,
 } from "../contracts";
+import { worseState } from "./factoryModel";
 import { roomStatus } from "./status";
 import { sessionPhase } from "./sessionInfo";
 
@@ -129,15 +130,6 @@ function nameOf(cs: CampusSession, labels?: ReadonlyMap<string, string>) {
   );
 }
 
-const CI_RANK: Record<CheckState, number> = {
-  failure: 0,
-  running: 1,
-  queued: 2,
-  success: 3,
-  cancelled: 4,
-  none: 5,
-};
-
 function rollupCi(p: CampusProject): { ci: CheckState | null; prs: number } {
   const states: CheckState[] = [];
   let prs = 0;
@@ -146,14 +138,13 @@ function rollupCi(p: CampusProject): { ci: CheckState | null; prs: number } {
     prs += 1;
     if (pr.checks?.state) states.push(pr.checks.state);
   }
-  const latest = (p.pipelines ?? [])[0];
-  if (latest?.state) states.push(latest.state);
+  // Trunk health: the backend's rolled-up default-branch state, else the
+  // newest run (same source the factory line uses).
+  const trunk = p.mainHealth ?? (p.pipelines ?? [])[0]?.state;
+  if (trunk) states.push(trunk);
   const real = states.filter((s) => s !== "none");
   if (!real.length) return { ci: null, prs };
-  return {
-    ci: real.sort((a, b) => CI_RANK[a] - CI_RANK[b])[0],
-    prs,
-  };
+  return { ci: real.reduce<CheckState>(worseState, "none"), prs };
 }
 
 /**

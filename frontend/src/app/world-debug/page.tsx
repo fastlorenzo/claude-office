@@ -270,8 +270,13 @@ export default function WorldDebugPage() {
           p.shot ? (p.t ?? 20000) : Date.now() - t0 + 20000,
         );
         if (live) {
-          useCampusStore.getState().setSessions(live.campus);
-          useCampusStore.getState().setProjects(live.projects);
+          useCampusStore.getState().acceptFrame({
+            sessions: live.campus,
+            stats: live.stats,
+            projects: live.projects,
+            revs: live.revs,
+            sentAt: live.sentAt,
+          });
           world?.sync({
             campus: live.campus,
             sessions: live.sessions,

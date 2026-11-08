@@ -780,6 +780,18 @@ const en = {
   "factory.line.noPipelines": "No recent pipelines.",
   "factory.line.throughput": "Merged in 24 h",
   "factory.line.stale": "Showing last-good data",
+  "conn.reconnecting": "Reconnecting — data from {time}",
+  "conn.connecting": "Connecting to the backend…",
+  "conn.stalled": "No updates — data from {time}",
+  "conn.tooMany":
+    "Too many viewers are connected to the backend (limit 8). Retrying…",
+  "conn.origin":
+    "The backend refused this page's origin. Check BACKEND_CORS_ORIGINS and reload.",
+  "factory.line.demo": "DEMO",
+  "factory.line.demoHint": "Demo data, not your repositories",
+  "factory.line.ciError": "CI error",
+  "factory.line.fetched": "Fetched",
+  "factory.line.openPr": "Open PR #{n} on GitHub",
   "factory.deploy.releases": "Releases",
   "factory.deploy.noReleases": "No releases yet.",
   "factory.deploy.pipelines": "Deploy pipelines",

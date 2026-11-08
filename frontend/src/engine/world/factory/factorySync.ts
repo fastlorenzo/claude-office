@@ -6,16 +6,18 @@
  *
  * Data source:
  *   - real `CampusProject[]` from the backend feed (PRs, checks, releases…);
- *   - demo projects (`demoFactory.ts`) only when asked for (world-debug
- *     `?demoFactory=1`) or when the feed carries no project data at all. The
- *     demo templates are re-keyed onto the cells that exist (one per project
- *     room), snapshotted once per cell set and advanced with `demoFactoryTick`.
+ *   - demo projects (`demoFactory.ts`) only when explicitly asked for
+ *     (`demo: true`, world-debug `?demoFactory=1`), or `projects === undefined`
+ *     with the dev fallback on. An empty / null feed is REAL data: it renders
+ *     empty cells, never demo PRs (D1). The demo templates are re-keyed onto
+ *     the cells that exist (one per project room), snapshotted once per cell set and advanced with `demoFactoryTick`.
  */
 import type { CampusProject, CampusSession } from "@/engine/contracts";
 import {
   demoFactoryProjects,
   demoFactoryTick,
 } from "@/engine/demo/demoFactory";
+import { publishFactoryLive } from "@/engine/logic/factoryLive";
 import {
   buildFactoryModel,
   factoryKey,
@@ -32,6 +34,8 @@ export interface FactorySyncInput {
   cellIds: readonly string[];
   /** Force demo data (world-debug `?demoFactory=1`). */
   demo?: boolean;
+  /** Dev only: use demo data when `projects` is `undefined` (feed not wired). */
+  devFallback?: boolean;
 }
 
 export interface FactorySyncStats {
@@ -54,13 +58,6 @@ export interface FactorySyncResult {
   projects: readonly CampusProject[];
 }
 
-/** True when the feed has no project data at all (demo fallback). */
-export function noProjectData(
-  projects: readonly CampusProject[] | null | undefined,
-): boolean {
-  return !projects || projects.length === 0;
-}
-
 /**
  * Demo templates re-keyed onto the given project ids (cycled when there are
  * more cells than templates). Ids stay unique, so pieces stay unique too.
@@ -76,12 +73,15 @@ export function rekeyDemo(
   });
 }
 
+const EMPTY: readonly CampusProject[] = [];
+
 export class FactorySync {
   private prev: FactoryModel | null = null;
   private key: string | null = null;
   private demoBase: CampusProject[] = [];
   private demoSig = "";
   private lastProjects: readonly CampusProject[] = [];
+  private published: readonly CampusProject[] | null = null;
   readonly stats: FactorySyncStats = {
     builds: 0,
     pushes: 0,
@@ -103,10 +103,12 @@ export class FactorySync {
   }
 
   update(input: FactorySyncInput): FactorySyncResult {
-    const demo = !!input.demo || noProjectData(input.projects);
+    const demo =
+      input.demo === true ||
+      (input.projects === undefined && input.devFallback === true);
     const projects = demo
       ? this.demoProjects(input.cellIds, input.campus, input.nowMs)
-      : (input.projects ?? []);
+      : (input.projects ?? EMPTY);
     this.lastProjects = projects;
     const model = buildFactoryModel(projects, input.campus, input.nowMs, {
       lanesFor: input.lanesFor,
@@ -116,6 +118,11 @@ export class FactorySync {
     this.stats.builds++;
     this.stats.demo = demo;
     const key = factoryKey(model);
+    // Publish for the HUD only when something it shows can have changed.
+    if (key !== this.key || projects !== this.published) {
+      this.published = projects;
+      publishFactoryLive({ model, projects, demo });
+    }
     if (key === this.key) {
       this.stats.skips++;
       return { model: null, projects };

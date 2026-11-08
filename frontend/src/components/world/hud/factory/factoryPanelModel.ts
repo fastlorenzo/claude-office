@@ -94,14 +94,19 @@ export function findProject(
   return (projects ?? []).find((p) => p.id === projectId);
 }
 
-/** Builds only this project's line (cheap: one project, memoised by the caller). */
+/**
+ * Fallback line builder for when the 3D scene has published no model
+ * (`engine/logic/factoryLive`; the panels read that first, D3). Pass the cell's
+ * `lanesFor` and the previous line model to reproduce the 3D lanes/queue.
+ */
 export function lineFor(
   project: CampusProject | undefined,
   sessions: readonly CampusSession[],
   nowMs: number,
+  opts?: Parameters<typeof buildFactoryModel>[3],
 ): LineModel | null {
   if (!project) return null;
-  return buildFactoryModel([project], sessions, nowMs).lines[0] ?? null;
+  return buildFactoryModel([project], sessions, nowMs, opts).lines[0] ?? null;
 }
 
 export function pieceFor(
@@ -367,6 +372,7 @@ export interface LinePrRow {
   state: CheckState;
   stamp: string | null;
   prState: PullRequestInfo["state"];
+  url: string | null;
 }
 
 export interface LineView {
@@ -383,6 +389,12 @@ export interface LineView {
   failing: number;
   merged24h: number;
   stale: boolean;
+  /** Last CI fetch error (data shown is last-good), when any. */
+  ciError: string | null;
+  /** Age of the last successful CI fetch. */
+  fetched: Ago | null;
+  /** Rendered from demo data (not the user's repositories). */
+  demo: boolean;
   prs: LinePrRow[];
   pipelines: PipelineRow[];
 }
@@ -391,6 +403,7 @@ export function lineView(
   project: CampusProject,
   line: LineModel,
   nowMs: number,
+  demo = false,
 ): LineView {
   const prs: LinePrRow[] = [];
   for (const w of line.workpieces) {
@@ -405,6 +418,7 @@ export function lineView(
       state: pr?.checks.state ?? "none",
       stamp: w.stamp,
       prState: pr?.state ?? "open",
+      url: pr?.url ?? w.url ?? null,
     });
   }
   // On a lane (by lane number) -> queued (by place) -> everything else.
@@ -429,6 +443,9 @@ export function lineView(
     merged24h: (project.pullRequests ?? []).filter((p) => p.state === "merged")
       .length,
     stale: line.stale,
+    ciError: line.ciError,
+    fetched: agoParts(project.fetchedAt, nowMs),
+    demo,
     prs,
     pipelines: pipelineRows(project.pipelines, nowMs, ["ci", "other"]).slice(
       0,

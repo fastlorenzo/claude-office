@@ -13,6 +13,7 @@ import { getWorld } from "../worldRef";
 import { GLASS, LABEL } from "./glass";
 import { Keycap } from "./Keycap";
 import { HINT_ORDER, PANELS } from "./panels";
+import type { ConnectionStatus } from "./connectionStatus";
 
 // ============================================================================
 // CROSSHAIR
@@ -316,6 +317,48 @@ export function EnterBanner(): ReactNode {
       className={`pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 animate-[hud-sheet-up_200ms_ease-out] rounded-2xl px-5 py-2.5 text-sm font-semibold text-white ${GLASS}`}
     >
       {banner.text}
+    </div>
+  );
+}
+
+// ============================================================================
+// CONNECTION BANNER (top-centre; the feed is down or frozen)
+// ============================================================================
+
+function clock(ms: number | null): string {
+  return ms === null
+    ? "—"
+    : new Date(ms).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+}
+
+export function ConnectionBanner({
+  status,
+}: {
+  status: ConnectionStatus;
+}): ReactNode {
+  const { t } = useTranslation();
+  if (status.kind === "ok") return null;
+  const time = clock(status.since);
+  const text =
+    status.kind === "reconnecting"
+      ? t("conn.reconnecting", { time })
+      : status.kind === "stalled"
+        ? t("conn.stalled", { time })
+        : status.kind === "tooMany"
+          ? t("conn.tooMany")
+          : status.kind === "origin"
+            ? t("conn.origin")
+            : t("conn.connecting");
+  return (
+    <div
+      role="alert"
+      className={`pointer-events-none absolute left-1/2 top-3 z-50 max-w-[calc(100%-24px)] -translate-x-1/2 rounded-2xl border border-amber-400/50 px-5 py-2.5 text-center text-sm font-semibold text-amber-200 ${GLASS}`}
+    >
+      {text}
     </div>
   );
 }

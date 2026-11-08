@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { CampusProject } from "@/engine/contracts";
+import {
+  getFactoryLive,
+  liveLine,
+  subscribeFactoryLive,
+} from "@/engine/logic/factoryLive";
 import type { LineModel } from "@/engine/logic/factoryModel";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
@@ -21,30 +26,44 @@ export interface FactoryData {
   project: CampusProject;
   line: LineModel;
   now: number;
+  /** The scene is showing demo data (not the user's repositories). */
+  demo: boolean;
 }
 
 /**
- * Live data for the open factory target: the project is selected by id from
- * campusStore (the store bails on identical frames, so this only changes when
- * the project does) and the single-line model is memoised on it.
+ * Live data for the open factory target. The line comes from the model the 3D
+ * scene built (`factoryLive`: same lanes, queue and demo data as what is on
+ * screen, D3). Without a published model (no world mounted) it falls back to
+ * campusStore + a single-project build.
  */
 export function useFactoryData(): {
   target: ReturnType<typeof useWorldUiStore.getState>["factoryTarget"];
   data: FactoryData | null;
 } {
   const target = useWorldUiStore((s) => s.factoryTarget);
-  const project = useCampusStore((s) =>
+  const storeProject = useCampusStore((s) =>
     findProject(s.projects, target?.projectId),
   );
   const sessions = useCampusStore((s) => s.sessions);
+  const snap = useSyncExternalStore(
+    subscribeFactoryLive,
+    getFactoryLive,
+    () => null,
+  );
   const now = useNow();
-  const line = useMemo(
-    () => lineFor(project, sessions, now),
-    [project, sessions, now],
+  const live = useMemo(
+    () => liveLine(snap, target?.projectId),
+    [snap, target?.projectId],
   );
-  const data = useMemo(
-    () => (project && line ? { project, line, now } : null),
-    [project, line, now],
+  const fallback = useMemo(
+    () => (live ? null : lineFor(storeProject, sessions, now)),
+    [live, storeProject, sessions, now],
   );
+  const data = useMemo(() => {
+    if (live) return { ...live, now, demo: snap?.demo ?? false };
+    return storeProject && fallback
+      ? { project: storeProject, line: fallback, now, demo: false }
+      : null;
+  }, [live, snap, storeProject, fallback, now]);
   return { target, data };
 }

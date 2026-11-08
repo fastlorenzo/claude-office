@@ -793,6 +793,18 @@ const ptBR: Record<TranslationKey, string> = {
   "factory.line.noPipelines": "Nenhum pipeline recente.",
   "factory.line.throughput": "Mesclados em 24 h",
   "factory.line.stale": "Mostrando os últimos dados válidos",
+  "conn.reconnecting": "Reconectando — dados de {time}",
+  "conn.connecting": "Conectando ao backend…",
+  "conn.stalled": "Sem atualizações — dados de {time}",
+  "conn.tooMany":
+    "Há visualizadores demais conectados ao backend (limite 8). Tentando novamente…",
+  "conn.origin":
+    "O backend recusou a origem desta página. Verifique BACKEND_CORS_ORIGINS e recarregue.",
+  "factory.line.demo": "DEMO",
+  "factory.line.demoHint": "Dados de demonstração, não seus repositórios",
+  "factory.line.ciError": "Erro de CI",
+  "factory.line.fetched": "Obtido",
+  "factory.line.openPr": "Abrir PR #{n} no GitHub",
   "factory.deploy.releases": "Releases",
   "factory.deploy.noReleases": "Nenhuma release ainda.",
   "factory.deploy.pipelines": "Pipelines de deploy",

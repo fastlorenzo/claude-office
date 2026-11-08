@@ -16,7 +16,6 @@ import type { Factory } from "@/engine/world/factory/Factory";
 import { FactoryLines } from "@/engine/world/factory/FactoryLines";
 import {
   FactorySync,
-  noProjectData,
   rekeyDemo,
 } from "@/engine/world/factory/factorySync";
 import {
@@ -144,9 +143,7 @@ describe("FactorySync (World.sync seam)", () => {
     expect(laneOf(next.model!, 9)).toBe(before[0]);
   });
 
-  it("uses demo data only when asked or when the feed has no projects", () => {
-    expect(noProjectData(null)).toBe(true);
-    expect(noProjectData([])).toBe(true);
+  it("uses demo data only when asked (an empty / null feed is real data)", () => {
     const real = [project("o/r", [pr(1)])];
     const sync = new FactorySync();
     const r = sync.update(base(real));
@@ -155,9 +152,9 @@ describe("FactorySync (World.sync seam)", () => {
 
     const empty = new FactorySync();
     const d = empty.update({ ...base(null), cellIds: ["a/x", "b/y"] });
-    expect(empty.stats.demo).toBe(true);
-    expect(d.projects.map((p) => p.id)).toEqual(["a/x", "b/y"]);
-    expect(d.model!.lines.some((l) => l.workpieces.length > 0)).toBe(true);
+    expect(empty.stats.demo).toBe(false);
+    expect(d.projects).toEqual([]);
+    expect(empty.stats.pieces).toBe(0);
 
     const forced = new FactorySync();
     forced.update({ ...base(real), demo: true });
