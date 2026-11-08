@@ -383,6 +383,13 @@ const es: Record<TranslationKey, string> = {
   "hud.help.interact": "Inspeccionar lo que miras",
   "hud.help.enter": "Entrar en la sesión que miras",
   "hud.help.camera": "Alternar cámara (1.ª / 3.ª persona)",
+  "hud.fly.label": "Vuelo",
+  "hud.fly.off": "Cámara libre",
+  "hud.fly.on": "Volando: N vuelve, Shift+N aterriza",
+  "hud.help.fly": "Cámara de vuelo libre (noclip); N vuelve a tu cuerpo",
+  "hud.help.flyLand": "Salir del vuelo libre y aterrizar bajo la cámara",
+  "hud.help.flyVertical": "Vuelo libre: subir (Espacio / E) y bajar (Ctrl / Q)",
+  "hud.help.flySpeed": "Velocidad del vuelo: Shift rápido, Alt lento, rueda ajusta",
   "hud.help.close": "Cerrar panel / soltar el ratón",
   "hud.help.tip":
     "Abrir un panel libera el ratón. Haz clic en la escena para mirar de nuevo.",

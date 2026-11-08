@@ -160,6 +160,7 @@ export function WorldCanvas({
           w.on("cameraMode", (m) =>
             useWorldUiStore.getState().setCameraMode(m),
           ),
+          w.on("fly", (f) => useWorldUiStore.getState().setFlying(f)),
           w.on("layout", (l) => useWorldUiStore.getState().setLayout(l)),
           w.on("action", ({ action, target, screenPos }) => {
             const store = useWorldUiStore.getState();

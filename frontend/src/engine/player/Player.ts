@@ -30,6 +30,10 @@ import {
 } from "@/engine/player/poseMemory";
 import { isStaticCollider } from "@/engine/physics/Colliders";
 import type { PlayerAvatar } from "@/engine/player/Avatar";
+import {
+  FlyController,
+  resolveLanding,
+} from "@/engine/player/FlyCamera";
 
 export const PLAYER = {
   capsuleHeight: 1.8,
@@ -76,6 +80,9 @@ export class Player {
   /** Fell with no floored spawn anywhere: hold until one has a floor. */
   private stranded = false;
   private airborneOutside = 0;
+  /** Free-fly / noclip camera (body frozen, never saved to the pose memory). */
+  private readonly fly = new FlyController();
+  private flyOn = false;
 
   private cc: PhysicsCharacterController | null = null;
   private body: Mesh | null = null;
@@ -172,6 +179,67 @@ export class Player {
     return this.feet;
   }
 
+  get flying(): boolean {
+    return this.flyOn;
+  }
+
+  /** Where the view is: the fly camera while flying, else the camera. */
+  get flyPosition(): Vector3 {
+    return this.camera.position;
+  }
+
+  /** Gate for fly-mode keys (false while a text field / modal / panel owns them). */
+  setFlyKeyGate(fn: () => boolean): void {
+    this.fly.enabled = fn;
+  }
+
+  /** Start flying from the current eye pose; the body stays put. */
+  enterFly(): void {
+    if (this.flyOn) return;
+    this.flyOn = true;
+    const p = this.camera.position;
+    this.fly.start({ x: p.x, y: p.y, z: p.z }, this.yaw, this.pitch);
+    this.avatar?.setVisible(true);
+  }
+
+  /**
+   * Stop flying. `land` drops the body at the camera's x/z onto the nearest
+   * floor below; with no (walkable) floor it falls back to returning to the
+   * body. Returns whether the body was moved.
+   */
+  exitFly(land: boolean): boolean {
+    if (!this.flyOn) return false;
+    this.flyOn = false;
+    const cam = { ...this.fly.pos };
+    const yaw = this.fly.yaw;
+    const pitch = this.fly.pitch;
+    this.fly.stop();
+    this.avatar?.setVisible(this.mode === "tp");
+    this.boom = 0.6;
+    if (land) {
+      const spot = resolveLanding(cam, PLAYER.eyeHeight, {
+        floorBelow: (x, y, z, reach) => {
+          this.tmpRay.origin.set(x, y, z);
+          this.tmpRay.direction.copyFrom(DOWN);
+          this.tmpRay.length = reach;
+          const hit = this.scene.pickWithRay(this.tmpRay, (m) =>
+            isStaticCollider(m.metadata),
+          );
+          return hit?.hit && hit.pickedPoint ? hit.pickedPoint.y : null;
+        },
+        walkable: (p) => this.zoneOk?.(p) ?? true,
+      });
+      if (spot) {
+        this.teleport(new Vector3(spot.x, spot.y, spot.z), yaw);
+        this.pitch = pitch;
+        this.placeCamera(0);
+        return true;
+      }
+    }
+    this.placeCamera(0);
+    return false;
+  }
+
   get avatarMeshes(): AbstractMesh[] {
     return this.avatar?.getMeshes() ?? [];
   }
@@ -195,6 +263,18 @@ export class Player {
     this.pending = saved;
     this.pendingUntil = performance.now() + POSE_RETRY_MS;
     this.pendingOrigin.copyFrom(this.feet);
+  }
+
+  /**
+   * Move the spawn (e.g. once the entrance floor exists). The player follows
+   * when still standing at the old spawn (no remembered pose applied).
+   */
+  setSpawn(spawn: { feet: Vector3; yaw: number }): void {
+    const old = this.spawnPose;
+    this.spawnPose = { feet: spawn.feet.clone(), yaw: spawn.yaw };
+    if (this.frozen || !old) return;
+    if (Vector3.DistanceSquared(this.feet, old.feet) < 0.04)
+      this.teleport(spawn.feet, spawn.yaw);
   }
 
   /** Extra respawn spots the fall net tries (in order) after the spawn. */
@@ -269,7 +349,7 @@ export class Player {
   }
 
   private savePoseNow(): void {
-    if (this.pending || this.frozen || this.waiting) return;
+    if (this.flyOn || this.pending || this.frozen || this.waiting) return;
     if (!canSavePose({ grounded: this.grounded, y: this.feet.y })) return;
     savePose({
       x: this.feet.x,
@@ -283,7 +363,7 @@ export class Player {
 
   setMode(mode: CameraMode): void {
     this.mode = mode;
-    this.avatar?.setVisible(mode === "tp");
+    this.avatar?.setVisible(mode === "tp" || this.flyOn);
     this.boom = 0.6;
   }
 
@@ -315,6 +395,10 @@ export class Player {
   }
 
   update(dt: number, input: InputController | null): void {
+    if (this.flyOn) {
+      this.updateFly(dt, input);
+      return;
+    }
     if (input) {
       const look = input.consumeLook();
       this.yaw += look.dx;
@@ -362,6 +446,24 @@ export class Player {
       if (this.mode === "tp") this.avatar.update(dt);
     }
     this.placeCamera(dt);
+  }
+
+  private updateFly(dt: number, input: InputController | null): void {
+    if (input) {
+      const look = input.consumeLook();
+      this.fly.look(look.dx, look.dy);
+      input.consumeJump();
+    }
+    if (!this.frozen) this.fly.update(dt);
+    this.speed = 0;
+    if (this.avatar) {
+      this.avatar.root.position.copyFrom(this.feet);
+      this.avatar.root.rotation.y = this.yaw;
+      this.avatar.setMoving(0);
+      this.avatar.update(dt);
+    }
+    this.camera.rotation.set(this.fly.pitch, this.fly.yaw, 0);
+    this.camera.position.set(this.fly.pos.x, this.fly.pos.y, this.fly.pos.z);
   }
 
   /** Safety net: below the world, or airborne over "outside" too long. */
@@ -510,6 +612,7 @@ export class Player {
       window.removeEventListener("pagehide", this.flush);
       document.removeEventListener("visibilitychange", this.flush);
     }
+    this.fly.stop();
     this.avatar?.dispose();
     this.avatar = null;
     this.body?.dispose();

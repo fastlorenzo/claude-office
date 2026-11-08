@@ -378,6 +378,13 @@ const en = {
   "hud.help.interact": "Inspect what you're looking at",
   "hud.help.enter": "Enter the session you're looking at",
   "hud.help.camera": "Toggle camera (1st / 3rd person)",
+  "hud.fly.label": "Fly",
+  "hud.fly.off": "Free-fly",
+  "hud.fly.on": "Flying: N to return, Shift+N to land",
+  "hud.help.fly": "Free-fly camera (noclip); N returns to your body",
+  "hud.help.flyLand": "Leave free-fly and land under the camera",
+  "hud.help.flyVertical": "Free-fly up (Space / E) and down (Ctrl / Q)",
+  "hud.help.flySpeed": "Free-fly speed: Shift fast, Alt slow, wheel adjusts",
   "hud.help.close": "Close panel / release mouse",
   "hud.help.tip":
     "Opening a panel releases the mouse. Click the scene to look around again.",

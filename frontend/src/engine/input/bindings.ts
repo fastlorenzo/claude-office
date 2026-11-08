@@ -4,7 +4,7 @@
  */
 export type HoldAction =
   "forward" | "back" | "left" | "right" | "sprint" | "jump" | "lobby";
-export type PressAction = "camera" | "inspect" | "enter";
+export type PressAction = "camera" | "inspect" | "enter" | "fly";
 export type GameAction = HoldAction | PressAction;
 
 export const BINDINGS: Readonly<Record<string, GameAction>> = {
@@ -20,6 +20,7 @@ export const BINDINGS: Readonly<Record<string, GameAction>> = {
   ShiftRight: "sprint",
   Space: "jump",
   KeyV: "camera",
+  KeyN: "fly",
   KeyF: "inspect",
   Enter: "enter",
   NumpadEnter: "enter",
@@ -30,6 +31,7 @@ export const PRESS_ACTIONS: ReadonlySet<GameAction> = new Set<GameAction>([
   "camera",
   "inspect",
   "enter",
+  "fly",
 ]);
 
 /** Hold R this long to teleport back to the lobby (unstuck). */

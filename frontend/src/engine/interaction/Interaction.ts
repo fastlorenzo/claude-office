@@ -71,6 +71,8 @@ export class Interaction {
   private currentMesh: AbstractMesh | null = null;
   private currentThin = false;
   enabled = true;
+  /** Minimum interaction range (m) while set (free-fly camera). */
+  rangeBoost: number | null = null;
   private readonly frame: FocusFrame;
 
   constructor(
@@ -127,9 +129,10 @@ export class Interaction {
         ? Vector3.Distance(pick.pickedPoint, this.getEye())
         : pick.distance;
     }
-    const range =
+    const base =
       (mesh?.metadata as { interactRange?: number } | null)?.interactRange ??
       INTERACT_RANGE;
+    const range = this.rangeBoost ? Math.max(base, this.rangeBoost) : base;
     if (!target || distance > range) {
       this.set(null, null);
       return;

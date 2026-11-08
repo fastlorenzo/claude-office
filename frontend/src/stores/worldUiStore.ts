@@ -57,6 +57,8 @@ interface WorldUiState {
   pose: PlayerPose | null;
   stats: WorldStats | null;
   cameraMode: CameraMode;
+  /** Free-fly / noclip camera active. */
+  flying: boolean;
   pointerLocked: boolean;
   layout: BuildingLayout | null;
   error: string | null;
@@ -91,6 +93,7 @@ interface WorldUiState {
   setPose: (pose: PlayerPose | null) => void;
   setStats: (stats: WorldStats | null) => void;
   setCameraMode: (mode: CameraMode) => void;
+  setFlying: (flying: boolean) => void;
   setPointerLocked: (locked: boolean) => void;
   setLayout: (layout: BuildingLayout | null) => void;
   setError: (error: string | null) => void;
@@ -131,6 +134,7 @@ const INITIAL = {
   pose: null,
   stats: null,
   cameraMode: "fp" as CameraMode,
+  flying: false,
   pointerLocked: false,
   layout: null,
   error: null,
@@ -207,6 +211,7 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   setPose: (pose) => set({ pose }),
   setStats: (stats) => set({ stats }),
   setCameraMode: (cameraMode) => set({ cameraMode }),
+  setFlying: (flying) => set({ flying }),
   setPointerLocked: (pointerLocked) => set({ pointerLocked }),
   setLayout: (layout) => set({ layout }),
   setError: (error) => set({ error }),

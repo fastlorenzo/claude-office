@@ -71,6 +71,7 @@ import {
   preloadCharacterPack,
   setCharacterCast,
 } from "@/engine/characters/characterPacks";
+import { FLY } from "@/engine/player/FlyCamera";
 import { Player, PLAYER } from "@/engine/player/Player";
 import { FeedScheduler } from "@/engine/screens/FeedScheduler";
 import { LabelLayer } from "@/engine/screens/LabelLayer";
@@ -320,6 +321,7 @@ class World implements IWorld {
         mode: this.cameraMode,
         headBob: this.debug.headBob ?? true,
       });
+      this.player.setFlyKeyGate(() => this.inputEnabled);
       if (!this.debug.camera && !this.debug.preserveDrawingBuffer)
         this.player.restoreOr(
           {
@@ -349,7 +351,10 @@ class World implements IWorld {
         () => this.scene.activeCamera!,
         this.fx,
         this.events,
-        () => this.player!.position.add(new Vector3(0, PLAYER.eyeHeight, 0)),
+        () =>
+          this.player!.flying
+            ? this.player!.flyPosition.clone()
+            : this.player!.position.add(new Vector3(0, PLAYER.eyeHeight, 0)),
       );
       // Depth of field follows the inspect action; ends when input returns.
       this.events.on("action", ({ action }) => {
@@ -692,10 +697,13 @@ class World implements IWorld {
     for (const r of this.rooms.values()) r.update(dt, eye);
     for (const r of this.projectRooms.values()) r.update(dt, eye);
     this.building?.update(dt); // LED panel tickers (art)
-    if (this.gfx.dynamicLights) this.lighting.update(dt, this.player.position);
+    const flying = this.player.flying;
+    // Fly camera: the view, not the frozen body, drives zone / lights / pose.
+    const focus = flying ? this.player.flyPosition : this.player.position;
+    if (this.gfx.dynamicLights) this.lighting.update(dt, focus);
     this.interaction?.update(now);
 
-    const zone = roomAt(this.layout, this.player.position);
+    const zone = roomAt(this.layout, focus);
     const nearControl =
       zone.kind === "control" ||
       this.player.position.z > this.layout.hall.length - 6;
@@ -712,9 +720,10 @@ class World implements IWorld {
     // Pose (10 Hz, on change)
     if (now - this.lastPoseAt >= POSE_MS) {
       this.lastPoseAt = now;
-      const p = this.player.position;
-      const pose: PlayerPose = { x: p.x, z: p.z, yaw: this.player.yaw, zone };
-      const key = `${p.x.toFixed(2)}:${p.z.toFixed(2)}:${this.player.yaw.toFixed(2)}:${zoneKey(zone)}`;
+      const p = focus;
+      const yaw = flying ? this.player.camera.rotation.y : this.player.yaw;
+      const pose: PlayerPose = { x: p.x, z: p.z, yaw, zone };
+      const key = `${p.x.toFixed(2)}:${p.z.toFixed(2)}:${yaw.toFixed(2)}:${zoneKey(zone)}`;
       if (key !== this.lastPoseKey) {
         this.lastPoseKey = key;
         this.events.emit("pose", pose);
@@ -751,7 +760,12 @@ class World implements IWorld {
     if (!this.inputEnabled) return;
     switch (e) {
       case "camera":
+        if (this.player?.flying) break;
         this.setCameraMode(this.cameraMode === "fp" ? "tp" : "fp");
+        break;
+      case "fly":
+        // N toggles; Shift+N leaves by landing under the camera.
+        this.toggleFly(this.input.sprint);
         break;
       case "inspect":
         this.interaction?.trigger("primary");
@@ -763,6 +777,17 @@ class World implements IWorld {
         this.teleport("lobby");
         break;
     }
+  }
+
+  /** Free-fly / noclip camera: enter at the eye pose, leave by return or landing. */
+  toggleFly(land = false): void {
+    const p = this.player;
+    if (!p) return;
+    if (p.flying) p.exitFly(land);
+    else p.enterFly();
+    if (this.interaction)
+      this.interaction.rangeBoost = p.flying ? FLY.interactRange : null;
+    this.events.emit("fly", p.flying);
   }
 
   setCameraMode(mode: CameraMode): void {

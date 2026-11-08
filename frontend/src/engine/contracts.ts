@@ -748,6 +748,8 @@ export interface WorldEvents {
   };
   pointerLock: boolean;
   cameraMode: CameraMode;
+  /** Free-fly / noclip camera on or off. */
+  fly: boolean;
   layout: BuildingLayout;
 }
 
@@ -775,6 +777,8 @@ export interface IWorld {
   init(): Promise<void>;
   sync(input: SyncInput): void;
   setCameraMode(mode: CameraMode): void;
+  /** Toggle the free-fly camera; leaving with `land` drops the body below the camera. */
+  toggleFly(land?: boolean): void;
   setQuality(q: QualitySetting): void;
   /** Apply full graphics settings live (presets / custom). */
   setGraphics(settings: GraphicsSettings): void;

@@ -9,6 +9,7 @@ import { usePreferencesStore } from "@/stores/preferencesStore";
 import { STATUS_COLORS, type Zone } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
 import { campusStatus, labelMap } from "../sessionMeta";
+import { getWorld } from "../worldRef";
 import { GLASS, LABEL } from "./glass";
 import { Keycap } from "./Keycap";
 import { HINT_ORDER, PANELS } from "./panels";
@@ -104,6 +105,7 @@ function zoneLabel(
 export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
   const { t } = useTranslation();
   const zone = useWorldUiStore((s) => s.pose?.zone ?? null);
+  const flying = useWorldUiStore((s) => s.flying);
   const roomId = zone?.kind === "room" ? zone.sessionId : null;
   const projectName = useWorldUiStore((s) => {
     const z = s.pose?.zone;
@@ -123,8 +125,10 @@ export function LocationChip({ sessions }: { sessions: Session[] }): ReactNode {
   if (!zone) return null;
   const pod = zoneLabel(zone, labels, t);
   // In a team room: "project · pod session" (the pod under the player).
-  const label =
+  const where =
     projectName && pod && pod !== projectName ? `${projectName} · ${pod}` : pod;
+  // Free-fly camera: "Fly · <zone below the camera>".
+  const label = flying ? `${t("hud.fly.label")} · ${where}` : where;
   return (
     <div
       className={`pointer-events-none flex items-center gap-2.5 rounded-2xl px-3.5 py-2 ${GLASS}`}
@@ -202,6 +206,7 @@ export function KeyHints({ portrait }: { portrait: boolean }): ReactNode {
   const panels = useWorldUiStore(selectPanels);
   const toggle = useWorldUiStore((s) => s.toggle);
   const cameraMode = useWorldUiStore((s) => s.cameraMode);
+  const flying = useWorldUiStore((s) => s.flying);
   // The bottom sheet covers this row on tall viewports.
   if (portrait && panels.length > 0) return null;
   return (
@@ -240,6 +245,17 @@ export function KeyHints({ portrait }: { portrait: boolean }): ReactNode {
         <Keycap>V</Keycap>
         {t(cameraMode === "fp" ? "hud.camera.fp" : "hud.camera.tp")}
       </span>
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => getWorld()?.toggleFly()}
+        className={`flex items-center gap-1.5 text-[11px] transition-colors ${
+          flying ? "text-[#f0a58b]" : "text-slate-400 hover:text-white"
+        }`}
+      >
+        <Keycap accent={flying}>N</Keycap>
+        {t(flying ? "hud.fly.on" : "hud.fly.off")}
+      </button>
     </div>
   );
 }
