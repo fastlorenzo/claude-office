@@ -126,6 +126,22 @@ Fetch/poll/caching/offline exactly as v1 (gh CLI, adaptive 20/60/180 s, last-goo
 
 ## 7. Phased implementation plan (revised; Phase 0 done)
 
+### Implementation status (updated with the review, see `review-plan.md`)
+
+| Phase | Item | Status |
+|---|---|---|
+| 0 | P0.1-P0.9 model, lanes, layout contract, demo with queue overflow | Done |
+| 1 | P1.1 spine/rooms as elevated boxes, P1.2 `FactoryHall`, P1.3 `Exterior`, P1.4 visibility + minimap level layer | Done (seams and colliders under review: WS2/WS3) |
+| 2 | P2.1 conveyors, P2.2 stations, P2.3 workpieces, P2.4 cell dressing/header boards, P2.5 factory sync | Done (render budget: WS4) |
+| 3 | P3.1 motion logic, P3.2 arms/beacons/belts, P3.3 dock + truck + release shelves | Done (truck model: WS6) |
+| 3 | P3.4 technicians | Cell plan and layout exist; no skinned technicians in the scene yet (WS6) |
+| 4 | P4.1 targets/actions/i18n, P4.2 panels | Done |
+| 4 | P4.3 FLOOR panel + line cams, P4.4 minimap lanes and zone names | Partial: floor teleports exist; signage and minimap levels pending (WS3/WS7) |
+| 5 | P5.1 CI poller hardening, P5.4 perf gate (`make perf-gate`, `make walk-gate`) + docs | Poller done; gates added; architecture doc has a "3D World" section |
+| 5 | P5.2 local-git intake/bench, P5.3 flaky/bot/stale polish, P5.5 pinned-repos UI + branding to doors/trucks | Open |
+| 6 | Vertex AO / lightmaps | Not started |
+
+
 Tiers: **Opus** art/engine judgement, **Sonnet** well-specified implementation, **Haiku** plumbing. "∥" = no shared files with its siblings.
 
 ### Phase 0b — Lanes + layout contract (demo: tests green; `FactoryLayout` printed in `/world-debug`)

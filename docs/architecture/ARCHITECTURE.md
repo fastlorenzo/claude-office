@@ -22,6 +22,7 @@ System architecture and design documentation for Claude Office Visualizer.
 - [Wall Clock](#wall-clock)
 - [User Preferences](#user-preferences)
 - [Internationalization](#internationalization)
+- [3D World (Babylon.js)](#3d-world-babylonjs)
 - [PixiJS Rendering](#pixijs-rendering)
 - [Multi-Floor / Agent Teams](#multi-floor--agent-teams)
 - [Command Center](#command-center)
@@ -614,6 +615,109 @@ The frontend supports multiple languages via a lightweight i18n system in `front
 **Usage:** The `useTranslation` hook provides a `t()` function with parameter interpolation. Translations are key-value; English serves as the fallback for missing keys.
 
 **Adding a language:** Create a new file (e.g., `fr.ts`) with all `TranslationKey` entries, register it in `index.ts`, and add the locale to the `Locale` type.
+
+## 3D World (Babylon.js)
+
+The 3D renderer (`frontend/src/engine/`, mounted by `components/world/WorldCanvas.tsx`) draws the
+whole campus as one building: reception and offices on level 0, a control room at the hall end, and
+the "software factory" (one production line per repository) on the level below. It is independent of
+the PixiJS office above; the renderer preference selects between them. Design background:
+[`docs/design/software-factory.md`](../design/software-factory.md); open review items:
+[`docs/design/review-plan.md`](../design/review-plan.md).
+
+### Module map
+
+Data flows left to right: layout (pure) -> world (builds and owns Babylon objects) -> screens
+(canvas textures) -> fx (lighting and post-processing). `logic/` and `layout/` import no Babylon.
+
+| Directory (`src/engine/`) | Role |
+|---|---|
+| `contracts.ts` | Hand-written TS mirror of the backend `/ws/campus` schema, plus `BuildingLayout`, `FactoryLayout`, `IWorld` and the event/action ids. Checked against the backend by `tests/contractsDrift.test.ts` |
+| `layout/` | Pure geometry: `buildingLayout.ts` (bay grid of project rooms on both sides of the hall), `factoryLayout.ts` (cells, lanes, stairs under the rooms), `exteriorPlan.ts` |
+| `logic/` | Framework-free models: `syncDiff.ts` (campus feed -> `SyncOp`s), `factoryModel.ts` (PRs/checks -> lines, lanes, stations, workpieces), `opsModel.ts`, `sessionInfo.ts`, `projectMap.ts`, `status.ts`, `factoryLive.ts` (the model the scene shows, published to the HUD) |
+| `world/` | `World.ts` (engine, render loop, sync seam, teleport), `Building.ts`, `EntranceHall.ts`, `ProjectRoom.ts`/`Room.ts`, `ControlRoom.ts`, `Exterior.ts`, `Visibility.ts` (zone/portal culling), and `world/factory/` (instanced pools: `Conveyors`, `Stations`, `Workpieces`, `Cell`, `Dock`, `Truck`, `FactoryHall`) |
+| `screens/` | Canvas-textured displays: `ScreenHub`/`MonitorBatch` (live planes only near the player), `opsCanvas.ts` (control-room wall), `DoorSign`, `Whiteboard`, `ProjectInfoScreen`, `LabelLayer`. Strings go through `@/i18n` (`setOpsLocale` for the wall) |
+| `fx/` | `Lighting` (HDRI probes, baked-once shadows), `PostFx` (G-buffer, SSAO, SSR, DoF, AA), `fxPlan.ts` (tier -> render plan), `graphicsSettings.ts` (presets), `Quality.ts` (auto governor) |
+| `materials/`, `assets/` | PBR surfaces (`Materials.ts`, `assets/materials2.ts`), glTF models and characters (`AssetLibrary`, `manifest.ts`), procedural fallbacks |
+| `player/`, `input/`, `interaction/`, `physics/` | First/third-person and fly camera, key bindings, F/Enter targets and actions, Havok colliders |
+| `characters/`, `art/`, `util/` | Rigs and poses, procedural geometry, `MeshBatcher` |
+
+HUD (React) lives in `components/world/hud/` and talks to the engine only through `IWorld` events and
+the stores (`worldUiStore`, `campusStore`).
+
+### Sync pipeline
+
+1. Backend: `build_campus()` -> `/ws/campus` (see the `/ws/campus` section) carries sessions, stats and the
+   per-repository CI/PR `projects` list (polled by `core/ci_poller.py`, last-good data with
+   `stale`/`error`).
+2. Frontend: `hooks/useCampusWebSocket.ts` (reconnect with backoff + jitter, no retry on 4003, slow
+   retry on 4013) -> `stores/campusStore.ts`.
+3. `WorldCanvas` subscribes to the store and calls `world.sync(input)`:
+   `allocateSlots` -> `generateLayout` -> `diffCampus` (`syncDiff.ts`, O(n)) -> apply ops (rooms,
+   actors, screens) -> `applyToModel`.
+4. Factory: `world/factory/factorySync.ts` builds a `FactoryModel` from the projects (with the
+   previous model for lane stability) and only touches the instanced buffers when `factoryKey`
+   changes; an empty feed renders empty cells, never demo PRs. The result is published through
+   `logic/factoryLive.ts` so the HUD panels read what the scene shows.
+5. Demo mode: `engine/demo/` generates a campus (and `demoFactory`) when no live feed is used.
+
+### Quality tiers
+
+`fx/graphicsSettings.ts` defines the presets `auto | low | medium | high | ultra | custom`; touching
+any individual field turns the preset into `custom`. In `auto`, `fx/Quality.ts` walks
+high -> medium -> low from the frame time (2 s mean over 24 ms steps down, at most once per 3 s; under
+12 ms for 20 s steps up). `fx/fxPlan.ts` maps the tier to the render plan (post-process chain,
+shadow/SSAO/SSR quality, resolution scale); `GraphicsController` applies it. Screens release their
+textures at far LOD and redraw only when their content key changes.
+
+### Debug pages and URL parameters
+
+All debug pages are Next routes under `src/app/` and are meant for screenshots and measurement.
+
+| Route | Purpose |
+|---|---|
+| `/world-debug` | The full 3D world on the demo campus (or `live=1` for the real feed) |
+| `/actors-debug` | Characters in every pose, a walking actor, monitors and labels |
+| `/materials-debug` | Contact sheet of every `materials2` candidate |
+| `/factory-debug/{cell,conveyors,dock,panels,workpieces}` | Isolated factory sandboxes |
+| `/sprite-debug` | Pixi sprite tooling |
+
+`/world-debug` query parameters (full list in the header of `app/world-debug/page.tsx`):
+
+| Parameter | Effect |
+|---|---|
+| `n=6`, `t=20000`, `demoFactory=1`, `live=1` | Demo session count, frozen demo clock, demo factory data, real backend feed |
+| `quality=auto\|high\|medium\|low`, `gfx=<preset>`, `gfxset=key:value,...`, `tierStep=low@60,high@120` | Force a tier or a single setting; replay a live tier change |
+| `cam=x,y,z,yawDeg,pitchDeg`, `tp=1` | Fixed eye pose (freezes the player); third person |
+| `walk=x,y,z,yawDeg;x,z;...` | Scripted walk with the real player collider (progress in `__worldStats.walk`) |
+| `inspect=1`, `panel=1`, `ops=1` | Simulate F inspect (DoF), open the first factory panel, show the Ops dashboard |
+| `shot=1`, `frames=40` | Set `document.title = "ready"` after N frames so scripts know when to capture |
+| `drawdbg=1` | Per-pass draw breakdown in `__worldStats.passes` |
+| `brand=`, `brandTag=`, `brandColor=`, `brandFlicker=1` | Lobby sign branding |
+
+`window.__worldStats` (refreshed every 500 ms) exposes `draws`, `active`, `textures`, `zone`,
+`actors`, `factory` and, when reported, `postProcesses`, `screenUploads` and `textureMB`.
+
+### Screenshot, walk-test and perf workflow
+
+- Never launch a browser by hand. Screenshots go through the serialising wrapper
+  `~/.local/share/claude-office-shot/shot.sh "<url>" <out.png> [frames] [w] [h]` against the running
+  dev server on `:3000` (it uses at most two browser slots and kills the browser afterwards); keep
+  results under `~/.local/share/claude-office-shot/out/<topic>/`.
+- Reference views use `/world-debug?...&shot=1&cam=...`; compare PNGs by eye or pixel diff.
+- `make perf-gate` checks draw-call budgets at the reference cameras; `make walk-gate` runs scripted
+  collider walks (`walk=`) and asserts they end on the right floor. Both go through `shot.sh` and the
+  machine-wide heavy lock (`.heavy.lock`).
+- Heavy commands (`bun run build`, Blender) run under
+  `flock ~/.local/share/claude-office-shot/.heavy.lock <cmd>`; vitest uses `--maxWorkers=4`.
+- Dead-code gate: `bun run knip` (part of `make checkall`) fails on unused exports and types.
+
+### Assets
+
+`frontend/public/assets/` is git-ignored except `NOTICE.md`. `bun run assets` (`scripts/fetch-assets.ts`)
+downloads the Poly Haven models and HDRIs listed in `engine/assets/manifest.ts`; `bun run materials`
+builds the ambientCG PBR sets (`materials2/`); `bun run characters` converts the character packs. The
+runtime tolerates missing files (procedural fallbacks).
 
 ## PixiJS Rendering
 
