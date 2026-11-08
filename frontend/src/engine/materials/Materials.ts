@@ -372,9 +372,13 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     roughness: 0.36,
     metallic: 1,
     role: "metalBrushed",
-    tint: [1.0, 0.99, 0.97],
+    // Brushed grain (normal map) only: Metal011's albedo / roughness carry
+    // 20-30 cm stains that read as a blotchy smear on the large door leaves
+    // (factory door, lift doors); trims are too small to show them anyway.
+    noAlbedoMap: true,
+    flatRough: true,
     // ≥ 0.4: brushed, and keeps SSR from speckling on large door leaves.
-    roughFactor: 0.8,
+    roughFactor: 0.42,
     metalFactor: 1,
     bumpLevel: 0.15,
   },
@@ -738,6 +742,8 @@ export class Materials {
       /** Constant roughness = roughFactor (no ORM roughness variation). */
       flatRough?: boolean;
       bumpLevel?: number;
+      /** false: no normal / ORM maps from the role's set (grime only). */
+      relief?: boolean;
     } = {},
   ): PBRMaterial {
     const albedo = opts.albedo ?? 0.8;
@@ -758,6 +764,7 @@ export class Materials {
       bumpLevel: opts.bumpLevel ?? base.bumpLevel,
       flatRough: opts.flatRough,
       grime: opts.grime,
+      ...(opts.relief === false ? { role: undefined } : {}),
     };
     const mat = this.build(k, spec);
     this.derived.set(k, spec);

@@ -1051,10 +1051,10 @@ export class Dock {
       m.environmentIntensity = env;
       return m;
     };
-    // Precast concrete shell and painted steel: the shared textured surfaces
-    // (normal + ORM at world scale + grime) under the vertex colours, with
-    // the albedo pulled down to real concrete / paint (was white × colour:
-    // the washed-out beige of the review shots). Flat fallbacks headless.
+    // Precast concrete shell and painted steel: the shared surfaces under
+    // the vertex colours, with the albedo pulled down to real concrete /
+    // paint (was white × colour: the washed-out beige of the review shots).
+    // Flat fallbacks headless.
     const mats = Materials.of(scene);
     applyWorldUVs(this.matte);
     applyWorldUVs(this.metal);
@@ -1063,11 +1063,12 @@ export class Dock {
         albedo: 0.82,
         grime: true,
         env: 0.45,
-        // Constant 0.9 roughness, soft relief: ORM roughness variation let
-        // SSR smear the bright door openings into radial streaks.
         roughFactor: 0.9,
-        flatRough: true,
-        bumpLevel: 0.3,
+        // Grime only, no Concrete046 normal / ORM: on the dock's large
+        // planes those maps rendered as radial streaks fanning out to the
+        // vanishing point at every viewing angle (not SSR, SSAO, shadows or
+        // filtering: WS5b bisection, ws5b/07-11).
+        relief: false,
       }) ?? mk("dock:matteMat", 0.88, 0.45);
     this.metal.material =
       mats?.forVertexColors("steelPainted", { albedo: 0.9, env: 0.7 }) ??
