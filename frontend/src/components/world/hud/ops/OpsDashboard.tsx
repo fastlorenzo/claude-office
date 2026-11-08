@@ -166,7 +166,10 @@ function Header({
         ))}
       </div>
       <div className="ml-auto flex items-center gap-3">
-        <span className="font-mono text-sm text-slate-400">
+        <span
+          suppressHydrationWarning
+          className="font-mono text-sm text-slate-400"
+        >
           {fmtClock(new Date(m.nowMs).toISOString())}
         </span>
         {onClose && (
