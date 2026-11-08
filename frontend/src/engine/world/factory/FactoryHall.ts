@@ -603,8 +603,9 @@ export class FactoryHall {
     };
     const plinthTop = fy + HALL.PLINTH_H;
     put("concreteSoffit", y0, Math.min(y1, plinthTop));
+    // Profiled sandwich-panel cladding (WS5 R15) above the concrete plinth.
     this.paint(b, PAINT.cladding, () =>
-      put("paint", Math.max(y0, plinthTop), y1),
+      put("cladding", Math.max(y0, plinthTop), y1),
     );
     const c = (a0 + a1) / 2;
     const len = a1 - a0;
@@ -1347,11 +1348,12 @@ export class FactoryHall {
           );
           b.cylinder("steelPainted", v3(x, y + 0.12, z), 0.24, 0.3, 0.55, 16);
           b.cylinder("lightPanel", v3(x, y - 0.005, z), 0.01, 0.5, 0.5, 16);
+          // 1.0 (was 1.35): the bays no longer clip through the drum glazing.
           this.fixtureList.push(
             fixture(x, y - 0.05, z, {
               kind: "down",
               color: "#F2F5FF",
-              intensity: 1.35,
+              intensity: 1.0,
               range: 7.8,
             }),
           );

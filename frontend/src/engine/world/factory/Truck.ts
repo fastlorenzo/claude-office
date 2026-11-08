@@ -68,10 +68,14 @@ export class Truck {
     const body = soup.build("truck:body", scene);
     if (!body) throw new Error("truck: empty body");
     const bm = new PBRMaterial("truck:bodyMat", scene);
+    // Painted body (dielectric) under an automotive clear coat.
     bm.albedoColor = Color3.White();
-    bm.metallic = 0.25;
-    bm.roughness = 0.55;
+    bm.metallic = 0;
+    bm.roughness = 0.5;
     bm.environmentIntensity = 0.7;
+    bm.clearCoat.isEnabled = true;
+    bm.clearCoat.intensity = 0.8;
+    bm.clearCoat.roughness = 0.08;
     body.material = bm;
     body.parent = this.root;
     this.body = body;
@@ -90,8 +94,15 @@ export class Truck {
     lm.metallic = 0;
     lm.roughness = 0.42;
     lm.environmentIntensity = 0.55;
+    // Glossy vinyl livery on the trailer side (same clear coat as the body).
+    lm.clearCoat.isEnabled = true;
+    lm.clearCoat.intensity = 0.8;
+    lm.clearCoat.roughness = 0.08;
     this.livery = buildLiveryMesh(scene);
     this.livery.material = lm;
+    // Livery redraws update the texture in place: both stay frozen.
+    bm.freeze();
+    lm.freeze();
     this.livery.parent = this.root;
     this.meshes = [this.body, this.livery];
     this.redraw();

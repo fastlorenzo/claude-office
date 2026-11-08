@@ -569,7 +569,7 @@ export class PostFx {
     ip.toneMappingEnabled = true;
     ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
     ip.exposure = 1.05;
-    ip.vignetteWeight = 1.6;
+    ip.vignetteWeight = 0.9; // a lens falloff, not an iris
     ip.vignetteStretch = 0.4;
     ip.vignetteColor = new Color4(0.05, 0.04, 0.03, 0);
     ip.vignetteBlendMode = ImageProcessingConfiguration.VIGNETTEMODE_MULTIPLY;

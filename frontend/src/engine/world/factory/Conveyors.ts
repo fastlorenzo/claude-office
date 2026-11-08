@@ -178,14 +178,15 @@ export class Conveyors {
     beltMesh.material = this.rubber;
     this.belt = new BoxPool(beltMesh, false);
 
-    // ---- frame: unit box, satin metal, instance colours
+    // ---- frame: unit box, powder-coated steel (dielectric), instance colours
     const frameMesh = new Mesh("conveyorFrame", scene);
     CreateBoxVertexData({ size: 1 }).applyToMesh(frameMesh, false);
     const fm = new PBRMaterial("conveyorFrameMat", scene);
     fm.albedoColor = Color3.White();
-    fm.metallic = 0.72;
-    fm.roughness = 0.36;
+    fm.metallic = 0;
+    fm.roughness = 0.42;
     frameMesh.material = fm;
+    fm.freeze();
     this.frame = new BoxPool(frameMesh, true);
 
     // ---- guard: unit cylinder along +X, satin polymer, instance colours
@@ -199,9 +200,10 @@ export class Conveyors {
     gvd.applyToMesh(guardMesh, false);
     const gm = new PBRMaterial("conveyorGuardMat", scene);
     gm.albedoColor = Color3.White();
-    gm.metallic = 0.05;
+    gm.metallic = 0;
     gm.roughness = 0.32;
     guardMesh.material = gm;
+    gm.freeze();
     this.guard = new BoxPool(guardMesh, true);
   }
 

@@ -5,10 +5,12 @@
  * `scripts/fetch-materials.ts` (download + pack) and the runtime.
  *
  * Every entry is an ambientCG asset (CC0, https://ambientcg.com). Textures are
- * generated into `public/assets/materials2/<id>/` by `bun run materials`:
- *   albedo.webp  sRGB colour, 2048
- *   normal.webp  OpenGL (+Y) tangent-space normal, 2048
- *   orm.webp     R = ambient occlusion, G = roughness, B = metalness, 1024
+ * generated into `public/assets/materials2/<id>/` by `bun run materials`, at
+ * the edge `textureEdge` gives (≈ 512 texels per metre of tile, 512–1024;
+ * GPU memory is the budget, WS5 — ≤ 300 MB resident at "high"):
+ *   albedo.webp  sRGB colour
+ *   normal.webp  OpenGL (+Y) tangent-space normal
+ *   orm.webp     R = ambient occlusion, G = roughness, B = metalness (half)
  * Use orm as PBRMaterial.metallicTexture with
  * useAmbientOcclusionFromMetallicTextureRed / useRoughnessFromMetallicTextureGreen
  * / useMetallnessFromMetallicTextureBlue = true.
@@ -53,6 +55,27 @@ export interface PbrMaterialAsset {
 
 export const MATERIALS2_BASE = "/assets/materials2";
 
+/** Texel density the shipped maps aim for (texels per metre of surface). */
+const TEXELS_PER_M = 512;
+
+/**
+ * Edge (px) of a shipped map: albedo / normal ≈ TEXELS_PER_M × tile,
+ * power of two in [512, 1024]; ORM (AO / roughness: low frequency) half of
+ * that, at least 256. Shared by the fetch script (output size) and the
+ * runtime (whether a quality cap needs a CPU downscale).
+ */
+export function textureEdge(
+  asset: Pick<PbrMaterialAsset, "tileMeters">,
+  kind: "albedo" | "normal" | "orm",
+): number {
+  const want = asset.tileMeters * TEXELS_PER_M;
+  const edge = Math.min(
+    1024,
+    Math.max(512, 2 ** Math.ceil(Math.log2(Math.max(1, want)))),
+  );
+  return kind === "orm" ? Math.max(256, edge / 2) : edge;
+}
+
 export function material2Path(file: string): string {
   return `${MATERIALS2_BASE}/${file}`;
 }
@@ -79,29 +102,22 @@ function m(
   };
 }
 
-/** First entry of each list is the pick; the rest are alternates. */
+/**
+ * First entry of each list is the role's pick; further entries are used by a
+ * surface through `asset:` (Materials.ts). Every listed set is fetched and
+ * every one is in use — WS5 pruned the 21 alternates that nothing referenced
+ * (≈ 54 MB on disk); re-add an entry here before referencing a new id.
+ */
 export const MATERIAL_CANDIDATES: Record<MaterialRole, PbrMaterialAsset[]> = {
   floorMain: [
     m("floorMain", "Concrete034", 2, {
-      notes: "light grey smooth microcement, subtle cloudiness",
+      notes: "light grey smooth microcement, subtle cloudiness (hall, paving)",
     }),
-    m("floorMain", "Concrete019", 2, {
-      notes: "cool pale grey, smooth, slight cloud variation",
-    }),
-    m("floorMain", "Concrete046", 2, { notes: "off-white smooth concrete" }),
   ],
   floorWarm: [
     m("floorWarm", "Wood095", 1.5, {
       notes: "clear light oak/ash, seamless wide-board look",
       grade: { saturation: 0.65, brightness: 1.05 },
-    }),
-    m("floorWarm", "WoodFloor062", 1.2, {
-      notes: "fine-grain oak planks, bleached toward light oak",
-      grade: { saturation: 0.5, brightness: 1.25 },
-    }),
-    m("floorWarm", "WoodFloor066A", 1.2, {
-      notes: "blonde plank, desaturated",
-      grade: { saturation: 0.4, brightness: 0.95 },
     }),
   ],
   floorCarpet: [
@@ -110,59 +126,31 @@ export const MATERIAL_CANDIDATES: Record<MaterialRole, PbrMaterialAsset[]> = {
       grade: { saturation: 0.1, brightness: 1.5 },
     }),
     m("floorCarpet", "Carpet016", 0.6, {
-      notes: "low-pile, greyed to mid grey",
+      notes: "low-pile, greyed to mid grey (rugs)",
       grade: { saturation: 0.05, brightness: 0.8 },
-    }),
-    m("floorCarpet", "Fabric029", 0.6, {
-      notes: "dark soft pile, neutralised graphite",
-      grade: { saturation: 0.1, brightness: 2.4 },
     }),
   ],
   floorTerrazzo: [
-    m("floorTerrazzo", "Tiles043", 1.2, {
-      notes: "fine white/grey terrazzo tile, clean",
+    m("floorTerrazzo", "Terrazzo006", 0.5, {
+      notes: "polished white terrazzo with sand chips (lobby, quartz tops)",
     }),
-    m("floorTerrazzo", "Terrazzo005", 1, {
-      notes: "white with grey/black chips",
-    }),
-    m("floorTerrazzo", "Terrazzo006", 1, { notes: "white with sand chips" }),
   ],
   wallMain: [
     m("wallMain", "Plaster002", 2, {
       notes: "clean white plaster, gentle texture",
       grade: { saturation: 0.3, brightness: 1.05 },
     }),
-    m("wallMain", "PaintedPlaster017", 2, {
-      notes: "white painted plaster, fine grain",
-      grade: { saturation: 0.35 },
-    }),
-    m("wallMain", "Paint004", 1.5, {
-      notes: "white painted wall, streaky",
-      grade: { saturation: 0.2, brightness: 1.02 },
-    }),
   ],
   wallSlats: [
-    m("wallSlats", "WoodFloor039", 1.2, {
-      notes: "pale narrow vertical boards; rotate 90 deg for slat feel",
-      grade: { saturation: 0.7 },
-    }),
     m("wallSlats", "Wood095", 1, {
       notes: "light clear oak/ash",
-      grade: { saturation: 0.6, brightness: 1.05 },
-    }),
-    m("wallSlats", "Wood094", 1, {
-      notes: "light beech/ash",
-      grade: { saturation: 0.55, brightness: 1.1 },
+      grade: { saturation: 0.65, brightness: 1.05 },
     }),
   ],
   wallFelt: [
     m("wallFelt", "Fabric030", 0.5, {
       notes: "mid grey felt-like knit",
       grade: { brightness: 1.15 },
-    }),
-    m("wallFelt", "Fabric066", 0.5, {
-      notes: "sage/khaki woven acoustic fabric",
-      grade: { saturation: 0.9, brightness: 1.1 },
     }),
     m("wallFelt", "Fabric036", 0.5, { notes: "light grey linen weave" }),
   ],
@@ -171,69 +159,31 @@ export const MATERIAL_CANDIDATES: Record<MaterialRole, PbrMaterialAsset[]> = {
       notes: "dark graphite concrete",
       grade: { saturation: 0.1, brightness: 1.1 },
     }),
-    m("wallFeature", "Concrete033", 2, {
-      notes: "dark concrete, softly mottled",
-      grade: { saturation: 0.1, brightness: 1.1 },
-    }),
-    m("wallFeature", "Tiles138", 1.2, {
-      notes: "black large-format tile",
-      grade: { saturation: 0.3, brightness: 1.2 },
-    }),
   ],
   ceiling: [
-    m("ceiling", "OfficeCeiling001", 2.4, {
-      notes: "mineral-fibre grid tiles, plain",
-      grade: { saturation: 0.4 },
-    }),
     m("ceiling", "Plaster001", 2, {
       notes: "smooth plaster",
       grade: { saturation: 0.3, brightness: 1.1 },
     }),
-    m("ceiling", "OfficeCeiling005", 2.4, {
-      notes: "grid with vent/light inserts (busy)",
-      grade: { saturation: 0.4 },
-    }),
   ],
   metalBrushed: [
-    m("metalBrushed", "Metal009", 1, {
-      notes: "brushed steel, darker",
-      forceMetal: true,
-    }),
     m("metalBrushed", "Metal011", 1, {
-      notes: "brushed aluminium/steel",
-      forceMetal: true,
-    }),
-    m("metalBrushed", "Metal032", 1, {
-      notes: "satin blue-grey metal",
+      notes: "brushed aluminium/steel, graded to aluminium F0 (tints <= 1)",
+      grade: { saturation: 0.6, brightness: 1.32 },
       forceMetal: true,
     }),
   ],
   metalDark: [
-    m("metalDark", "Metal029", 1, {
-      notes: "black anodised, glossy",
-      forceMetal: true,
-    }),
-    m("metalDark", "Metal028", 1, {
-      notes: "black coated metal",
-      forceMetal: true,
-    }),
     m("metalDark", "Metal030", 1, {
-      notes: "dark blue-grey powder coat",
+      notes:
+        "dark blue-grey powder coat; dielectric uses (metalFactor 0) for black / charcoal / RAL 7016 paint",
       forceMetal: true,
     }),
   ],
   woodFurniture: [
-    m("woodFurniture", "Wood094", 0.8, {
-      notes: "light beech/ash veneer",
-      grade: { saturation: 0.55, brightness: 1.1 },
-    }),
     m("woodFurniture", "Wood050", 0.8, {
       notes: "plain light oak veneer, bleached",
       grade: { saturation: 0.5, brightness: 1.1 },
-    }),
-    m("woodFurniture", "Wood058", 0.8, {
-      notes: "oak veneer fine grain, bleached",
-      grade: { saturation: 0.6, brightness: 1.25 },
     }),
   ],
   fabricUpholstery: [
@@ -241,35 +191,28 @@ export const MATERIAL_CANDIDATES: Record<MaterialRole, PbrMaterialAsset[]> = {
       notes: "grey-taupe tight weave",
       grade: { saturation: 0.6 },
     }),
-    m("fabricUpholstery", "Fabric036", 0.4, { notes: "light grey linen" }),
-    m("fabricUpholstery", "Fabric063", 0.4, {
-      notes: "taupe woven upholstery",
-      grade: { saturation: 0.6, brightness: 1.3 },
+    m("fabricUpholstery", "Fabric036", 0.4, {
+      notes: "light grey linen (warm / accent upholstery tints)",
     }),
   ],
   leather: [
-    m("leather", "Leather026", 0.5, { notes: "black grained leather" }),
-    m("leather", "Leather027", 0.5, { notes: "black smooth leather" }),
-    m("leather", "Leather031", 0.5, {
-      notes: "very dark green-black leather",
+    m("leather", "Leather026", 0.5, {
+      notes: "black grained leather, lifted to a dark brown-black (tints <= 1)",
+      grade: { brightness: 1.9 },
     }),
   ],
-  rubberMat: [
-    m("rubberMat", "Rubber004", 0.8, { notes: "dark fine rubber" }),
-    m("rubberMat", "Rubber001", 0.8, { notes: "black speckle rubber" }),
-  ],
-  // ---- Software factory: reuse the downloaded set, graded per surface. ----
+  rubberMat: [m("rubberMat", "Rubber004", 0.8, { notes: "dark fine rubber" })],
+  // ---- Software factory ----
   floorEpoxy: [
-    m("floorEpoxy", "Concrete019", 3, {
-      notes: "smooth pale concrete under a grey epoxy coat (tinted + glossed)",
+    m("floorEpoxy", "Concrete046", 3, {
+      notes: "smooth off-white concrete under a grey epoxy coat (tinted)",
     }),
-    m("floorEpoxy", "Concrete046", 3, { notes: "off-white smooth concrete" }),
   ],
   concreteSoffit: [
     m("concreteSoffit", "Concrete046", 2.5, {
-      notes: "off-white smooth concrete, greyed for slab soffits / plinths",
+      notes:
+        "off-white smooth concrete, greyed for slab soffits / plinths / dock",
     }),
-    m("concreteSoffit", "Concrete019", 2.5, { notes: "cool pale grey" }),
   ],
 };
 

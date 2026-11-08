@@ -4,8 +4,11 @@
  * (R = AO, G = roughness, B = metalness) and writes
  * public/assets/materials2/manifest.json + LICENSE.md.
  *
- * Usage: bun scripts/fetch-materials.ts [--force] [--all]
- * Default: only the chosen material per role (MATERIALS2). --all: every candidate.
+ * Usage: bun scripts/fetch-materials.ts [--force] [--only=Id,Id] [--prune]
+ * Fetches every material listed in MATERIAL_CANDIDATES (each one is used by a
+ * surface in Materials.ts). --only limits the run (with --force: re-grade
+ * those ids after a `grade` change). --prune deletes folders under
+ * public/assets/materials2 that are no longer listed.
  * Idempotent: materials whose outputs already exist are skipped.
  */
 import {
@@ -24,7 +27,7 @@ import { spawn } from "node:child_process";
 import sharp from "sharp";
 import {
   MATERIAL_CANDIDATES,
-  MATERIALS2,
+  textureEdge,
   type PbrMaterialAsset,
 } from "../src/engine/assets/materials2";
 
@@ -33,7 +36,12 @@ const OUT = join(ROOT, "public", "assets", "materials2");
 const UA = "claude-office-material-fetch/1.0";
 const CONCURRENCY = 3;
 const FORCE = process.argv.includes("--force");
-const ALL = process.argv.includes("--all");
+const PRUNE = process.argv.includes("--prune");
+const ONLY = new Set(
+  (process.argv.find((a) => a.startsWith("--only="))?.slice(7) ?? "")
+    .split(",")
+    .filter(Boolean),
+);
 
 class AssetError extends Error {
   constructor(
@@ -110,7 +118,8 @@ async function process_(a: PbrMaterialAsset): Promise<void> {
     if (!color || !normal || !rough)
       throw new AssetError(id, `missing maps in zip: ${names.join(", ")}`);
 
-    let albedo = sharp(color).resize(2048, 2048);
+    const E = textureEdge(a, "albedo");
+    let albedo = sharp(color).resize(E, E);
     if (a.grade)
       albedo = albedo.modulate({
         saturation: a.grade.saturation ?? 1,
@@ -121,11 +130,11 @@ async function process_(a: PbrMaterialAsset): Promise<void> {
       .toFile(join(outDir, "albedo.webp"));
 
     await sharp(normal)
-      .resize(2048, 2048)
+      .resize(E, E)
       .webp({ quality: 92, smartSubsample: true, effort: 5 })
       .toFile(join(outDir, "normal.webp"));
 
-    const S = 1024;
+    const S = textureEdge(a, "orm");
     const ao = find("AmbientOcclusion");
     const met = find("Metalness");
     const r = await grey(rough, S);
@@ -152,20 +161,55 @@ async function process_(a: PbrMaterialAsset): Promise<void> {
   }
 }
 
+/**
+ * Existing outputs larger than `textureEdge` (older 2048 / 1024 runs) are
+ * downscaled in place — the same result as a fresh fetch, without the
+ * download. Returns true when something changed.
+ */
+async function normalise(a: PbrMaterialAsset): Promise<boolean> {
+  let changed = false;
+  for (const kind of ["albedo", "normal", "orm"] as const) {
+    const file = join(OUT, a.files[kind]);
+    if (!(await exists(file))) continue;
+    const edge = textureEdge(a, kind);
+    const meta = await sharp(file).metadata();
+    if ((meta.width ?? 0) <= edge) continue;
+    const img = sharp(await readFile(file)).resize(edge, edge);
+    const buf =
+      kind === "orm"
+        ? await img
+            .webp({ nearLossless: true, quality: 80, effort: 5 })
+            .toBuffer()
+        : await img
+            .webp({
+              quality: kind === "normal" ? 92 : 88,
+              smartSubsample: true,
+              effort: 5,
+            })
+            .toBuffer();
+    await writeFile(file, buf);
+    changed = true;
+  }
+  return changed;
+}
+
 const NOTICE_BEGIN = "<!-- BEGIN MATERIALS2 -->";
 const NOTICE_END = "<!-- END MATERIALS2 -->";
-const NOTICE_SECTION = `${NOTICE_BEGIN}
+const noticeSection = (ids: string[]): string => `${NOTICE_BEGIN}
 ## materials2 (ambientCG, CC0 1.0)
 
 PBR textures under \`materials2/\` come from [ambientCG](https://ambientcg.com)
 and are released under CC0 1.0 Universal (public domain); credit is not
-required. Fetched by \`bun run materials\` (\`scripts/fetch-materials.ts\`); ids
-are listed in \`materials2/LICENSE.md\`.
+required. Fetched, colour-graded, resized and packed (ORM) by \`bun run materials\`
+(\`scripts/fetch-materials.ts\`; the list is \`src/engine/assets/materials2.ts\`):
+
+${ids.map((id) => `- [${id}](https://ambientcg.com/a/${id})`).join("\n")}
 ${NOTICE_END}
 `;
 
 /** Replace or append the delimited section (fetch-assets.ts rewrites NOTICE.md). */
-async function upsertNotice(): Promise<void> {
+async function upsertNotice(ids: string[]): Promise<void> {
+  const section = noticeSection(ids);
   const p = join(ROOT, "public", "assets", "NOTICE.md");
   let cur = "";
   try {
@@ -178,23 +222,30 @@ async function upsertNotice(): Promise<void> {
   if (a >= 0 && b > a) {
     cur =
       cur.slice(0, a) +
-      NOTICE_SECTION +
+      section +
       cur.slice(b + NOTICE_END.length).replace(/^\n/, "");
   } else {
-    cur = cur.replace(/\s*$/, "\n\n") + NOTICE_SECTION;
+    cur = cur.replace(/\s*$/, "\n\n") + section;
   }
   await writeFile(p, cur);
 }
 
 async function main(): Promise<void> {
-  const all = ALL
-    ? Object.values(MATERIAL_CANDIDATES).flat()
-    : Object.values(MATERIALS2);
   const unique = new Map<string, PbrMaterialAsset>();
-  for (const a of all) if (!unique.has(a.id)) unique.set(a.id, a);
+  for (const a of Object.values(MATERIAL_CANDIDATES).flat())
+    if (!unique.has(a.id)) unique.set(a.id, a);
+
+  if (PRUNE) {
+    for (const d of await readdir(OUT, { withFileTypes: true }))
+      if (d.isDirectory() && !unique.has(d.name)) {
+        await rm(join(OUT, d.name), { recursive: true, force: true });
+        console.log(`  pruned ${d.name}`);
+      }
+  }
 
   const todo: PbrMaterialAsset[] = [];
   for (const a of unique.values()) {
+    if (ONLY.size && !ONLY.has(a.id)) continue;
     const done =
       !FORCE &&
       (
@@ -205,6 +256,9 @@ async function main(): Promise<void> {
     if (!done) todo.push(a);
   }
   console.log(`materials2: ${unique.size} materials, ${todo.length} to fetch`);
+  for (const a of unique.values())
+    if (!todo.includes(a) && (await normalise(a)))
+      console.log(`  size ${a.id}`);
 
   const queue = [...todo];
   const failures: string[] = [];
@@ -247,7 +301,7 @@ async function main(): Promise<void> {
     join(OUT, "LICENSE.md"),
     `# materials2\n\nAll textures in this directory are from ambientCG (https://ambientcg.com), released under CC0 1.0 Universal (public domain). Credit is not required.\n\nMaterial ids:\n\n${[...unique.keys()].map((k) => `- ${k} (https://ambientcg.com/a/${k})`).join("\n")}\n\nAlbedo may have been colour-graded and maps repacked/converted to WebP by scripts/fetch-materials.ts.\n`,
   );
-  await upsertNotice();
+  await upsertNotice([...unique.keys()].sort());
   console.log("materials2: done");
 }
 

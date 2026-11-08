@@ -63,10 +63,12 @@ export class BrandSign {
     // ---- Backplate + standoffs (one merged mesh, one material)
     const plateMat = new PBRMaterial("brandPlate:mat", scene);
     plateMat.albedoColor = new Color3(0.05, 0.052, 0.058);
-    plateMat.metallic = 0.5;
-    plateMat.roughness = 0.55;
+    // Black satin-painted backplate (dielectric).
+    plateMat.metallic = 0;
+    plateMat.roughness = 0.5;
     plateMat.environmentIntensity = 0.12;
     plateMat.directIntensity = 0.5;
+    plateMat.freeze();
     const pw = CONTENT_W + 0.4;
     const ph = CONTENT_H + 0.3;
     const parts: Mesh[] = [

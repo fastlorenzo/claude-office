@@ -6,6 +6,8 @@
  *    long period (≈ 5–7 m) on top of the tiled ambientCG maps it breaks the
  *    visible repetition and gives floors believable roughness "wear" (wax
  *    patches, scuffs), which is what makes reflections look real.
+ *    `strength` scales it into a grime map (dock, plant walls).
+ *  - `createSandwichPanelNormal` — profiled steel cladding (1.2 m panels).
  *  - `createMossTextures` — preserved-moss wall (albedo + normal).
  *
  * Everything is tileable and seeded (deterministic).
@@ -70,6 +72,7 @@ export function createDetailMap(
   scene: Scene,
   seed = 7,
   size = 512,
+  strength = 1,
 ): RawTexture {
   const cloud = [4, 8, 16, 32].map((p, i) => new TileNoise(p, seed + i));
   const fine = [64, 128].map((p, i) => new TileNoise(p, seed + 10 + i));
@@ -89,8 +92,13 @@ export function createDetailMap(
       const i = y * size + x;
       const c = h[i];
       // Albedo: ±6 % cloudy, roughness: ±18 % (wax / wear patches).
-      const alb = 0.5 + (c - 0.5) * 0.35;
-      const rough = 0.5 + (c - 0.5) * 0.9;
+      const alb = 0.5 + (c - 0.5) * 0.35 * strength;
+      // B > 0.5 roughens, < 0.5 polishes (pbrBlockReflectivity). Grime
+      // (strength > 1) only ever roughens: dirt is matte, never a mirror.
+      const rough =
+        strength > 1
+          ? 0.5 + Math.abs(c - 0.5) * 0.9 * strength
+          : 0.5 + (c - 0.5) * 0.9;
       const hx =
         h[y * size + ((x + 1) % size)] - h[y * size + ((x - 1 + size) % size)];
       const hy =
@@ -112,7 +120,61 @@ export function createDetailMap(
     false,
     Texture.TRILINEAR_SAMPLINGMODE,
   );
-  tex.name = "detail:cloud";
+  tex.name = strength === 1 ? "detail:cloud" : "detail:grime";
+  tex.wrapU = Texture.WRAP_ADDRESSMODE;
+  tex.wrapV = Texture.WRAP_ADDRESSMODE;
+  tex.gammaSpace = false;
+  return tex;
+}
+
+/**
+ * Tangent-space normal map (OpenGL +Y, like the ambientCG sets) of profiled
+ * sandwich panels laid horizontally: one 1.2 m panel per repeat along V
+ * (world height with `applyWorldUVs`), a 20 mm V-joint at the panel edge
+ * and five shallow 40 mm micro-ribs. Only V varies, so the map is 8 × 512.
+ */
+export function createSandwichPanelNormal(scene: Scene, h = 512): RawTexture {
+  const W = 8;
+  const MODULE = 1200; // mm
+  const height = (v: number): number => {
+    const mm = v * MODULE;
+    if (mm < 10) return -2 * (1 - mm / 10);
+    if (mm > MODULE - 10) return -2 * (1 - (MODULE - mm) / 10);
+    const pitch = (MODULE - 20) / 5;
+    const p = ((mm - 10) % pitch) / pitch;
+    const r = Math.abs(p - 0.5) * pitch; // mm from the rib axis
+    if (r < 14) return 1.2;
+    if (r < 26) return 1.2 * (1 - (r - 14) / 12);
+    return 0;
+  };
+  const data = new Uint8Array(W * h * 4);
+  const dv = 1 / h;
+  for (let y = 0; y < h; y++) {
+    const v = (y + 0.5) / h;
+    // Slope (mm / mm), exaggerated so a 1.2 mm rib still reads at 6 m.
+    const dh = (height(v + dv) - height(v - dv)) / (2 * dv * MODULE);
+    let ny = -dh * 6;
+    const l = Math.hypot(ny, 1);
+    ny /= l;
+    const nz = 1 / l;
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      data[i] = 128;
+      data[i + 1] = clamp255(ny * 0.5 + 0.5);
+      data[i + 2] = clamp255(nz * 0.5 + 0.5);
+      data[i + 3] = 255;
+    }
+  }
+  const tex = RawTexture.CreateRGBATexture(
+    data,
+    W,
+    h,
+    scene,
+    true,
+    false,
+    Texture.TRILINEAR_SAMPLINGMODE,
+  );
+  tex.name = "normal:sandwichPanel";
   tex.wrapU = Texture.WRAP_ADDRESSMODE;
   tex.wrapV = Texture.WRAP_ADDRESSMODE;
   tex.gammaSpace = false;

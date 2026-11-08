@@ -107,11 +107,12 @@ export class Cells {
   private disposed = false;
 
   constructor(private readonly scene: Scene) {
-    const metal = this.pbr("cellMetal", 0.45, 0.4);
+    // Powder-coated steel furniture (dielectric; colour per instance).
+    const metal = this.pbr("cellMetal", 0, 0.45);
     metal.environmentIntensity = 0.9;
     this.pools.box = new Pool(this.mesh("cellBox", boxData(), metal));
     this.pools.cyl = new Pool(this.mesh("cellCyl", cylData(), metal));
-    const plateMat = this.pbr("cellPlateMat", 0.35, 0.35);
+    const plateMat = this.pbr("cellPlateMat", 0, 0.38);
     this.pools.plate = new Pool(this.mesh("cellPlate", boxData(), plateMat));
     const glow = new PBRMaterial("cellGlowMat", scene);
     glow.unlit = true;
@@ -124,6 +125,7 @@ export class Cells {
     registerThinResolver(this.pools.plate.mesh, (_m, i) => {
       return this.plateTargets[i] ?? null;
     });
+    for (const m of this.materials) m.freeze();
   }
 
   private pbr(name: string, metallic: number, roughness: number): PBRMaterial {

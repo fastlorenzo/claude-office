@@ -26,7 +26,8 @@
  * Graphics API (wired by GraphicsController):
  *   setAnisotropy(n)          anisotropic filtering of every tiled texture (1–16)
  *   setTextureQuality(q)      "low" | "medium" | "high" → max texture edge
- *                             512 / 1024 / 2048 (reloads the maps in place)
+ *                             256 / 512 / native (512–1024 by tile size,
+ *                             `textureEdge`); reloads the maps in place
  * ---------------------------------------------------------------------------
  */
 import {
@@ -43,12 +44,14 @@ import {
   MATERIALS2,
   material2Path,
   MATERIAL_CANDIDATES,
+  textureEdge,
   type MaterialRole,
   type PbrMaterialAsset,
 } from "@/engine/assets/materials2";
 import {
   createDetailMap,
   createMossTextures,
+  createSandwichPanelNormal,
 } from "@/engine/art/proceduralTextures";
 
 /** Gamma hex → linear Color3 (PBR colours are linear). */
@@ -139,7 +142,8 @@ export type SurfaceKey =
   | "floorEpoxy" // satin grey epoxy floor coat
   | "galvanised" // galvanised steel (treads, trays, decks, roof deck)
   | "steelPainted" // RAL 7016 painted steel (columns, trusses, stringers)
-  | "concreteSoffit"; // fair-faced concrete (slab soffits, wall plinth)
+  | "concreteSoffit" // fair-faced concrete (slab soffits, wall plinth)
+  | "cladding"; // profiled sandwich-panel cladding, light grey powder coat
 
 interface SurfaceSpec {
   color: string;
@@ -164,6 +168,16 @@ interface SurfaceSpec {
   alpha?: number;
   /** IBL multiplier (dark NOC surfaces must not mirror the warm interior HDRI). */
   env?: number;
+  /** Sealed / lacquered top coat (second, sharp specular lobe). */
+  clearCoat?: { intensity: number; roughness: number };
+  /** Detail-map rotation (radians): breaks alignment with the base tiling. */
+  detailAngle?: number;
+  /** Strong grime detail (dirt, scuffs, roughness contrast) instead of wax. */
+  grime?: boolean;
+  /** Keep the flat albedo colour (only normal + ORM from the role's set). */
+  noAlbedoMap?: boolean;
+  /** Procedural normal map instead of the set's (sandwich-panel profile). */
+  normal?: "sandwichPanel";
 }
 
 const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
@@ -178,20 +192,23 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     detail: 6,
   },
   floorLobby: {
+    // Polished terrazzo under a sealer: chips at real scale, glossy top coat.
     color: "#C9C5BE",
     roughness: 0.26,
     role: "floorTerrazzo",
-    tile: 0.6,
-    tint: [0.8, 0.74, 0.69],
-    roughFactor: 0.46,
+    tile: 0.5, // 2–4 cm chips
+    tint: [0.72, 0.78, 0.79],
+    roughFactor: 0.95,
     bumpLevel: 0.25,
     detail: 7,
+    clearCoat: { intensity: 0.55, roughness: 0.12 },
   },
+
   floorRoom: {
     color: "#5A5B5E",
     roughness: 0.95,
     role: "floorCarpet",
-    tint: [1.02, 1.0, 1.0],
+    tint: [1.0, 0.98, 0.98],
     roughFactor: 1.12,
     bumpLevel: 0.9,
   },
@@ -214,6 +231,7 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     bumpLevel: 0.3,
     detail: 6,
     env: 0.5,
+    clearCoat: { intensity: 0.55, roughness: 0.12 },
   },
   rug: {
     color: "#6E6A64",
@@ -233,13 +251,16 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     tint: [1.0, 0.985, 0.955],
     roughFactor: 1.55,
     bumpLevel: 0.22,
+    // 3.5 m repeat + a rotated detail map: no visible 2 m grid on 6 m walls.
+    tile: 3.5,
     detail: 5,
+    detailAngle: 1.13,
   },
   wallAccent: {
     color: "#55575A",
     roughness: 0.8,
     role: "wallFeature",
-    tint: [1.05, 1.04, 1.03],
+    tint: [1.0, 1.0, 1.0],
     roughFactor: 1.15,
     bumpLevel: 0.55,
     detail: 5,
@@ -279,7 +300,7 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     roughness: 0.95,
     role: "ceiling",
     asset: "Plaster001",
-    tint: [1.02, 1.01, 0.99],
+    tint: [1.0, 0.99, 0.97],
     roughFactor: 1.25,
     bumpLevel: 0.08,
   },
@@ -333,45 +354,52 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
   },
   // ---- metals ----
   metal: {
+    // Brushed steel (Metal011 graded to aluminium F0; steel a touch darker).
     color: "#A5A8AC",
     roughness: 0.4,
     metallic: 1,
     role: "metalBrushed",
-    tint: [2.3, 2.3, 2.3],
-    roughFactor: 0.9,
+    tint: [0.9, 0.9, 0.9],
+    roughFactor: 0.8,
     metalFactor: 1,
     bumpLevel: 0.2,
   },
+
   aluminium: {
     color: PALETTE.aluminium,
     roughness: 0.36,
     metallic: 1,
     role: "metalBrushed",
-    tint: [2.5, 2.5, 2.45],
+    tint: [1.0, 0.99, 0.97],
     // ≥ 0.4: brushed, and keeps SSR from speckling on large door leaves.
-    roughFactor: 0.88,
+    roughFactor: 0.8,
     metalFactor: 1,
     bumpLevel: 0.15,
   },
+
   chrome: { color: "#E8EAEC", roughness: 0.1, metallic: 1 },
   blackMetal: {
+    // Black powder coat (dielectric): Metal030's ORM for the satin texture.
     color: "#18191B",
     roughness: 0.42,
     role: "metalDark",
-    tint: [1.6, 1.6, 1.6],
-    roughFactor: 1.4,
+    tint: [0.3, 0.27, 0.25],
+    roughFactor: 1.15,
     metalFactor: 0,
     bumpLevel: 0.1,
   },
+
   charcoal: {
+    // Charcoal powder coat (dielectric).
     color: PALETTE.charcoal,
     roughness: 0.5,
     role: "metalDark",
-    tint: [6.5, 6.6, 7.0],
-    roughFactor: 1.6,
+    tint: [1.0, 0.92, 0.85],
+    roughFactor: 1.4,
     metalFactor: 0,
     bumpLevel: 0.12,
   },
+
   skirting: { color: "#141517", roughness: 0.5 },
   // ---- soft ----
   fabric: {
@@ -386,18 +414,22 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     color: PALETTE.fabricWarm,
     roughness: 0.95,
     role: "fabricUpholstery",
-    tint: [1.45, 1.38, 1.28],
+    asset: "Fabric036",
+    tint: [0.82, 0.73, 0.64],
     roughFactor: 1.15,
     bumpLevel: 0.8,
   },
+
   fabricAccent: {
     color: "#B4694C",
     roughness: 0.95,
     role: "fabricUpholstery",
-    tint: [1.6, 0.62, 0.42],
+    asset: "Fabric036",
+    tint: [0.9, 0.33, 0.21],
     roughFactor: 1.15,
     bumpLevel: 0.8,
   },
+
   fabricDark: {
     color: "#3A3C40",
     roughness: 0.95,
@@ -420,10 +452,11 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     color: "#2B2622",
     roughness: 0.5,
     role: "leather",
-    tint: [3.2, 2.7, 2.3],
+    tint: [1.0, 0.95, 0.9],
     roughFactor: 1.1,
     bumpLevel: 0.6,
   },
+
   rubber: {
     color: "#1C1D20",
     roughness: 0.8,
@@ -432,10 +465,12 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     bumpLevel: 0.5,
   },
   // ---- misc ----
-  glass: { color: "#F2F6F6", roughness: 0.04, alpha: 0.08 },
+  // Faint green edge tint of float glass; reflections come from the zone
+  // probe (Lighting.attachToProbe) at env 0.7 — "something is there".
+  glass: { color: "#E4F0EC", roughness: 0.04, alpha: 0.1, env: 0.7 },
   glassExterior: { color: "#E8EEF0", roughness: 0.03, alpha: 0.12 },
   glassFrosted: { color: "#F4F6F6", roughness: 0.4, alpha: 0.62 },
-  glassTint: { color: "#2E3842", roughness: 0.05, alpha: 0.42 },
+  glassTint: { color: "#2E3842", roughness: 0.05, alpha: 0.42, env: 0.6 },
   plantLeaf: { color: "#4E7A45", roughness: 0.65 },
   plantLeafDark: { color: "#2F5A32", roughness: 0.6 },
   soil: { color: "#3A2C22", roughness: 1 },
@@ -453,11 +488,12 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     color: "#EFEDE9",
     roughness: 0.2,
     role: "floorTerrazzo",
-    tint: [1.02, 0.98, 0.95],
-    roughFactor: 0.35,
+    tint: [0.93, 1.0, 1.0],
+    roughFactor: 0.7,
     bumpLevel: 0.12,
-    tile: 0.9,
+    tile: 0.4,
   },
+
   paint: { color: "#FFFFFF", roughness: 0.72 },
   paintGloss: { color: "#FFFFFF", roughness: 0.28 },
   lampShade: {
@@ -469,13 +505,13 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     color: "#A9A59E",
     roughness: 0.85,
     role: "floorMain",
-    asset: "Concrete019",
-    tint: [1.15, 1.08, 1.05],
-    roughFactor: 1.0,
+    tint: [0.44, 0.46, 0.42],
+    roughFactor: 1.6,
     bumpLevel: 0.6,
     tile: 3,
     detail: 9,
   },
+
   screenOff: { color: "#0B0D10", roughness: 0.15 },
   lightPanel: {
     color: "#000000",
@@ -510,26 +546,40 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
   },
   // ---- software factory ----
   floorEpoxy: {
+    // Grey epoxy over smooth concrete: satin base, sharp clear top coat.
     color: "#8E9294",
-    roughness: 0.3,
+    roughness: 0.45,
     role: "floorEpoxy",
-    tint: [1.43, 1.37, 1.53],
-    roughFactor: 0.42, // satin coat: soft streaks under the LED strips
+    tint: [0.44, 0.46, 0.61],
+    roughFactor: 0.95,
     bumpLevel: 0.08,
     detail: 8,
+    clearCoat: { intensity: 0.5, roughness: 0.16 },
   },
+
   galvanised: {
-    // Satin galvanised steel, flat (no brushed map): treads, trays, decks.
-    color: "#A3A9AE",
+    // Satin galvanised steel (#B4B8BB), brushed ORM: treads, trays, decks.
+    color: "#B4B8BB",
     roughness: 0.42,
-    metallic: 0.85,
+    metallic: 1,
+    role: "metalBrushed",
+    tint: [0.667, 0.684, 0.683],
+    roughFactor: 0.85,
+    metalFactor: 1,
+    bumpLevel: 0.08,
   },
+
   steelPainted: {
-    // RAL 7016 anthracite paint, satin.
+    // RAL 7016 anthracite paint, satin (dielectric).
     color: "#383E42",
     roughness: 0.5,
-    metallic: 0.1,
+    role: "metalDark",
+    tint: [0.5, 0.53, 0.52],
+    roughFactor: 1.2,
+    metalFactor: 0,
+    bumpLevel: 0.05,
   },
+
   concreteSoffit: {
     color: "#A6A49F",
     roughness: 0.9,
@@ -539,12 +589,48 @@ const SURFACES: Record<SurfaceKey, SurfaceSpec> = {
     bumpLevel: 0.45,
     detail: 7,
   },
+  cladding: {
+    // Profiled sandwich panels (1.2 m, horizontal), polyester coat over
+    // steel: dielectric, satin; the colour is the vertex paint × this.
+    color: "#E6E6E6",
+    roughness: 0.5,
+    role: "metalDark",
+    noAlbedoMap: true,
+    normal: "sandwichPanel",
+    roughFactor: 1.9, // ≈ 0.75: satin, and out of SSR (no wall smears)
+    metalFactor: 0,
+    bumpLevel: 1,
+    tile: 1.2,
+    grime: true,
+  },
 };
 
+/**
+ * Surface audit data for tests (WS5): every key with its metallic value and
+ * the albedo gain applied over a texture (null when the surface is flat).
+ */
+export function surfaceAudit(): {
+  key: SurfaceKey;
+  metallic: number;
+  textured: boolean;
+  tint: readonly number[] | null;
+}[] {
+  return (Object.keys(SURFACES) as SurfaceKey[]).map((key) => {
+    const s = SURFACES[key];
+    return {
+      key,
+      metallic: s.role ? (s.metalFactor ?? s.metallic ?? 0) : (s.metallic ?? 0),
+      textured: !!s.role && !s.noAlbedoMap,
+      tint: s.role && !s.noAlbedoMap ? (s.tint ?? [1, 1, 1]) : null,
+    };
+  });
+}
+
+/** Texture edge cap per quality (ORM maps: half). High = the shipped edge. */
 const MAX_SIZE: Record<TextureQuality, number> = {
-  low: 512,
-  medium: 1024,
-  high: 2048,
+  low: 256,
+  medium: 512,
+  high: 4096,
 };
 
 type MapKind = "albedo" | "normal" | "orm";
@@ -554,10 +640,26 @@ interface TexSlot {
   file: string;
   srgb: boolean;
   scale: number;
+  /** Shipped edge of the file (px). */
+  native: number;
 }
 
 export class Materials {
+  private static readonly registry = new WeakMap<Scene, Materials>();
+
+  /**
+   * The scene's material factory (modules built without one — factory pools,
+   * dock — reuse its textured surfaces). Null before the world creates it.
+   */
+  static of(scene: Scene): Materials | null {
+    return Materials.registry.get(scene) ?? null;
+  }
+
   private readonly cache = new Map<string, PBRMaterial>();
+  /** Derived specs (tinted / vertex-coloured) re-textured on load. */
+  private readonly derived = new Map<string, SurfaceSpec>();
+  private grime: BaseTexture | null = null;
+  private panelNormal: Texture | null = null;
   private readonly textures: Texture[] = [];
   private readonly slots = new Map<string, TexSlot>();
   private readonly ownedTextures: BaseTexture[] = [];
@@ -572,16 +674,26 @@ export class Materials {
   constructor(
     private readonly scene: Scene,
     private readonly assetBase: string,
-  ) {}
+  ) {
+    Materials.registry.set(scene, this);
+  }
 
   /** Shared material for a surface. */
   get(key: SurfaceKey): PBRMaterial {
     const hit = this.cache.get(key);
     if (hit) return hit;
     const mat = this.build(key, SURFACES[key]);
-    this.cache.set(key, mat);
+    this.remember(key, mat);
     return mat;
   }
+
+  /** Cache a shared material; frozen at once when created after `freezeAll`. */
+  private remember(k: string, mat: PBRMaterial): void {
+    this.cache.set(k, mat);
+    if (this.frozenAll) mat.freeze();
+  }
+
+  private frozenAll = false;
 
   /**
    * A surface re-tinted to a colour (felt panels per room, accent fabrics).
@@ -602,8 +714,48 @@ export class Materials {
         : base.tint,
     };
     const mat = this.build(k, spec);
-    this.cache.set(k, mat);
+    this.derived.set(k, spec);
     if (this.available) this.applyTextures(mat, spec);
+    this.remember(k, mat);
+    return mat;
+  }
+
+  /**
+   * A textured surface for vertex-coloured merged meshes (dock shell, plant
+   * walls): the surface's normal + ORM (+ detail / grime) at world scale, but
+   * the albedo is `albedo` × the vertex colour (no albedo map, no tint > 1).
+   * Meshes need world-metre UVs (`applyWorldUVs`). Cached per key + albedo.
+   */
+  forVertexColors(
+    key: SurfaceKey,
+    opts: {
+      albedo?: number;
+      grime?: boolean;
+      env?: number;
+      roughFactor?: number;
+    } = {},
+  ): PBRMaterial {
+    const albedo = opts.albedo ?? 0.8;
+    const k = `vc:${key}:${albedo}:${opts.grime ? 1 : 0}:${opts.roughFactor ?? ""}`;
+    const hit = this.cache.get(k);
+    if (hit) return hit;
+    const base = SURFACES[key];
+    const g = Math.round(Math.min(1, albedo) * 255)
+      .toString(16)
+      .padStart(2, "0");
+    const spec: SurfaceSpec = {
+      ...base,
+      color: `#${g}${g}${g}`,
+      noAlbedoMap: true,
+      tint: undefined,
+      env: opts.env ?? base.env,
+      roughFactor: opts.roughFactor ?? base.roughFactor,
+      grime: opts.grime,
+    };
+    const mat = this.build(k, spec);
+    this.derived.set(k, spec);
+    if (this.available) this.applyTextures(mat, spec);
+    this.remember(k, mat);
     return mat;
   }
 
@@ -618,11 +770,11 @@ export class Materials {
     const hit = this.cache.get(k);
     if (hit) return hit;
     const mat = this.build(k, { color: hex, roughness, metallic });
-    this.cache.set(k, mat);
+    this.remember(k, mat);
     return mat;
   }
 
-  /** Emissive material (status lamps, signage). Not frozen: colour animates. */
+  /** Emissive material (signage, reveals): static, shared, frozen. */
   emissive(name: string, hex: string, intensity = 2): PBRMaterial {
     const k = `e:${name}`;
     const hit = this.cache.get(k);
@@ -632,7 +784,7 @@ export class Materials {
       roughness: 1,
       emissive: { color: hex, intensity },
     });
-    this.cache.set(k, mat);
+    this.remember(k, mat);
     return mat;
   }
 
@@ -657,8 +809,11 @@ export class Materials {
     this.exteriorEnv = tex;
     const g = this.cache.get("glassExterior");
     if (g) {
+      const frozen = g.isFrozen;
+      if (frozen) g.unfreeze();
       g.reflectionTexture = tex;
       g.environmentIntensity = tex ? 0.9 : 0.35;
+      if (frozen) g.freeze();
     }
   }
 
@@ -683,6 +838,12 @@ export class Materials {
     mat.enableSpecularAntiAliasing = true;
     mat.useHorizonOcclusion = true;
     mat.useRadianceOcclusion = true;
+    if (spec.clearCoat) {
+      mat.clearCoat.isEnabled = true;
+      mat.clearCoat.intensity = spec.clearCoat.intensity;
+      mat.clearCoat.roughness = spec.clearCoat.roughness;
+      mat.clearCoat.indexOfRefraction = 1.5;
+    }
     if (spec.emissive) {
       mat.emissiveColor = lin(spec.emissive.color);
       mat.emissiveIntensity = spec.emissive.intensity;
@@ -702,7 +863,7 @@ export class Materials {
       // Thin glass never writes depth: panes behind panes must still blend.
       mat.disableDepthWrite = true;
       mat.needDepthPrePass = false;
-      mat.environmentIntensity = 0.3;
+      mat.environmentIntensity = spec.env ?? 0.3;
       if (name === "glassFrosted") {
         // Solid satin-etched band (reads cleanly at any distance).
         mat.alpha = 0.55;
@@ -734,12 +895,27 @@ export class Materials {
     this.ownedTextures.push(albedo, normal);
   }
 
-  private detailMap(): BaseTexture {
+  private detailMap(grime = false): BaseTexture {
+    if (grime) {
+      if (!this.grime) {
+        this.grime = createDetailMap(this.scene, 11, 512, 1.6);
+        this.ownedTextures.push(this.grime);
+      }
+      return this.grime;
+    }
     if (!this.detail) {
       this.detail = createDetailMap(this.scene);
       this.ownedTextures.push(this.detail);
     }
     return this.detail;
+  }
+
+  private sandwichNormal(): Texture {
+    if (!this.panelNormal) {
+      this.panelNormal = createSandwichPanelNormal(this.scene);
+      this.ownedTextures.push(this.panelNormal);
+    }
+    return this.panelNormal;
   }
 
   private assetFor(spec: SurfaceSpec): PbrMaterialAsset | null {
@@ -780,10 +956,14 @@ export class Materials {
       const spec = SURFACES[key];
       if (!spec.role) {
         // Flat surfaces still get the detail map where requested.
-        if (spec.detail) this.applyDetail(this.get(key), spec.detail);
+        if (spec.detail) this.applyDetail(this.get(key), spec);
         continue;
       }
       this.applyTextures(this.get(key), spec);
+    }
+    for (const [k, spec] of this.derived) {
+      const mat = this.cache.get(k);
+      if (mat) this.applyTextures(mat, spec);
     }
     await this.whenTexturesReady();
   }
@@ -797,21 +977,32 @@ export class Materials {
   private applyTextures(mat: PBRMaterial, spec: SurfaceSpec): void {
     const asset = this.assetFor(spec);
     if (!asset || !this.available?.has(asset.id)) {
-      if (spec.detail) this.applyDetail(mat, spec.detail);
+      if (spec.detail || spec.grime) this.applyDetail(mat, spec);
       return;
     }
     const tile = spec.tile ?? asset.tileMeters;
     const scale = 1 / tile;
     const frozen = mat.isFrozen;
     if (frozen) mat.unfreeze();
-    mat.albedoTexture = this.tex(asset.files.albedo, true, scale, "albedo");
-    const t = spec.tint ?? [1, 1, 1];
-    mat.albedoColor = new Color3(t[0], t[1], t[2]);
-    const bump = this.tex(asset.files.normal, false, scale, "normal");
+    if (spec.noAlbedoMap) {
+      mat.albedoTexture = null;
+      mat.albedoColor = lin(spec.color);
+    } else {
+      mat.albedoTexture = this.tex(asset, "albedo", true, scale);
+      const t = spec.tint ?? [1, 1, 1];
+      mat.albedoColor = new Color3(t[0], t[1], t[2]);
+    }
+    let bump: Texture;
+    if (spec.normal === "sandwichPanel") {
+      bump = this.sandwichNormal().clone();
+      bump.uScale = scale;
+      bump.vScale = scale;
+      this.ownedTextures.push(bump);
+    } else bump = this.tex(asset, "normal", false, scale);
     mat.bumpTexture = bump;
     // ambientCG ships OpenGL (+Y) normal maps; Babylon's left-handed frame wants DirectX.
     mat.invertNormalMapY = true;
-    mat.metallicTexture = this.tex(asset.files.orm, false, scale, "orm");
+    mat.metallicTexture = this.tex(asset, "orm", false, scale);
     mat.useAmbientOcclusionFromMetallicTextureRed = true;
     mat.useRoughnessFromMetallicTextureGreen = true;
     mat.useMetallnessFromMetallicTextureBlue = true;
@@ -826,49 +1017,58 @@ export class Materials {
       this.textures.push(b);
       mat.bumpTexture = b;
     }
-    if (spec.detail) this.applyDetail(mat, spec.detail);
+    if (spec.detail || spec.grime) this.applyDetail(mat, spec);
     if (frozen) mat.freeze();
   }
 
-  private applyDetail(mat: PBRMaterial, period: number): void {
-    const d = this.detailMap().clone() as Texture;
+  private applyDetail(mat: PBRMaterial, spec: SurfaceSpec): void {
+    // Grime: 4 m dirt / scuff patches with strong roughness contrast.
+    const period = spec.grime ? 4 : (spec.detail ?? 6);
+    const d = this.detailMap(!!spec.grime).clone() as Texture;
     d.uScale = 1 / period;
     d.vScale = 1 / period;
     d.uAng = 0;
-    d.wAng = 0.61;
+    d.wAng = spec.detailAngle ?? 0.61;
     this.ownedTextures.push(d);
     mat.detailMap.texture = d;
     mat.detailMap.isEnabled = true;
-    mat.detailMap.diffuseBlendLevel = 0.6;
-    mat.detailMap.roughnessBlendLevel = 0.8;
+    // Grime darkens and roughens; it must never polish a patch to a mirror.
+    mat.detailMap.diffuseBlendLevel = spec.grime ? 0.5 : 0.6;
+    mat.detailMap.roughnessBlendLevel = spec.grime ? 0.45 : 0.8;
     mat.detailMap.bumpLevel = 0.12;
   }
 
   private tex(
-    file: string,
+    asset: PbrMaterialAsset,
+    kind: MapKind,
     srgb: boolean,
     scale: number,
-    kind: MapKind,
   ): Texture {
+    const file = asset.files[kind];
     const key = `${file}@${scale.toFixed(4)}`;
     const hit = this.slots.get(key);
     if (hit) return hit.tex;
-    const tex = this.createTexture(file, srgb, kind);
+    const native = textureEdge(asset, kind);
+    const tex = this.createTexture(file, srgb, kind, native);
     tex.uScale = scale;
     tex.vScale = scale;
     tex.anisotropicFilteringLevel = this.anisotropy;
     tex.wrapU = Texture.WRAP_ADDRESSMODE;
     tex.wrapV = Texture.WRAP_ADDRESSMODE;
     this.textures.push(tex);
-    this.slots.set(key, { tex, file, srgb, scale });
+    this.slots.set(key, { tex, file, srgb, scale, native });
     return tex;
   }
 
-  private createTexture(file: string, srgb: boolean, kind: MapKind): Texture {
+  private createTexture(
+    file: string,
+    srgb: boolean,
+    kind: MapKind,
+    native: number,
+  ): Texture {
     const url = this.url(file);
-    const max = MAX_SIZE[this.quality];
-    // ORM maps ship at 1K; albedo / normal at 2K.
-    const native = kind === "orm" ? 1024 : 2048;
+    const cap = MAX_SIZE[this.quality];
+    const max = kind === "orm" ? Math.max(128, cap / 2) : cap;
     const opts = {
       noMipmap: false,
       invertY: true,
@@ -930,7 +1130,7 @@ export class Materials {
         : slot.file.endsWith("normal.webp")
           ? "normal"
           : "albedo";
-      const fresh = this.createTexture(slot.file, slot.srgb, kind);
+      const fresh = this.createTexture(slot.file, slot.srgb, kind, slot.native);
       const old = slot.tex;
       const swap = () => {
         // Copy the new GPU texture into the existing object (keeps every
@@ -947,12 +1147,13 @@ export class Materials {
     }
   }
 
-  /** Freeze every cached material that does not animate. */
+  /**
+   * Freeze every cached material (none animates: reflection / texture swaps
+   * thaw and re-freeze in place). Materials cached later freeze on creation.
+   */
   freezeAll(): void {
-    for (const [k, m] of this.cache) {
-      if (k.startsWith("e:") || k === "glassExterior") continue;
-      m.freeze();
-    }
+    this.frozenAll = true;
+    for (const m of this.cache.values()) m.freeze();
   }
 
   dispose(): void {
@@ -960,12 +1161,17 @@ export class Materials {
     for (const t of this.textures) t.dispose();
     for (const t of this.ownedTextures) t.dispose();
     this.cache.clear();
+    this.derived.clear();
     this.slots.clear();
     this.textures.length = 0;
     this.ownedTextures.length = 0;
     this.env = null;
     this.exteriorEnv = null;
     this.detail = null;
+    this.grime = null;
+    this.panelNormal = null;
+    if (Materials.registry.get(this.scene) === this)
+      Materials.registry.delete(this.scene);
   }
 }
 
@@ -973,23 +1179,21 @@ export class Materials {
 const MEAN_ALBEDO: Record<string, [number, number, number]> = {
   Concrete034: [0.484, 0.484, 0.484],
   Concrete032: [0.09, 0.091, 0.088],
+  Concrete046: [0.609, 0.617, 0.487],
   Wood095: [0.595, 0.397, 0.258],
-  Wood094: [0.405, 0.3, 0.228],
   Wood050: [0.675, 0.496, 0.391],
   Carpet012: [0.097, 0.099, 0.102],
   Carpet016: [0.257, 0.258, 0.249],
-  Tiles043: [0.675, 0.722, 0.709],
+  Terrazzo006: [0.755, 0.688, 0.627],
   Plaster002: [0.767, 0.762, 0.749],
   Plaster001: [0.847, 0.839, 0.825],
   Fabric030: [0.143, 0.141, 0.143],
   Fabric061: [0.261, 0.248, 0.235],
   Fabric036: [0.492, 0.492, 0.492],
-  Metal009: [0.289, 0.299, 0.314],
-  Metal029: [0.013, 0.016, 0.015],
-  Leather026: [0.01, 0.01, 0.009],
+  Metal011: [0.684, 0.7, 0.728],
+  Metal030: [0.079, 0.091, 0.103],
+  Leather026: [0.023, 0.022, 0.022],
   Rubber004: [0.023, 0.025, 0.031],
-  Concrete019: [0.187, 0.209, 0.193],
-  Concrete046: [0.609, 0.617, 0.487],
 };
 
 async function urlExists(url: string): Promise<boolean> {

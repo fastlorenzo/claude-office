@@ -443,14 +443,16 @@ export class Workpieces {
     this.slotKey = new Array<string>(this.maxTags).fill("");
     for (let i = this.maxTags - 1; i >= 0; i--) this.freeSlots.push(i);
 
+    // Anodised aluminium body (metal: the instance tint is its F0) on a
+    // moulded plastic pallet (dielectric).
     const body = new PBRMaterial("wpBody", scene);
     body.albedoColor = Color3.White();
-    body.metallic = 0.55;
+    body.metallic = 1;
     body.roughness = 0.42;
     const palletMat = new PBRMaterial("wpPallet", scene);
-    palletMat.albedoColor = new Color3(0.16, 0.18, 0.21);
-    palletMat.metallic = 0.5;
-    palletMat.roughness = 0.5;
+    palletMat.albedoColor = new Color3(0.05, 0.055, 0.065);
+    palletMat.metallic = 0;
+    palletMat.roughness = 0.62;
     const bandMat = new StandardMaterial("wpBand", scene);
     bandMat.disableLighting = true;
     bandMat.emissiveColor = new Color3(0.8, 0.8, 0.8);
@@ -478,6 +480,7 @@ export class Workpieces {
     this.band.material = bandMat;
     this.ghost = CreateBox("wpGhost", { size: 1 }, scene);
     this.ghost.material = ghostMat;
+    for (const m of [body, palletMat, bandMat, ghostMat]) m.freeze();
     this.ghost.isPickable = false;
     this.ghost.alwaysSelectAsActiveMesh = true;
     this.ghost.doNotSyncBoundingInfo = true;

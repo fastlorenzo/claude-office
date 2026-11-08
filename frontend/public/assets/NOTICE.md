@@ -21,3 +21,30 @@ but is gratefully given.
 
 `HavokPhysics.wasm` (copied to `public/havok/`) is distributed under the license of the
 `@babylonjs/havok` package.
+
+<!-- BEGIN MATERIALS2 -->
+## materials2 (ambientCG, CC0 1.0)
+
+PBR textures under `materials2/` come from [ambientCG](https://ambientcg.com)
+and are released under CC0 1.0 Universal (public domain); credit is not
+required. Fetched, colour-graded, resized and packed (ORM) by `bun run materials`
+(`scripts/fetch-materials.ts`; the list is `src/engine/assets/materials2.ts`):
+
+- [Carpet012](https://ambientcg.com/a/Carpet012)
+- [Carpet016](https://ambientcg.com/a/Carpet016)
+- [Concrete032](https://ambientcg.com/a/Concrete032)
+- [Concrete034](https://ambientcg.com/a/Concrete034)
+- [Concrete046](https://ambientcg.com/a/Concrete046)
+- [Fabric030](https://ambientcg.com/a/Fabric030)
+- [Fabric036](https://ambientcg.com/a/Fabric036)
+- [Fabric061](https://ambientcg.com/a/Fabric061)
+- [Leather026](https://ambientcg.com/a/Leather026)
+- [Metal011](https://ambientcg.com/a/Metal011)
+- [Metal030](https://ambientcg.com/a/Metal030)
+- [Plaster001](https://ambientcg.com/a/Plaster001)
+- [Plaster002](https://ambientcg.com/a/Plaster002)
+- [Rubber004](https://ambientcg.com/a/Rubber004)
+- [Terrazzo006](https://ambientcg.com/a/Terrazzo006)
+- [Wood050](https://ambientcg.com/a/Wood050)
+- [Wood095](https://ambientcg.com/a/Wood095)
+<!-- END MATERIALS2 -->

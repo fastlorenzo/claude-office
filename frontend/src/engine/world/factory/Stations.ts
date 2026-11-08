@@ -174,9 +174,10 @@ export class Stations {
   private msMean = 0;
 
   constructor(private readonly scene: Scene) {
-    // Satin painted steel (housing) and glossy robot paint (arm).
-    const paint = this.pbr("stationPaint", 0.18, 0.36);
-    const robot = this.pbr("stationArmPaint", 0.08, 0.28);
+    // Satin painted steel (housing) and glossy robot paint (arm): both
+    // dielectric (paint), the arm under a clear coat.
+    const paint = this.pbr("stationPaint", 0, 0.4);
+    const robot = this.pbr("stationArmPaint", 0, 0.3);
     robot.clearCoat.isEnabled = true;
     robot.clearCoat.intensity = 0.5;
     robot.clearCoat.roughness = 0.12;
@@ -219,6 +220,8 @@ export class Stations {
       this.mesh("stationGlyph", drumData(), glyphMat),
       true,
     );
+    // Nothing here animates per material (colours are per instance).
+    for (const m of this.materials) m.freeze();
   }
 
   private pbr(name: string, metallic: number, roughness: number): PBRMaterial {

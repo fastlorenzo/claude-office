@@ -16,7 +16,6 @@ import {
   Mesh,
   PBRMaterial,
   Scene,
-  StandardMaterial,
   Texture,
   TransformNode,
   VertexBuffer,
@@ -63,6 +62,7 @@ import {
 } from "@/engine/world/factory/dockModel";
 import { MeshSoup, hexColor, type RGBA } from "@/engine/world/factory/meshSoup";
 import { Truck } from "@/engine/world/factory/Truck";
+import { applyWorldUVs, Materials } from "@/engine/materials/Materials";
 
 type Ctx2D = CanvasRenderingContext2D;
 
@@ -230,12 +230,14 @@ export class Dock {
       DOOR_TEX_H,
       true,
     );
+    // Painted steel roller doors (dielectric; the canvas carries the slats).
     const dm = new PBRMaterial("dock:doorMat", scene);
     dm.albedoTexture = this.doorTex;
-    dm.metallic = 0.35;
+    dm.metallic = 0;
     dm.roughness = 0.5;
     dm.environmentIntensity = 0.6;
     this.doorMesh.material = dm;
+    dm.freeze();
 
     this.boardTex = this.makeTexture(
       "dock:board",
@@ -1041,22 +1043,40 @@ export class Dock {
     this.metal = this.track(me, "dock:metal");
     this.led = this.track(ld, "dock:led");
 
-    const mk = (name: string, metallic: number, rough: number, env: number) => {
+    const mk = (name: string, rough: number, env: number) => {
       const m = new PBRMaterial(name, scene);
       m.albedoColor = Color3.White();
-      m.metallic = metallic;
+      m.metallic = 0;
       m.roughness = rough;
       m.environmentIntensity = env;
       return m;
     };
-    this.matte.material = mk("dock:matteMat", 0, 0.88, 0.55);
-    this.metal.material = mk("dock:metalMat", 0.5, 0.42, 0.9);
-    const lm = new StandardMaterial("dock:ledMat", scene);
-    lm.disableLighting = true;
-    lm.diffuseColor = Color3.White();
-    lm.emissiveColor = Color3.Black();
-    lm.specularColor = Color3.Black();
+    // Precast concrete shell and painted steel: the shared textured surfaces
+    // (normal + ORM at world scale + grime) under the vertex colours, with
+    // the albedo pulled down to real concrete / paint (was white × colour:
+    // the washed-out beige of the review shots). Flat fallbacks headless.
+    const mats = Materials.of(scene);
+    applyWorldUVs(this.matte);
+    applyWorldUVs(this.metal);
+    this.matte.material =
+      mats?.forVertexColors("concreteSoffit", {
+        albedo: 0.82,
+        grime: true,
+        env: 0.45,
+        // Rough enough (> 0.8) to stay out of SSR: glossy walls smeared the
+        // bright door openings into streaks.
+        roughFactor: 1.7,
+      }) ?? mk("dock:matteMat", 0.88, 0.45);
+    this.metal.material =
+      mats?.forVertexColors("steelPainted", { albedo: 0.9, env: 0.7 }) ??
+      mk("dock:metalMat", 0.45, 0.7);
+    // LED diffusers: unlit, output = vertex colour (an unlit StandardMaterial
+    // with black emissive rendered them black).
+    const lm = new PBRMaterial("dock:ledMat", scene);
+    lm.unlit = true;
+    lm.albedoColor = Color3.White();
     this.led.material = lm;
+    lm.freeze();
     for (const m of [this.matte, this.metal, this.led]) m.freezeWorldMatrix();
   }
 
