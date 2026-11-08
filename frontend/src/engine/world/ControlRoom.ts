@@ -1818,6 +1818,8 @@ export class ControlRoom {
       this.dots.thinInstanceSetBuffer("color", this.dotCol, 4, false);
     }
     const t = performance.now() / 1000;
+            // Curved strip: a frame fitted to its AABB would be a deep slab.
+            noFocusFrame: true,
     const span = panel.a1 - panel.a0;
     const yTop = WALL_Y.upper1;
     const yH = WALL_Y.upper1 - WALL_Y.upper0;
