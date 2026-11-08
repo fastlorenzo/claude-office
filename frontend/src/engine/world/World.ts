@@ -97,12 +97,18 @@ import { Factory } from "@/engine/world/factory/Factory";
 import { FactoryLines } from "@/engine/world/factory/FactoryLines";
 import { cellStairFoot } from "@/engine/world/factory/FactoryHall";
 import { DOCK, DOCK_SPAWN } from "@/engine/world/factory/Dock";
+import {
+  BuildingGate,
+  computeBuildingVisibility,
+  type BuildingPart,
+} from "@/engine/world/buildingVisibility";
 import { computeCellVisibility } from "@/engine/world/factoryVisibility";
 import { ControlRoom } from "@/engine/world/ControlRoom";
 import { ProjectRoom } from "@/engine/world/ProjectRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
 import {
   halfFovFor,
+  VISIBILITY_HZ,
   VisibilityController,
   visRoomsOfProjects,
   type VisInput,
@@ -1153,6 +1159,55 @@ class World implements IWorld {
     );
   }
 
+  private readonly buildingGate = new BuildingGate();
+  private lastGateAt = -Infinity;
+
+  /** Sightline gating of lobby / entrance / factory shell / exterior (5 Hz). */
+  private gateBuilding(now: number, vi: VisInput, feedMode: boolean): void {
+    if (!this.building || now - this.lastGateAt < 1000 / VISIBILITY_HZ) return;
+    this.lastGateAt = now;
+    const parts: Partial<
+      Record<BuildingPart, { setEnabled(v: boolean): void }>
+    > = {
+      ...this.building.gateParts,
+      factory: {
+        setEnabled: (v) => {
+          for (const m of this.factory?.hall.staticMeshes ?? [])
+            m.setEnabled(v);
+        },
+      },
+    };
+    if (feedMode) {
+      this.buildingGate.reset(parts);
+      return;
+    }
+    const s = this.layout.lobby.size;
+    this.buildingGate.apply(
+      now,
+      computeBuildingVisibility({
+        vis: vi,
+        lobbyRect: { x0: -s.x / 2, x1: s.x / 2, z0: -s.z - 4, z1: 0 },
+      }),
+      parts,
+    );
+  }
+
+  /** Debug: active meshes of the building parts with their world bounds. */
+  private activeNames(): string[] {
+    const out: string[] = [];
+    const list = this.scene.getActiveMeshes();
+    for (let i = 0; i < list.length; i++) {
+      const m = list.data[i];
+      if (!/^(lobby|factory|entrance|exterior|outer)/.test(m.name)) continue;
+      const b = m.getBoundingInfo().boundingBox;
+      const f = (v: number) => Math.round(v);
+      out.push(
+        `${m.name}#${m.subMeshes?.length ?? 1}[${f(b.minimumWorld.x)},${f(b.minimumWorld.y)},${f(b.minimumWorld.z)}..${f(b.maximumWorld.x)},${f(b.maximumWorld.y)},${f(b.maximumWorld.z)}]`,
+      );
+    }
+    return out;
+  }
+
   private updateLod(now: number, zone: Zone3): void {
     if (!this.player || !this.visibility || !this.actorHub || !this.screenHub)
       return;
@@ -1188,6 +1243,7 @@ class World implements IWorld {
       vi.hallLength = this.layout.hall.length;
       vi.hallHalfWidth = this.layout.hall.width / 2;
       this.visibility.update(now, this.visHandles(), vi, feedMode);
+      this.gateBuilding(now, vi, feedMode);
     }
     if (!off && this.factory && now - this.lastFactoryVisAt >= FACTORY_VIS_MS) {
       this.lastFactoryVisAt = now;
@@ -1251,6 +1307,7 @@ class World implements IWorld {
               texBy: textureMBByGroup(this.engine),
               pp: this.fx?.stageNames ?? [],
               hl: this.takeOccluderKinds(),
+              act: this.activeNames(),
             }
           : {}),
         ...(this.debug.walk

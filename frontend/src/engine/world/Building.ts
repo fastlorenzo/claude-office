@@ -186,6 +186,23 @@ export class Building {
     return this.entranceHall;
   }
 
+  /** Static parts that sightline gating can switch off (buildingVisibility). */
+  get gateParts(): Record<
+    "lobby" | "entrance" | "exterior",
+    { setEnabled(v: boolean): void }
+  > {
+    const of = (get: () => readonly AbstractMesh[]) => ({
+      setEnabled: (v: boolean) => {
+        for (const m of get()) if (!m.isDisposed()) m.setEnabled(v);
+      },
+    });
+    return {
+      lobby: of(() => this.lobby?.meshes ?? []),
+      entrance: of(() => this.entranceHall?.meshes ?? []),
+      exterior: of(() => this.skyline?.meshes ?? []),
+    };
+  }
+
   /** Per-frame: LED ticker. */
   update(dt: number): void {
     this.controlLed?.update(dt);
