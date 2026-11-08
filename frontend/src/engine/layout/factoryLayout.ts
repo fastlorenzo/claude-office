@@ -56,8 +56,11 @@ export const ENTRANCE = {
   UPPER_X: [10.15, 11.55] as const,
   /** Landing (y = FLOOR_Y / 2) z range, against the south façade. */
   LANDING_Z: [-11.85, -10.6] as const,
-  /** Both flights run between the landing and this z (stair foot / head). */
-  FLIGHT_Z1: -6.6,
+  /**
+   * Both flights run between the landing and this z (stair foot / head):
+   * 3.0 m drop over 4.6 m → 17 risers of 0.176, going 0.27, 33° (G12).
+   */
+  FLIGHT_Z1: -6.0,
   /** Opening / footprint |x| range and z range. */
   RECT_X: [10.1, 13.1] as const,
   RECT_Z0: -11.9,
@@ -223,7 +226,6 @@ export function buildFactoryLayout(
   const dockDepth = opts.dockDepth ?? FACTORY.DOCK_D;
   const frontX = LAYOUT.HALL_W / 2;
   const { ROOM_W } = LAYOUT;
-  const hallLen = building.hall.length;
   const controlEnd =
     building.controlRoom.origin.z + building.controlRoom.size.z / 2;
   const zMin = Math.max(building.bounds.min.z, FACTORY.SOUTH_Z);
@@ -289,23 +291,7 @@ export function buildFactoryLayout(
 
   const dock = rectOf(-outerX, outerX, controlEnd, controlEnd + dockDepth);
 
-  // Spine-node stairs every 4 bays along the hall edge, alternating sides.
-  const spineStairs: StairLayout[] = [];
-  const STAIR_HALF = 3.2;
-  for (
-    let b = 2, k = 0;
-    b * ROOM_W + STAIR_HALF + 1 < hallLen;
-    b += FACTORY.SPINE_STAIR_EVERY, k++
-  ) {
-    const zc = b * ROOM_W;
-    const s = k % 2 === 0 ? 1 : -1;
-    spineStairs.push({
-      id: `spine:${k}`,
-      rect: rectOf(s * 2.3, s * frontX, zc - STAIR_HALF, zc + STAIR_HALF),
-      top: v3(s * 2.9, 0, zc - STAIR_HALF - 0.6),
-      bottom: v3(s * 2.9, FLOOR_Y, zc + STAIR_HALF + 0.6),
-    });
-  }
+  const spineStairs = spineStairPlan(building, cells);
 
   const entrance = buildEntrance(building);
   const lift = entrance.lift;
@@ -334,6 +320,115 @@ export function buildFactoryLayout(
   };
 }
 
+/**
+ * Spine-node stair wells (pure). Each well is a 1.2 × 6.4 m hole in the hall
+ * floor against one glass front (|x| 2.3–3.5) centred on a bay line, with a
+ * guard rail on its hall side; the flight drops 6 m along +z and carries on
+ * under the slab (`SPINE_STAIR.RUN`) to a foot on the factory floor.
+ *
+ * Wells follow the rooms (G2): the old fixed rhythm (bays 2, 6, 10 …) could
+ * put a room door inside a well — rail across the doorway from the hall, a
+ * 3.6 m drop beyond it. A well is only placed where, on its side,
+ *   - no room door (± DOOR_CLEAR) and no hall planter (room far end) falls
+ *     inside the well's z range, and
+ *   - no cell feeder (trunk → main line, at the entry bay) crosses the
+ *     flight's floor footprint (± FEEDER_CLEAR);
+ * and never over the glazed tower bay. Targets keep the rhythm (every
+ * `SPINE_STAIR_EVERY` bays, alternating sides, preferring the target bay,
+ * then the other side, then ± 1, ± 2 bays) with at least
+ * `SPINE_STAIR.MIN_GAP_BAYS` between wells.
+ */
+export const SPINE_STAIR = {
+  /** Well half length (z) and |x| range. */
+  HALF: 3.2,
+  X: [2.3, 3.5] as const,
+  /** Flight plan length (mirrors FactoryHall.SPINE_RUN) and the foot zone. */
+  RUN: 8.6,
+  FOOT: 1.25,
+  /** First candidate bay line. */
+  FIRST_BAY: 2,
+  MIN_GAP_BAYS: 2,
+  /** Door opening clearance (each side, beyond DOOR_W / 2). */
+  DOOR_CLEAR: 0.7,
+  /** Hall planter half size + margin (at |x| 2.95, z1 − 0.6 of each room). */
+  PLANTER_CLEAR: 0.5,
+  /** Feeder belt half width + capsule + margin. */
+  FEEDER_CLEAR: 1.0,
+  /** Glazed tower bay at the hall end (mirrors Building TOWER_BAY_D). */
+  TOWER_BAY_D: 4,
+} as const;
+
+/** Floor-level z range a spine flight + its foot occupy (from the well's z0). */
+export function spineFootprintZ(wellZ0: number): [number, number] {
+  return [wellZ0, wellZ0 + SPINE_STAIR.RUN + SPINE_STAIR.FOOT];
+}
+
+export function spineStairPlan(
+  building: BuildingLayout,
+  cells: readonly Pick<CellLayout, "side" | "trunk">[],
+): StairLayout[] {
+  const S = SPINE_STAIR;
+  const W = LAYOUT.ROOM_W;
+  const L = building.hall.length;
+  const doorHalf = LAYOUT.DOOR_W / 2 + S.DOOR_CLEAR;
+  const overlaps = (a0: number, a1: number, b0: number, b1: number) =>
+    a0 < b1 && b0 < a1;
+  const ok = (b: number, side: RoomSide): boolean => {
+    const zc = b * W;
+    const z0 = zc - S.HALF;
+    const z1 = zc + S.HALF;
+    if (b < S.FIRST_BAY || z1 > L - S.TOWER_BAY_D + 1e-9) return false;
+    for (const r of building.projects) {
+      if (r.slot.side !== side) continue;
+      const dz = r.door.z;
+      if (overlaps(z0, z1, dz - doorHalf, dz + doorHalf)) return false;
+      const pz = r.footprint.z1 - 0.6;
+      if (overlaps(z0, z1, pz - S.PLANTER_CLEAR, pz + S.PLANTER_CLEAR))
+        return false;
+    }
+    const [f0, f1] = spineFootprintZ(z0);
+    for (const c of cells) {
+      if (c.side !== side) continue;
+      const fz = c.trunk.feederZ;
+      if (overlaps(f0, f1, fz - S.FEEDER_CLEAR, fz + S.FEEDER_CLEAR))
+        return false;
+    }
+    return true;
+  };
+  const out: StairLayout[] = [];
+  let prevBay = -Infinity;
+  let prefer: RoomSide = "east";
+  const maxBay = Math.floor(L / W);
+  for (let t = S.FIRST_BAY; t <= maxBay;) {
+    let pick: { b: number; side: RoomSide } | null = null;
+    const other: RoomSide = prefer === "east" ? "west" : "east";
+    for (const d of [0, 1, -1, 2, -2]) {
+      const b = t + d;
+      if (b - prevBay < S.MIN_GAP_BAYS + 1) continue;
+      for (const side of [prefer, other])
+        if (!pick && ok(b, side)) pick = { b, side };
+      if (pick) break;
+    }
+    if (!pick) {
+      t += FACTORY.SPINE_STAIR_EVERY;
+      continue;
+    }
+    const s = sgn(pick.side);
+    const zc = pick.b * W;
+    const k = out.length;
+    out.push({
+      id: `spine:${k}`,
+      rect: rectOf(s * S.X[0], s * S.X[1], zc - S.HALF, zc + S.HALF),
+      top: v3(s * 2.9, 0, zc - S.HALF - 0.6),
+      bottom: v3(s * 2.9, FLOOR_Y, zc - S.HALF + S.RUN + 0.6),
+    });
+    prevBay = pick.b;
+    prefer = pick.side === "east" ? "west" : "east";
+    t = pick.b + FACTORY.SPINE_STAIR_EVERY;
+  }
+  return out;
+}
+
 /** Entrance building data (ground lobby, stairs, lift, doors) for a layout. */
 export function buildEntrance(building: BuildingLayout): EntranceLayout {
   const E = ENTRANCE;
@@ -349,12 +444,15 @@ export function buildEntrance(building: BuildingLayout): EntranceLayout {
       const [lz0, lz1] = E.LANDING_Z;
       const lowerMid = s * ((E.LOWER_X[0] + E.LOWER_X[1]) / 2);
       const upperMid = s * ((E.UPPER_X[0] + E.UPPER_X[1]) / 2);
+      // Foot / head spots: mid-way between the flights' north end and the
+      // shared wall's inner face (the approach strip along the wall).
+      const zSpot = (E.FLIGHT_Z1 + zWall - E.WALL_T) / 2;
       return {
         id: `entrance:${side}`,
         side,
         rect: xr(E.RECT_X, E.RECT_Z0, E.FLIGHT_Z1),
-        top: v3(upperMid, 0, E.FLIGHT_Z1 + 0.7),
-        bottom: v3(lowerMid, FLOOR_Y, E.FLIGHT_Z1 + 0.7),
+        top: v3(upperMid, 0, zSpot),
+        bottom: v3(lowerMid, FLOOR_Y, zSpot),
         lower: xr(E.LOWER_X, lz1, E.FLIGHT_Z1),
         upper: xr(E.UPPER_X, lz1, E.FLIGHT_Z1),
         landing: rectOf(s * E.UPPER_X[0], s * E.LOWER_X[1], lz0, lz1),
