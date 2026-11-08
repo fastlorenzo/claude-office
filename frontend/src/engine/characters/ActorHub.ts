@@ -241,6 +241,7 @@ export class ActorHub {
     }
     order.sort((x, y) => x.dist - y.dist);
     let skinned = 0;
+    let nears = 0;
     for (const { a, slot, dist } of order) {
       const f = a.feet;
       const detail = this.detail.get(a.sessionId) ?? "full";
@@ -250,6 +251,7 @@ export class ActorHub {
       // Skinned-character budget: only the nearest N keep their skinned mesh.
       if (!this.feedMode && (tier === "near" || tier === "mid")) {
         if (++skinned > this.budget.maxSkinned) tier = "far";
+        else if (tier === "near" && ++nears > this.budget.maxNear) tier = "mid";
       }
       if (tier !== slot.tier) {
         slot.tier = tier;

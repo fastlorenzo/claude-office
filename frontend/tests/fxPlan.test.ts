@@ -156,3 +156,32 @@ describe("QualityGovernor", () => {
     expect(new QualityGovernor(true, true, () => {}).tier).toBe("low");
   });
 });
+
+describe("gbuffer range / character budget", () => {
+  it("caps the G-buffer range only when SSAO or SSR is on", () => {
+    const s = applyPreset("high", defaultGraphicsSettings());
+    expect(planFx(s).gbufferRangeM).toBe(16);
+    const off = {
+      ...s,
+      ambientOcclusion: "off",
+      screenSpaceReflections: "off",
+    } as typeof s;
+    expect(planFx(off).gbufferRangeM).toBe(0);
+  });
+  it("skinned budget is bounded and near <= skinned", async () => {
+    const { characterBudget } = await import("@/engine/characters/lod");
+    for (const d of ["low", "medium", "high"] as const) {
+      const b = characterBudget(d);
+      expect(b.maxNear).toBeLessThanOrEqual(b.maxSkinned);
+      expect(b.maxSkinned).toBeLessThanOrEqual(10);
+    }
+  });
+});
+
+describe("gbufferReach", () => {
+  it("small props drop out near, big architecture keeps the full range", async () => {
+    const { gbufferReach } = await import("@/engine/fx/fxPlan");
+    expect(gbufferReach(0.1, 16)).toBeLessThan(3);
+    expect(gbufferReach(5, 16)).toBe(16);
+  });
+});

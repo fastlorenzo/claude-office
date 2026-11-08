@@ -40,6 +40,12 @@ export interface FxPlan {
   taa: { samples: number } | null;
   ssao: SsaoPlan | null;
   ssr: SsrPlan | null;
+  /**
+   * G-buffer (SSAO/SSR) draw range in metres: only active meshes whose bounds
+   * come within this distance of the eye are rendered into the geometry
+   * buffer (the pass re-draws everything otherwise). 0 = no G-buffer / no cap.
+   */
+  gbufferRangeM: number;
   bloom: boolean;
   chromaticAberration: boolean;
   grain: boolean;
@@ -91,6 +97,24 @@ export const SSAO_BY_QUALITY: Record<
   medium: { ratio: 0.5, blurRatio: 0.5, samples: 16, expensiveBlur: true },
   high: { ratio: 0.75, blurRatio: 0.75, samples: 24, expensiveBlur: true },
 };
+
+/** G-buffer draw range per AO quality (AO radius is < 1 m, SSR is subtle far away). */
+export const GBUFFER_RANGE_M = { low: 12, medium: 16, high: 20 } as const;
+
+/**
+ * How far from the eye a mesh of bounding radius `r` must still be drawn into
+ * the G-buffer: small props only matter for AO / SSR close up, big architecture
+ * (floors, walls, merged shells) out to the full `range`.
+ */
+export function gbufferReach(r: number, range: number): number {
+  return Math.min(range, 1 + 4 * r);
+}
+
+export function gbufferRange(s: GraphicsSettings): number {
+  if (s.ambientOcclusion !== "off") return GBUFFER_RANGE_M[s.ambientOcclusion];
+  if (s.screenSpaceReflections !== "off") return GBUFFER_RANGE_M.medium;
+  return 0;
+}
 
 export const SSR_BY_QUALITY: Record<
   Exclude<GraphicsSettings["screenSpaceReflections"], "off">,
@@ -161,6 +185,7 @@ export function planFx(s: GraphicsSettings): FxPlan {
       s.screenSpaceReflections === "off"
         ? null
         : SSR_BY_QUALITY[s.screenSpaceReflections],
+    gbufferRangeM: gbufferRange(s),
     bloom: s.bloom,
     chromaticAberration: s.chromaticAberration,
     grain: s.filmGrain,

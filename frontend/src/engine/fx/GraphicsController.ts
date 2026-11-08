@@ -9,7 +9,12 @@
  * Subsystem APIs owned by other agents (Lighting.setShadowQuality, ...) are
  * feature-detected; the fallbacks keep the existing behaviour.
  */
-import type { AbstractEngine, Scene, Camera } from "@/engine/babylon";
+import type {
+  AbstractEngine,
+  AbstractMesh,
+  Scene,
+  Camera,
+} from "@/engine/babylon";
 import { Vector3 } from "@/engine/babylon";
 import type { Lighting } from "@/engine/fx/Lighting";
 import type { Materials } from "@/engine/materials/Materials";
@@ -21,6 +26,7 @@ import {
   activeStages,
   autoStartTier,
   diffPlan,
+  gbufferReach,
   planFx,
   resolveEffective,
   type ConcretePreset,
@@ -77,6 +83,8 @@ export class GraphicsController {
   private inspectFocusM = 2;
   private dofStrength = 0;
   private iblNoted = false;
+  private gbufHooked: unknown = null;
+  private readonly gbufList: AbstractMesh[] = [];
 
   constructor(
     private readonly t: GfxTargets,
@@ -157,6 +165,7 @@ export class GraphicsController {
 
   /** Per-frame: animate DoF focus in/out. */
   update(dtMs: number): void {
+    this.updateGBufferList();
     const fx = this.t.getFx();
     const mode = this.plan?.dofMode ?? "off";
     if (!fx || mode === "off") return;
@@ -172,6 +181,36 @@ export class GraphicsController {
     if (Math.abs(target - this.dofStrength) < 0.01) this.dofStrength = target;
     const focus = mode === "always" ? this.alwaysFocus() : this.inspectFocusM;
     fx.setDof(this.dofStrength, focus);
+  }
+
+  /**
+   * SSAO/SSR re-render every active mesh into the geometry buffer (a second
+   * full scene pass). Hook the G-buffer's render-list callback so it only
+   * draws active (frustum-culled) meshes that are still near enough to matter
+   * (see gbufferReach); the callback reads the live plan each frame.
+   */
+  private updateGBufferList(): void {
+    const mrt = this.t.scene.geometryBufferRenderer?.getGBuffer();
+    if (!mrt || mrt === this.gbufHooked) return;
+    this.gbufHooked = mrt;
+    const scene = this.t.scene;
+    const out = this.gbufList;
+    mrt.getCustomRenderList = (_i, list, len) => {
+      const range = this.plan?.gbufferRangeM ?? 0;
+      const cam = scene.activeCamera;
+      if (range <= 0 || !cam || !list) return null;
+      const eye = cam.globalPosition;
+      out.length = 0;
+      for (let i = 0; i < len; i++) {
+        const m = list[i];
+        const bs = m.getBoundingInfo().boundingSphere;
+        const c = bs.centerWorld;
+        const r = bs.radiusWorld;
+        const d = Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z);
+        if (d - r < gbufferReach(r, range)) out.push(m);
+      }
+      return out;
+    };
   }
 
   private alwaysFocus(): number {

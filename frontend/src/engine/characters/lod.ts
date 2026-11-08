@@ -23,10 +23,12 @@ export type CharacterDetail = "low" | "medium" | "high";
 export function characterBudget(d: CharacterDetail): {
   scale: number;
   maxSkinned: number;
+  /** Of those, how many may be "near" (full detail: lanyard / extras). */
+  maxNear: number;
 } {
-  if (d === "low") return { scale: 0.6, maxSkinned: 8 };
-  if (d === "medium") return { scale: 0.8, maxSkinned: 16 };
-  return { scale: 1, maxSkinned: 16 };
+  if (d === "low") return { scale: 0.6, maxSkinned: 6, maxNear: 3 };
+  if (d === "medium") return { scale: 0.8, maxSkinned: 8, maxNear: 5 };
+  return { scale: 1, maxSkinned: 10, maxNear: 6 };
 }
 
 /** Tier from the eye distance, with hysteresis against `prev`. */
