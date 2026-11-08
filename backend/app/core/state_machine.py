@@ -11,6 +11,7 @@ from app.core.quotes import get_random_job_completion_quote
 from app.core.session_phase import slim_tool_input
 from app.core.summary_service import get_summary_service, is_trivial_prompt, objective_fallback
 from app.core.token_tracker import TokenTracker
+from app.core.tool_calls import AgentTree, ApplyResult, ToolCallTracker
 from app.core.whiteboard_tracker import WhiteboardTracker
 from app.models.agents import (
     Agent,
@@ -198,6 +199,8 @@ def parse_todos_from_event(event: AnyEvent) -> list[TodoItem]:
 
 OBJECTIVE_PROMPT_HISTORY = 6
 FIRST_PROMPTS_KEPT = 3
+# ``state_update.history`` carries only the latest entries, slimmed (spec 3.2 rule 9).
+STATE_HISTORY_LIMIT = 50
 
 
 def describe_tool_activity(event: ToolEvent) -> str:
@@ -265,8 +268,9 @@ def _handle_pre_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     assert isinstance(event, ToolEvent)
     tool_name = event.data.tool_name
     sm.compacting = False
+    agent_id = sm.routed_agent_id(event)
 
-    if tool_name and (event.data.agent_id or "main") == "main":
+    if tool_name and agent_id == "main":
         sm.last_tool_name = tool_name
         sm.last_tool_input = slim_tool_input(event.data.tool_input)
         sm.tool_running = True
@@ -280,12 +284,15 @@ def _handle_pre_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
             sm.todos = parsed
 
     if tool_name in ("Task", "Agent"):
-        sm.phase = OfficePhase.DELEGATING
-        sm.boss_state = BossState.DELEGATING
-        sm.elevator_state = ElevatorState.ARRIVING
+        if agent_id == "main":
+            sm.phase = OfficePhase.DELEGATING
+            sm.boss_state = BossState.DELEGATING
+            sm.elevator_state = ElevatorState.ARRIVING
+    elif agent_id != (event.data.agent_id or "main") and agent_id not in sm.agents:
+        # A hook copy attributed (via its caller id) to a subagent the office
+        # already let go: nothing to animate, and the boss must not take it.
+        pass
     else:
-        agent_id = event.data.agent_id or "main"
-
         bubble = sm.tool_to_thought(event)
         if agent_id == "main":
             sm.boss_bubble = bubble
@@ -340,7 +347,7 @@ def _handle_user_prompt_submit(sm: "StateMachine", event: AnyEvent) -> None:
 def _handle_permission_request(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle PERMISSION_REQUEST: set boss or agent to waiting state."""
     assert isinstance(event, ToolEvent)
-    agent_id = event.data.agent_id or "main"
+    agent_id = sm.routed_agent_id(event)
     tool_name = event.data.tool_name or "permission"
 
     waiting_bubble = BubbleContent(
@@ -363,8 +370,11 @@ def _handle_permission_request(sm: "StateMachine", event: AnyEvent) -> None:
 def _handle_post_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     """Handle POST_TOOL_USE: increment tool counter and reset agent state."""
     assert isinstance(event, ToolEvent)
-    agent_id = event.data.agent_id or "main"
+    agent_id = sm.routed_agent_id(event)
+    duplicate = sm.last_console.outcome == "merged_duplicate"
     if agent_id == "main":
+        if duplicate:
+            return
         sm.boss_state = BossState.IDLE
         sm.tool_running = False
     elif agent_id in sm.agents and sm.agents[agent_id].state == AgentState.WAITING_PERMISSION:
@@ -380,8 +390,10 @@ def _handle_post_tool_use(sm: "StateMachine", event: AnyEvent) -> None:
     ):
         sm.link_native_agent(f"subagent_{event.data.tool_use_id}", event.data.native_agent_id)
 
-    sm.tool_uses_since_compaction += 1
-    sm.whiteboard.track_tool_use(event)
+    # The second copy of a subagent call (hook + poller) is counted once.
+    if not duplicate:
+        sm.tool_uses_since_compaction += 1
+        sm.whiteboard.track_tool_use(event)
 
 
 def _handle_subagent_start(sm: "StateMachine", event: AnyEvent) -> None:
@@ -724,9 +736,31 @@ class StateMachine:
     # double the transition). Internal bookkeeping, like ``last_event_at``.
     applied_entry_ids: set[str] = field(default_factory=_empty_str_set)
 
+    # Session Console (spec section 3.2): the agent tree and the tool-call
+    # tracker, fed from ``transition`` so live, restore and replay rebuild them
+    # identically. ``last_console`` is what the latest transition changed
+    # (frames to broadcast, merge outcome, the agent a tool event belongs to).
+    agent_tree: AgentTree = field(default_factory=AgentTree)
+    tool_calls: ToolCallTracker = field(init=False)
+    last_console: ApplyResult = field(init=False, default_factory=ApplyResult)
+
+    def __post_init__(self) -> None:
+        self.tool_calls = ToolCallTracker(self.agent_tree)
+
     # ---------------------------------------------------------------------------
     # Core methods
     # ---------------------------------------------------------------------------
+
+    def routed_agent_id(self, event: AnyEvent) -> str:
+        """Agent a tool event belongs to: the tracker's owner of its call.
+
+        A hook copy of a subagent's call says ``agent_id="main"``; once the
+        tracker knows better (caller id, or a merged poller copy) the call's
+        owner is the subagent, and the office routes the event there.
+        """
+        if isinstance(event, ToolEvent) and self.last_console.agent_id:
+            return self.last_console.agent_id
+        return event.data.agent_id or "main"
 
     @property
     def effective_objective(self) -> str | None:
@@ -814,7 +848,7 @@ class StateMachine:
             agents=agents_list,
             office=office,
             last_updated=datetime.now(UTC),
-            history=self.history,
+            history=self.slim_history(),
             todos=self.todos,
             arrival_queue=self.arrival_queue.copy(),
             departure_queue=self.handin_queue.copy(),
@@ -823,6 +857,21 @@ class StateMachine:
             floor_id=self.floor_id,
             room_id=self.room_id,
         )
+
+    def slim_history(self, limit: int = STATE_HISTORY_LIMIT) -> list[HistoryEntry]:
+        """The last *limit* history entries with ``detail`` reduced to ``{toolName}``.
+
+        ``state_update`` used to carry all 500 entries with raw ``toolInput``
+        dicts on every event; no frontend reads them (the event log is fed by
+        ``event`` frames, the console by ``tool_call`` frames). The full list
+        stays server-side (``self.history``) for campus activity and restore.
+        """
+        slim: list[HistoryEntry] = []
+        for entry in self.history[-limit:] if limit > 0 else []:
+            tool_name = entry["detail"].get("toolName")
+            detail: dict[str, object] = {"toolName": tool_name} if tool_name else {}
+            slim.append({**entry, "detail": detail})
+        return slim
 
     def link_native_agent(self, agent_id: str, native_agent_id: str) -> bool:
         """Link a tracked agent to its native Claude Code agent id.
@@ -877,6 +926,10 @@ class StateMachine:
         # call being synchronous and deterministic.
         self.token_tracker.update_from_event(event)
 
+        # Tool calls / agent tree first: the handlers route tool events by the
+        # call's resolved owner (``routed_agent_id``).
+        self.last_console = self.tool_calls.apply(event)
+
         handler = _DISPATCH_TABLE.get(event.event_type)
         if handler is not None:
             try:
@@ -888,6 +941,10 @@ class StateMachine:
                     exc_info=True,
                 )
                 raise
+        if self.agents:
+            self.tool_calls.sync_colors(
+                {aid: a.color for aid, a in self.agents.items()}, self.last_console
+            )
 
     def tool_to_thought(self, event: ToolEvent) -> BubbleContent:
         """Convert a tool use event to thought bubble content.

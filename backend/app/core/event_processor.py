@@ -25,6 +25,7 @@ from app.config import get_settings
 from app.core.beads_poller import get_beads_poller, has_beads, init_beads_poller
 from app.core.broadcast_service import (
     broadcast_campus_state,
+    broadcast_console,
     broadcast_error,
     broadcast_event,
     broadcast_overview_state,
@@ -60,6 +61,7 @@ from app.core.summary_backfill import SummaryBackfill
 from app.core.task_file_poller import init_task_file_poller
 from app.core.task_persistence import load_tasks, save_tasks
 from app.core.telemetry import get_telemetry_store
+from app.core.tool_calls import ApplyResult
 from app.core.transcript_poller import init_transcript_poller
 from app.core.transcript_telemetry import refresh_transcript_telemetry
 from app.db.database import AsyncSessionLocal
@@ -641,10 +643,17 @@ class EventProcessor:
                 event.data.source == "recovered" and sm_preexisting
             )
 
+        console: ApplyResult | None = None
         if applied:
-            get_telemetry_store().record_event(event.session_id, event)
             sm.transition(event)
+            # Captured now: enrichers may run further transitions.
+            console = sm.last_console
+            # The second copy of a subagent's call (hook "main" + poller) is
+            # neither logged, broadcast as an event, nor counted twice.
+            if console.outcome != "merged_duplicate":
+                get_telemetry_store().record_event(event.session_id, event)
             await self._refresh_titles(sm, event.data.transcript_path, event.session_id)
+        duplicate = console is not None and console.outcome == "merged_duplicate"
 
         # Apply resolved floor/room to in-memory state machine.
         if resolved_floor_id:
@@ -658,7 +667,10 @@ class EventProcessor:
             sm.teammate_name = event.data.teammate_name
             sm.is_lead = False
 
-        agent_id = event.data.agent_id or "main"
+        # Tool events carry the tracker's owner of the call (a hook copy of a
+        # subagent's call says "main" but belongs to the subagent).
+        agent_id = sm.routed_agent_id(event) if console is not None else None
+        agent_id = agent_id or event.data.agent_id or "main"
 
         # Build detail dict from event data fields for frontend inspection.
         # Family-specific fields are read via getattr because event.data is the
@@ -688,7 +700,7 @@ class EventProcessor:
             "timestamp": event.timestamp.isoformat(),
             "detail": detail,
         }
-        if not already_applied:
+        if not already_applied and not duplicate:
             sm.history.append(event_dict)
             if len(sm.history) > MAX_HISTORY_ENTRIES:
                 sm.history = sm.history[-MAX_HISTORY_ENTRIES:]
@@ -734,7 +746,10 @@ class EventProcessor:
         # Default state broadcast + history event notification
         # ------------------------------------------------------------------
         await broadcast_state(event.session_id, sm)
-        await broadcast_event(event.session_id, event_dict)
+        if not duplicate:
+            await broadcast_event(event.session_id, event_dict)
+        if console is not None:
+            await broadcast_console(event.session_id, console)
 
         # ------------------------------------------------------------------
         # Room orchestrator broadcast (team sessions)
@@ -760,7 +775,7 @@ class EventProcessor:
         # rebuilt its conversation entries, and the enrichment handlers would
         # append them a second time.
         enricher = self._post_broadcast_enrichers.get(event.event_type)
-        if enricher is not None and not already_applied:
+        if enricher is not None and not already_applied and not duplicate:
             await enricher(sm, event, agent_id, event_dict["id"], event_dict["summary"])
 
         # ------------------------------------------------------------------
@@ -1179,13 +1194,17 @@ class EventProcessor:
                     sm.transition(evt)
                     await self._refresh_titles(sm, evt.data.transcript_path, evt.session_id)
 
-                    agent_id = evt.data.agent_id or "main"
+                    agent_id = sm.routed_agent_id(evt)
                     # Same id scheme as the live path, so a re-render after a
                     # restore keeps the same React keys. Recorded in
                     # ``applied_entry_ids`` so the live path skips this event
                     # if it arrives while the restore is still fresh.
                     entry_id = self._entry_id(evt, rec.id)
                     sm.applied_entry_ids.add(entry_id)
+                    # Same dedupe as the live path: a merged duplicate copy of
+                    # a call adds no history or conversation entry.
+                    if sm.last_console.outcome == "merged_duplicate":
+                        continue
                     history_entry: HistoryEntry = {
                         "id": entry_id,
                         "type": str(evt.event_type),

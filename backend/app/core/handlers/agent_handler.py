@@ -15,7 +15,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.core.broadcast_service import broadcast_state
+from app.core.broadcast_service import broadcast_console, broadcast_state
 from app.core.jsonl_parser import get_first_user_prompt, get_last_assistant_response
 from app.core.state_machine import StateMachine, resolve_agent_for_stop
 from app.core.summary_service import get_summary_service
@@ -149,6 +149,7 @@ async def handle_subagent_info(
             data=synthetic_data,
         )
         sm.transition(synthetic_start)
+        await broadcast_console(event.session_id, sm.last_console)
         logger.info(
             f"Synthesized SUBAGENT_START for native agent {native_agent_id} "
             f"(missed due to backend restart)"

@@ -9,10 +9,13 @@ full EventProcessor class.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.core.connection_manager import get_manager
 from app.core.state_machine import StateMachine
+from app.core.tool_calls import ApplyResult
+from app.models.console import AgentNode, ToolCall
 from app.models.sessions import GameState, HistoryEntry
 
 if TYPE_CHECKING:
@@ -21,6 +24,9 @@ if TYPE_CHECKING:
 __all__ = [
     "broadcast_state",
     "broadcast_event",
+    "broadcast_tool_call",
+    "broadcast_agent_node",
+    "broadcast_console",
     "broadcast_error",
     "broadcast_room_state",
     "broadcast_overview_state",
@@ -69,6 +75,48 @@ async def broadcast_event(
         "event": dict(event_dict),
     }
     await get_manager().broadcast(payload, session_id)
+
+
+async def broadcast_tool_call(session_id: str, call: ToolCall) -> None:
+    """Send one upserted :class:`ToolCall` as a ``tool_call`` frame (spec 3.5)."""
+    await get_manager().broadcast(
+        {
+            "type": "tool_call",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "sessionId": session_id,
+            "toolCall": call.model_dump(mode="json", by_alias=True),
+        },
+        session_id,
+    )
+
+
+async def broadcast_agent_node(session_id: str, node: AgentNode) -> None:
+    """Send one upserted :class:`AgentNode` as an ``agent_node`` frame (spec 3.5)."""
+    await get_manager().broadcast(
+        {
+            "type": "agent_node",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "sessionId": session_id,
+            "agent": node.model_dump(mode="json", by_alias=True),
+        },
+        session_id,
+    )
+
+
+async def broadcast_console(session_id: str, result: ApplyResult) -> None:
+    """Broadcast everything one transition touched: agent nodes first, then calls.
+
+    Nodes go first so a client never sees a call whose agent it does not know.
+    Skips serialization entirely when nobody is connected to the session.
+    """
+    if not (result.nodes or result.calls):
+        return
+    if not get_manager().active_connections.get(session_id):
+        return
+    for node in result.nodes:
+        await broadcast_agent_node(session_id, node)
+    for call in result.calls:
+        await broadcast_tool_call(session_id, call)
 
 
 async def broadcast_error(session_id: str, message: str, timestamp: str) -> None:

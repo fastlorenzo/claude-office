@@ -201,7 +201,9 @@ class EventDataBase(BaseModel):
     # Producer tag: "recovered" marks a synthetic SESSION_START the backend
     # builds when the real one never arrived (see EventProcessor._process_event_internal);
     # "opencode" marks plugin events, whose child @agent sessions must stay
-    # excluded from that recovery. Old producers omit it (extra="ignore").
+    # excluded from that recovery; "zombie" marks the synthetic SUBAGENT_STOP
+    # the transcript poller emits for a silent subagent. Old producers omit it
+    # (extra="ignore").
     source: str | None = None
     # Agent identity (read across many event types).
     agent_id: str | None = None
@@ -283,6 +285,14 @@ class AgentEventData(EventDataBase):
     success: bool | None = None
     bubble_content: BubbleContent | None = None
     speech_content: SpeechContent | None = None
+    # Session Console (spec section 3.1): a subagent_start fired inside a
+    # subagent names its caller (nested agents); a synchronous Task/Agent post
+    # remapped to subagent_stop carries the child's result preview.
+    caller_native_agent_id: str | None = None
+    caller_agent_type: str | None = None
+    tool_output: str | None = None
+    tool_output_bytes: int | None = None
+    tool_output_truncated: bool | None = None
 
 
 class LifecycleEventData(EventDataBase):

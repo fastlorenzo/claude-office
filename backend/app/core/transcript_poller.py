@@ -152,6 +152,8 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             data=AgentEventData(
                 agent_id=agent.agent_id,
                 agent_transcript_path=str(agent.transcript_path),
+                # Persisted with the row, so a restore also marks the node zombie.
+                source="zombie",
             ),
         )
 
@@ -270,7 +272,10 @@ class TranscriptPoller(BasePoller[PolledAgent]):
         if not tool_name:
             return None
 
-        if tool_name == "Task":
+        # Nested Task/Agent calls are spawns, not plain tool rows: the hook's
+        # subagent_start for the child covers them (the tracker builds the
+        # spawn call from it).
+        if tool_name in ("Task", "Agent"):
             return None
 
         tool_input = block.get("input", {})
