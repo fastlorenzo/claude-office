@@ -12,6 +12,7 @@
  */
 import {
   Mesh,
+  Vector3,
   VertexData,
   VertexBuffer,
   type Material,
@@ -270,6 +271,68 @@ export function paintOf(hex: string): [number, number, number] {
   return [f((n >> 16) & 255), f((n >> 8) & 255), f(n & 255)];
 }
 
+/** Walkable floor levels (office slab, factory / ground floor). */
+const FLOOR_LEVELS = [0, -6];
+const AO_REACH = 0.25;
+const scratchP = new Vector3();
+const scratchN = new Vector3();
+
+/**
+ * Per-vertex ambient occlusion for a positioned piece (no GI, no SSAO on low
+ * tiers): side faces of a furniture-sized piece standing on a floor darken
+ * toward the
+ * contact (0.8 at the floor → 1 at 0.25 m), faces looking down get 0.9.
+ * Null when nothing is occluded. Pure function of the mesh (exported for
+ * tests).
+ */
+export function vertexAO(mesh: Mesh): Float32Array | null {
+  const pos = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const nor = mesh.getVerticesData(VertexBuffer.NormalKind);
+  if (!pos || !nor) return null;
+  const wm = mesh.computeWorldMatrix(true);
+  const n = pos.length / 3;
+  const wy = new Float32Array(n);
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    Vector3.TransformCoordinatesFromFloatsToRef(
+      pos[i * 3],
+      pos[i * 3 + 1],
+      pos[i * 3 + 2],
+      wm,
+      scratchP,
+    );
+    wy[i] = scratchP.y;
+    if (scratchP.y < minY) minY = scratchP.y;
+    if (scratchP.y > maxY) maxY = scratchP.y;
+  }
+  // Furniture-sized pieces only: a 3 m wall has vertices only at its foot
+  // and head, so its AO would smear over the whole height.
+  const onFloor =
+    maxY - minY < 1.6 && FLOOR_LEVELS.some((f) => Math.abs(minY - f) < 0.03);
+  const out = new Float32Array(n);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    Vector3.TransformNormalFromFloatsToRef(
+      nor[i * 3],
+      nor[i * 3 + 1],
+      nor[i * 3 + 2],
+      wm,
+      scratchN,
+    );
+    const ny = scratchN.y / (scratchN.length() || 1);
+    let k = 1;
+    if (ny < -0.7) k = 0.9;
+    else if (onFloor && ny < 0.7) {
+      const h = wy[i] - minY;
+      if (h < AO_REACH) k = 0.8 + (0.2 * h) / AO_REACH;
+    }
+    out[i] = k;
+    if (k < 1) any = true;
+  }
+  return any ? out : null;
+}
+
 export class ArtBatcher extends MeshBatcher {
   private readonly sc: Scene;
   private readonly rand: () => number;
@@ -304,15 +367,20 @@ export class ArtBatcher extends MeshBatcher {
     const g = p ? p[1] * (1 + l) : 1 + l;
     const b = p ? p[2] * (1 + l) : 1 + l - hshift;
     const cols = new Float32Array(nv * 4);
+    const ao = this.vertexAO ? vertexAO(mesh) : null;
     for (let i = 0; i < nv; i++) {
-      cols[i * 4] = r;
-      cols[i * 4 + 1] = g;
-      cols[i * 4 + 2] = b;
+      const k = ao ? ao[i] : 1;
+      cols[i * 4] = r * k;
+      cols[i * 4 + 1] = g * k;
+      cols[i * 4 + 2] = b * k;
       cols[i * 4 + 3] = 1;
     }
     mesh.setVerticesData(VertexBuffer.ColorKind, cols, false);
     return super.add(m, mesh, true);
   }
+
+  /** Bake contact / underside occlusion into the vertex colours. */
+  vertexAO = true;
 
   /** Cylinders get world-metre UVs too (true texture scale on round tops). */
   override cylinder(

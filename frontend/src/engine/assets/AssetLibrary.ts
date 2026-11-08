@@ -40,6 +40,7 @@ import {
   type ProceduralRole,
 } from "@/engine/assets/proceduralProps";
 import type { Materials } from "@/engine/materials/Materials";
+import { blobMatrix, ContactShadows } from "@/engine/assets/contactShadows";
 import type { Colliders } from "@/engine/physics/Colliders";
 import type { Vec3 } from "@/engine/contracts";
 
@@ -185,8 +186,31 @@ interface ModelEntry {
   dirty: boolean;
 }
 
+/** Floor-standing roles that get a contact shadow (not desk / wall items). */
+const BLOB_ROLES: ReadonlySet<PropRole> = new Set<PropRole>([
+  "desk",
+  "chair",
+  "sofa",
+  "shelves",
+  "plant",
+  "plantTall",
+  "coffeeCart",
+  "wetFloorSign",
+  "workDesk",
+  "taskChair",
+  "execDesk",
+  "loungeTable",
+  "planter",
+  "planterTall",
+  "floorLamp",
+  "sideTable",
+]);
+
 export class AssetLibrary {
   private readonly entries = new Map<PropRole, ModelEntry>();
+  private blobs: ContactShadows | null = null;
+  private blobBuf = new Float32Array(0);
+  private readonly blobScratch = new Matrix();
   private loading: Promise<void> | null = null;
   private nextId = 1;
   private readonly groupIndex = new Map<
@@ -572,8 +596,10 @@ export class AssetLibrary {
 
   /** Push dirty thin-instance buffers to the GPU (call once per frame). */
   flush(): void {
+    let blobsDirty = false;
     for (const e of this.entries.values()) {
       if (!e.dirty) continue;
+      if (BLOB_ROLES.has(e.role)) blobsDirty = true;
       e.dirty = false;
       const n = e.placements.size;
       const buf = new Float32Array(Math.max(1, n) * 16);
@@ -598,6 +624,26 @@ export class AssetLibrary {
         part.isVisible = true;
       }
     }
+    if (blobsDirty) this.flushBlobs();
+  }
+
+  /** One contact-shadow instance per floor-standing placement (1 draw). */
+  private flushBlobs(): void {
+    let n = 0;
+    for (const e of this.entries.values())
+      if (BLOB_ROLES.has(e.role)) n += e.placements.size;
+    if (!this.blobs) this.blobs = new ContactShadows(this.scene);
+    if (this.blobBuf.length < n * 16) this.blobBuf = new Float32Array(n * 16);
+    let i = 0;
+    for (const e of this.entries.values()) {
+      if (!BLOB_ROLES.has(e.role)) continue;
+      for (const p of e.placements.values()) {
+        blobMatrix(p.matrix, e.size.x, e.size.z, this.blobScratch);
+        this.blobScratch.copyToArray(this.blobBuf, i * 16);
+        i += 1;
+      }
+    }
+    this.blobs.set(this.blobBuf, i);
   }
 
   /**
@@ -649,6 +695,8 @@ export class AssetLibrary {
   }
 
   dispose(): void {
+    this.blobs?.dispose();
+    this.blobs = null;
     for (const e of this.entries.values())
       for (const p of e.parts) p.dispose(false, false);
     this.entries.clear();
