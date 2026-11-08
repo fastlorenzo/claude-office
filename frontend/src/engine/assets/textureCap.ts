@@ -27,9 +27,59 @@ export const MODEL_TEXTURE_CAP = {
 /** URLs of glTF models and characters (embedded images keep the GLB URL). */
 export const MODEL_TEXTURE_URL = /\/(characters[^/]*|models)\//;
 
+/** Character textures that carry a face (Rocketbox skin atlas, MPFB head). */
+const FACE_TEXTURE = /(skinned_\w+_diffuse\d*|_head_color)$/i;
+
+/** Edge cap for body / clothes / hair maps of characters (WS5c). */
+export const CHARACTER_BODY_CAP = {
+  low: 256,
+  medium: 256,
+  high: 512,
+} as const;
+
+/** Edge cap for props (furniture, plants, fixtures) at 1-2 m (WS5c). */
+export const PROP_TEXTURE_CAP = {
+  low: 512,
+  medium: 512,
+  high: 512,
+} as const;
+
+/** Tiled-material normal maps (`materials2/<id>/normal.webp`). */
+const MATERIAL_NORMAL_URL = /\/materials2\/[^/]+\/normal\./;
+
+/**
+ * Edge cap for the tiled-material normal maps: their fine grain is hidden by
+ * the mip chain and the albedo, so half the native 1024 holds (WS5c). The
+ * albedo keeps its native size.
+ */
+export const MATERIAL_NORMAL_CAP = {
+  low: 256,
+  medium: 512,
+  high: 512,
+} as const;
+
+/**
+ * Cap (px) for one glTF texture: faces keep `MODEL_TEXTURE_CAP`, the rest of
+ * a character (a few hundred px tall at normal distance) and props use the
+ * smaller tables. 0 = leave the texture alone.
+ */
+export function modelTextureCap(
+  url: string,
+  label: string,
+  quality: keyof typeof MODEL_TEXTURE_CAP,
+): number {
+  if (MATERIAL_NORMAL_URL.test(url)) return MATERIAL_NORMAL_CAP[quality];
+  const m = MODEL_TEXTURE_URL.exec(url);
+  if (!m) return 0;
+  if (m[1] === "models") return PROP_TEXTURE_CAP[quality];
+  return FACE_TEXTURE.test(label)
+    ? MODEL_TEXTURE_CAP[quality]
+    : CHARACTER_BODY_CAP[quality];
+}
+
 type Img = { width: number; height: number };
 type Prepare = (
-  texture: { url?: string; _buffer?: unknown },
+  texture: { url?: string; label?: string; _buffer?: unknown },
   extension: string,
   scene: unknown,
   img: Img,
@@ -52,13 +102,13 @@ export function cappedSize(
 }
 
 /**
- * Install the cap on an engine. `capFor(url)` returns the edge cap in px for
+ * Install the cap on an engine. `capFor(url, label)` returns the edge cap in px for
  * a texture URL (0 = no cap); it is read per upload, so a quality change
  * applies to textures loaded afterwards. Returns the uninstaller.
  */
 export function capTextureUploads(
   engine: AbstractEngine,
-  capFor: (url: string) => number,
+  capFor: (url: string, label: string) => number,
 ): () => void {
   const e = engine as unknown as { _prepareWebGLTexture?: Prepare };
   const orig = e._prepareWebGLTexture;
@@ -74,7 +124,11 @@ export function capTextureUploads(
     ...rest
   ) {
     const size = img
-      ? cappedSize(img.width, img.height, capFor(texture?.url ?? ""))
+      ? cappedSize(
+          img.width,
+          img.height,
+          capFor(texture?.url ?? "", texture?.label ?? ""),
+        )
       : null;
     if (!size)
       return orig.call(this, texture, extension, scene, img, invertY, ...rest);

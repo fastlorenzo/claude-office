@@ -9,6 +9,7 @@ import {
   capTextureUploads,
   MODEL_TEXTURE_CAP,
   MODEL_TEXTURE_URL,
+  modelTextureCap,
 } from "@/engine/assets/textureCap";
 
 describe("texture upload cap", () => {
@@ -21,6 +22,26 @@ describe("texture upload cap", () => {
     expect(cappedSize(4096, 4096, 0)).toBeNull();
     expect(MODEL_TEXTURE_CAP.high).toBe(1024);
     expect(MODEL_TEXTURE_CAP.medium).toBe(512);
+  });
+
+  it("WS5c: faces keep the model cap, bodies, props and normals use less", () => {
+    const ch = "data:/assets/characters/business_male_01.glb#image0";
+    const mpfb = "data:/assets/characters-mpfb/office_f01.glb#image1";
+    const prop = "/assets/models/sofa_02/sofa_02_diff.jpg";
+    expect(
+      modelTextureCap(ch, "young_lightskinned_male_diffuse3", "high"),
+    ).toBe(1024);
+    expect(modelTextureCap(mpfb, "m005_head_color", "high")).toBe(1024);
+    expect(modelTextureCap(ch, "male_casualsuit03_diffuse", "high")).toBe(512);
+    expect(modelTextureCap(mpfb, "m005_head_normal", "high")).toBe(512);
+    expect(modelTextureCap(ch, "young_lightskinned_male_diffuse", "low")).toBe(
+      512,
+    );
+    expect(modelTextureCap(ch, "shoes03_diffuse", "medium")).toBe(256);
+    expect(modelTextureCap(prop, "sofa_02_diff", "high")).toBe(512);
+    expect(
+      modelTextureCap("/assets/materials2/a/albedo.webp", "", "high"),
+    ).toBe(0);
   });
 
   it("matches models and every character pack, not the tiled materials", () => {

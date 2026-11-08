@@ -50,11 +50,7 @@ import {
   type MaterialRole,
   type PbrMaterialAsset,
 } from "@/engine/assets/materials2";
-import {
-  capTextureUploads,
-  MODEL_TEXTURE_CAP,
-  MODEL_TEXTURE_URL,
-} from "@/engine/assets/textureCap";
+import { capTextureUploads, modelTextureCap } from "@/engine/assets/textureCap";
 import {
   createDetailMap,
   createMossTextures,
@@ -690,8 +686,8 @@ export class Materials {
   ) {
     Materials.registry.set(scene, this);
     // glTF characters / props: 1024² at high, 512² below (WS5b P12).
-    this.uncap = capTextureUploads(scene.getEngine(), (url) =>
-      MODEL_TEXTURE_URL.test(url) ? MODEL_TEXTURE_CAP[this.quality] : 0,
+    this.uncap = capTextureUploads(scene.getEngine(), (url, label) =>
+      modelTextureCap(url, label, this.quality),
     );
   }
 
