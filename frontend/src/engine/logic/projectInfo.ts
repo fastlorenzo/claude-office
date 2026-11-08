@@ -48,9 +48,25 @@ export function formatTokens(n: number | null | undefined): string | null {
   return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
 }
 
-export function formatCost(usd: number | null | undefined): string {
+const usdFormats = new Map<string, Intl.NumberFormat>();
+
+/** "$42.75" (locale-aware separators; default en-US). */
+export function formatCost(
+  usd: number | null | undefined,
+  locale = "en-US",
+): string {
   if (usd == null || !Number.isFinite(usd)) return DASH;
-  return `$${usd.toFixed(2)}`;
+  let f = usdFormats.get(locale);
+  if (!f) {
+    f = new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    usdFormats.set(locale, f);
+  }
+  return f.format(usd);
 }
 
 function cleanSummary(s: string | null): string | null {

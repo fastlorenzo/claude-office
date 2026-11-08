@@ -30,7 +30,8 @@ import {
   type OpsRow,
   type OpsWindow,
 } from "../logic/opsModel";
-import { PHASE_LABEL_EN } from "../logic/sessionInfo";
+import { getTranslation, type Locale, type TranslationKey } from "@/i18n";
+import { isPhaseKind, PHASE_LABEL_EN } from "../logic/sessionInfo";
 import {
   fitText,
   roundRect,
@@ -41,6 +42,40 @@ import {
 } from "./canvasKit";
 
 export { phaseColor };
+
+// ---------------------------------------------------------------------------
+// Strings: every canvas label goes through the module translator (default
+// English). The owner calls `setOpsLocale` on a language change and folds
+// `opsLocaleRev()` into its redraw key so the screens repaint.
+// ---------------------------------------------------------------------------
+type Params = Record<string, string | number>;
+let locale: Locale = "en";
+let tr = getTranslation(locale);
+let localeRev = 0;
+
+/** @public Wired by ControlRoom.setData (language change). */
+export function setOpsLocale(next: Locale): void {
+  if (next === locale) return;
+  locale = next;
+  tr = getTranslation(next);
+  localeRev++;
+}
+
+/** @public Bumps whenever `setOpsLocale` changes the language (redraw-key ingredient). */
+export function opsLocaleRev(): number {
+  return localeRev;
+}
+
+const T = (key: TranslationKey, params?: Params): string => tr(key, params);
+const up = (s: string): string => s.toLocaleUpperCase(locale);
+const low = (s: string): string => s.toLocaleLowerCase(locale);
+
+/** Translated phase name; a backend-supplied custom label wins verbatim. */
+function phaseText(kind: string, label?: string | null): string {
+  if (isPhaseKind(kind) && (!label || label === PHASE_LABEL_EN[kind]))
+    return T(`hud.phase.${kind}` as TranslationKey);
+  return label || kind;
+}
 
 export const OPS_THEME = {
   bg0: "#08101C",
@@ -288,22 +323,22 @@ export function drawSessionsBoard(
     ctx,
     u,
     W,
-    "Sessions",
-    `${c.live} live · ${c.subagents} subagents`,
+    T("ops.sessions"),
+    T("ops.c.liveSub", { live: c.live, sub: c.subagents }),
     null,
   );
   // Count chips (right side of the header).
   let cx = W - 6 * u;
-  const chips: Array<[string, number, string]> = [
-    ["IDLE", c.done, STATUS_COLORS.done],
-    ["WORKING", c.working, STATUS_COLORS.working],
-    ["NEEDS YOU", c.needs_you, STATUS_COLORS.needs_you],
+  const chips: Array<[string, number, string, boolean]> = [
+    [up(T("ops.c.idle")), c.done, STATUS_COLORS.done, false],
+    [up(T("ops.c.working")), c.working, STATUS_COLORS.working, false],
+    [up(T("ops.c.needsYou")), c.needs_you, STATUS_COLORS.needs_you, true],
   ];
-  for (const [label, n, col] of chips) {
+  for (const [label, n, col, pulse] of chips) {
     const s = `${n} ${label}`;
     const w = measure(ctx, s, 5 * u, 600, true) + 5 * u * 0.9;
     cx -= w;
-    chip(ctx, s, cx, 7 * u, 5 * u, col, label === "NEEDS YOU" && n > 0);
+    chip(ctx, s, cx, 7 * u, 5 * u, col, pulse && n > 0);
     cx -= 2.5 * u;
   }
 
@@ -321,32 +356,30 @@ export function drawSessionsBoard(
     caps: true,
     color: C.muted,
   };
-  text(ctx, "Project · what it's building", col("project").x + 3 * u, hy, hs);
-  text(ctx, "Now", col("phase").x, hy, hs);
-  text(ctx, "Context", col("context").x, hy, hs);
-  text(ctx, "Cost · time", col("cost").x, hy, hs);
-  text(ctx, "Lines", col("lines").x, hy, hs);
-  text(ctx, "Model", col("model").x, hy, hs);
-  text(ctx, "Crew", col("crew").x, hy, hs);
+  text(ctx, T("ops.col.project"), col("project").x + 3 * u, hy, hs);
+  text(ctx, T("ops.col.now"), col("phase").x, hy, hs);
+  text(ctx, T("ops.col.context"), col("context").x, hy, hs);
+  text(ctx, T("ops.col.cost"), col("cost").x, hy, hs);
+  text(ctx, T("ops.col.lines"), col("lines").x, hy, hs);
+  text(ctx, T("ops.col.model"), col("model").x, hy, hs);
+  text(ctx, T("ops.col.crew"), col("crew").x, hy, hs);
 
   const live = m.rows.filter((r) => r.status !== "ended");
   const ended = m.rows.length - live.length;
   const bodyY = hy + 4.5 * u;
   const bodyH = H - bodyY - 3 * u;
   if (live.length === 0) {
-    text(ctx, "No live sessions", W / 2, bodyY + bodyH * 0.4, {
+    text(ctx, T("ops.c.noLive"), W / 2, bodyY + bodyH * 0.4, {
       size: 9 * u,
       weight: 600,
       color: C.sub,
       align: "center",
     });
-    text(
-      ctx,
-      "Start Claude Code anywhere and it shows up here",
-      W / 2,
-      bodyY + bodyH * 0.4 + 10 * u,
-      { size: 6 * u, color: C.muted, align: "center" },
-    );
+    text(ctx, T("ops.c.startHint"), W / 2, bodyY + bodyH * 0.4 + 10 * u, {
+      size: 6 * u,
+      color: C.muted,
+      align: "center",
+    });
     return;
   }
   const fullH = 23 * u;
@@ -382,8 +415,8 @@ export function drawSessionsBoard(
   if (rest > 0 || ended > 0) {
     const fy = bodyY + shown.length * rowH + footer / 2;
     const parts: string[] = [];
-    if (rest > 0) parts.push(`+${rest} more live`);
-    if (ended > 0) parts.push(`${ended} ended`);
+    if (rest > 0) parts.push(T("ops.c.moreLive", { n: rest }));
+    if (ended > 0) parts.push(T("ops.c.ended", { n: ended }));
     text(ctx, parts.join("  ·  "), x0 + 3 * u, fy, {
       size: 5 * u,
       color: C.muted,
@@ -448,7 +481,7 @@ function drawRow(
     rx += cw + 1.2 * u;
   }
   if (!compact)
-    text(ctx, r.summary ?? r.branch ?? "No description yet", nameX, l2, {
+    text(ctx, r.summary ?? r.branch ?? T("hud.overview.noSummary"), nameX, l2, {
       size: body,
       color: r.summary ? C.sub : C.muted,
       max: p.w - (nameX - p.x) - 2 * u,
@@ -458,7 +491,7 @@ function drawRow(
   const ph = col("phase");
   const pc = phaseColor(r.phaseKind);
   dot(ctx, ph.x + 1.1 * u, l1, 1.1 * u, pc);
-  const label = r.phaseLabel || PHASE_LABEL_EN[r.phaseKind];
+  const label = phaseText(r.phaseKind, r.phaseLabel);
   text(ctx, label, ph.x + 3.4 * u, l1, {
     size: body,
     weight: 600,
@@ -468,9 +501,10 @@ function drawRow(
   if (!compact) {
     const bits = [
       r.phaseDetail,
-      r.phaseElapsed ? `for ${r.phaseElapsed}` : null,
+      r.phaseElapsed ? T("ops.for", { span: r.phaseElapsed }) : null,
     ];
-    if (r.idleFor && r.status !== "working") bits.push(`idle ${r.idleFor}`);
+    if (r.idleFor && r.status !== "working")
+      bits.push(T("ops.idle", { span: r.idleFor }));
     text(ctx, bits.filter(Boolean).join(" · ") || "—", ph.x + 3.4 * u, l2, {
       size: small,
       color: C.muted,
@@ -563,8 +597,8 @@ function drawRow(
       r.cacheMinsLeft == null
         ? null
         : r.cacheMinsLeft === 0
-          ? "cache cold"
-          : `cache ${r.cacheMinsLeft}m`;
+          ? T("ops.cacheCold")
+          : T("ops.cache", { m: r.cacheMinsLeft });
     const low = r.cacheMinsLeft != null && r.cacheMinsLeft <= 5;
     const eff = r.effort ?? "";
     const ew = eff
@@ -592,7 +626,7 @@ function drawRow(
   });
   text(
     ctx,
-    r.subagents === 1 ? "agent" : "agents",
+    r.subagents === 1 ? T("ops.c.agent1") : T("ops.c.agentN"),
     cr.x + measure(ctx, `${r.subagents}`, body, 700, true) + 1 * u,
     l1,
     {
@@ -678,7 +712,9 @@ function gauge(
   });
   text(
     ctx,
-    w?.projectedPct != null ? `pace ${fmtPct(w.projectedPct)}` : "pace —",
+    T("ops.pace", {
+      pct: w?.projectedPct != null ? fmtPct(w.projectedPct) : "—",
+    }),
     cx,
     cy + r * 0.46,
     {
@@ -690,7 +726,9 @@ function gauge(
   );
   text(
     ctx,
-    w?.resetsInMs != null ? `resets in ${fmtSpan(w.resetsInMs)}` : "reset —",
+    w?.resetsInMs != null
+      ? T("ops.resetsIn", { span: fmtSpan(w.resetsInMs) })
+      : T("ops.c.resetNone"),
     cx,
     cy + r * 0.86,
     { size: 4.8 * u, align: "center", color: C.muted, mono: true },
@@ -739,31 +777,39 @@ export function drawUsagePanel(
   u: number,
 ) {
   panelBg(ctx, W, H);
-  const top = header(ctx, u, W, "Usage", "account-wide limits", null);
+  const top = header(ctx, u, W, T("ops.usage"), T("ops.usage.sub"), null);
   const us = m.usage;
   const r = Math.min(W / 4.9, 27 * u);
   const gy = top + 6 * u + r;
-  gauge(ctx, W * 0.27, gy, r, us.fiveHour, u, "5-hour");
-  gauge(ctx, W * 0.73, gy, r, us.sevenDay, u, "7-day");
+  gauge(ctx, W * 0.27, gy, r, us.fiveHour, u, T("ops.fiveHour"));
+  gauge(ctx, W * 0.73, gy, r, us.sevenDay, u, T("ops.sevenDay"));
   if (!us.fiveHour && !us.sevenDay)
     statusLineHint(ctx, W / 2, gy + r + 4 * u, W - 12 * u, u);
 
   const ky = gy + r + 10 * u;
   const kw = (W - 12 * u) / 3;
-  kpi(ctx, 6 * u, ky, kw - 2 * u, u, "Cost today", fmtUsd(us.costTodayUsd));
+  kpi(
+    ctx,
+    6 * u,
+    ky,
+    kw - 2 * u,
+    u,
+    T("ops.costToday"),
+    fmtUsd(us.costTodayUsd),
+  );
   kpi(
     ctx,
     6 * u + kw,
     ky,
     kw - 2 * u,
     u,
-    "Burn rate",
+    T("ops.burn"),
     us.burnUsdPerHour != null ? `${fmtUsd(us.burnUsdPerHour)}/h` : "—",
     us.burnUsdPerHour != null && us.burnUsdPerHour > 30 ? C.amber : C.text,
   );
   const la = us.linesAddedToday;
   const lr = us.linesRemovedToday;
-  text(ctx, "Lines today", 6 * u + 2 * kw, ky, {
+  text(ctx, T("ops.linesToday"), 6 * u + 2 * kw, ky, {
     size: 4.4 * u,
     weight: 600,
     caps: true,
@@ -786,7 +832,7 @@ export function drawUsagePanel(
   const sy = ky + 24 * u;
   const sh = H - sy - 10 * u;
   if (sh > 12 * u) {
-    text(ctx, "Spend per 5 min · last 3 h", 6 * u, sy, {
+    text(ctx, T("ops.spend"), 6 * u, sy, {
       size: 4.4 * u,
       weight: 600,
       caps: true,
@@ -808,14 +854,17 @@ export function drawUsagePanel(
       });
     } else {
       spark(ctx, 6 * u, top2, W - 12 * u, ch, [], C.accent);
-      text(ctx, "No spend data yet", W / 2, top2 + ch / 2, {
+      text(ctx, T("ops.c.noSpend"), W / 2, top2 + ch / 2, {
         size: 5 * u,
         color: C.muted,
         align: "center",
       });
     }
-    text(ctx, "3h ago", 6 * u, H - 4.5 * u, { size: 4 * u, color: C.muted });
-    text(ctx, "now", W - 6 * u, H - 4.5 * u, {
+    text(ctx, T("ops.c.ago3h"), 6 * u, H - 4.5 * u, {
+      size: 4 * u,
+      color: C.muted,
+    });
+    text(ctx, T("ops.c.now"), W - 6 * u, H - 4.5 * u, {
       size: 4 * u,
       color: C.muted,
       align: "right",
@@ -824,8 +873,7 @@ export function drawUsagePanel(
 }
 
 /** Shown wherever a status-line value is missing (rate limits are statusline-only). */
-export const STATUSLINE_HINT =
-  "Enable status line feed: hooks/install.sh --statusline";
+const statusLineHintText = (): string => T("ops.noLimits");
 
 /** Small amber-outlined hint pill, centred on (cx, cy). */
 export function statusLineHint(
@@ -836,7 +884,10 @@ export function statusLineHint(
   u: number,
 ) {
   const size = 4.6 * u;
-  const w = Math.min(maxW, measure(ctx, STATUSLINE_HINT, size, 600) + 12 * u);
+  const w = Math.min(
+    maxW,
+    measure(ctx, statusLineHintText(), size, 600) + 12 * u,
+  );
   const h = size * 1.9;
   roundRect(ctx, cx - w / 2, cy - h / 2, w, h, h / 2);
   ctx.fillStyle = withAlpha(C.amber, 0.12);
@@ -845,7 +896,7 @@ export function statusLineHint(
   ctx.strokeStyle = withAlpha(C.amber, 0.55);
   ctx.stroke();
   dot(ctx, cx - w / 2 + 4 * u, cy, 1.1 * u, C.amber);
-  text(ctx, STATUSLINE_HINT, cx + 2 * u, cy, {
+  text(ctx, statusLineHintText(), cx + 2 * u, cy, {
     size,
     weight: 600,
     color: "#FCD34D",
@@ -871,25 +922,19 @@ export function drawActivityPanel(
     ctx,
     u,
     W,
-    "Activity",
-    a.eventsLastMin != null ? `${a.eventsLastMin} events/min now` : null,
+    T("ops.activity"),
+    a.eventsLastMin != null ? T("ops.eventsNow", { n: a.eventsLastMin }) : null,
     null,
   );
   // Building events/min.
   const ay = top + 6 * u;
   const n = a.eventsPerMin.length;
-  text(
-    ctx,
-    `Events per minute · last ${n >= 60 ? 60 : n || 60} min`,
-    6 * u,
-    ay,
-    {
-      size: 4.4 * u,
-      weight: 600,
-      caps: true,
-      color: C.muted,
-    },
-  );
+  text(ctx, T("ops.c.eventsLast", { n: n >= 60 ? 60 : n || 60 }), 6 * u, ay, {
+    size: 4.4 * u,
+    weight: 600,
+    caps: true,
+    color: C.muted,
+  });
   const ch = 30 * u;
   const cw = W - 12 * u;
   // Grid lines.
@@ -899,7 +944,7 @@ export function drawActivityPanel(
   spark(ctx, 6 * u, ay + 5 * u, cw, ch, a.eventsPerMin, "#60A5FA", {
     max: Math.max(4, a.peakPerMin * 1.1),
   });
-  text(ctx, `peak ${a.peakPerMin}`, W - 6 * u, ay + 7 * u, {
+  text(ctx, T("ops.c.peak", { n: a.peakPerMin }), W - 6 * u, ay + 7 * u, {
     size: 4.2 * u,
     color: C.muted,
     align: "right",
@@ -908,7 +953,7 @@ export function drawActivityPanel(
 
   // Per-session sparklines.
   let y = ay + ch + 12 * u;
-  text(ctx, "Per session · 30 min", 6 * u, y, {
+  text(ctx, T("ops.perSession"), 6 * u, y, {
     size: 4.4 * u,
     weight: 600,
     caps: true,
@@ -946,7 +991,7 @@ export function drawActivityPanel(
 
   // Tool mix stacked bar.
   y = Math.max(y + 5 * u, H - 44 * u);
-  text(ctx, "Tool mix", 6 * u, y, {
+  text(ctx, T("ops.toolMix"), 6 * u, y, {
     size: 4.4 * u,
     weight: 600,
     caps: true,
@@ -973,7 +1018,7 @@ export function drawActivityPanel(
     let lx = 6 * u;
     const ly = by + bh + 5 * u;
     for (const t of a.toolMix.slice(0, 5)) {
-      const s = `${PHASE_LABEL_EN[t.kind] ?? t.kind} ${Math.round((t.count / total) * 100)}%`;
+      const s = `${phaseText(t.kind)} ${Math.round((t.count / total) * 100)}%`;
       const w = measure(ctx, s, 4.4 * u) + 5 * u;
       if (lx + w > W - 6 * u) break;
       dot(ctx, lx + 1 * u, ly, 1 * u, kindColor(t.kind));
@@ -992,10 +1037,14 @@ export function drawActivityPanel(
     ky,
     kw - 2 * u,
     u,
-    "Tests",
+    T("ops.tests"),
     a.testRuns != null ? `${a.testRuns}` : "—",
     C.text,
-    a.testRuns != null ? (tf > 0 ? `${tf} failing` : "all passing") : undefined,
+    a.testRuns != null
+      ? tf > 0
+        ? T("ops.failing", { n: tf })
+        : T("ops.allPassing")
+      : undefined,
   );
   kpi(
     ctx,
@@ -1003,7 +1052,7 @@ export function drawActivityPanel(
     ky,
     kw - 2 * u,
     u,
-    "Tool errors",
+    T("ops.errors"),
     a.errors != null ? `${a.errors}` : "—",
     (a.errors ?? 0) > 0 ? C.amber : C.text,
   );
@@ -1013,14 +1062,16 @@ export function drawActivityPanel(
     ky,
     kw - 2 * u,
     u,
-    "Tool calls",
+    T("ops.toolCalls"),
     fmtCount(a.toolCalls),
     C.text,
-    a.subagentsSpawned != null ? `${a.subagentsSpawned} spawned` : undefined,
+    a.subagentsSpawned != null
+      ? T("ops.subagents", { n: a.subagentsSpawned })
+      : undefined,
   );
   if (tf > 0) {
     // Recolour the failing sub-line.
-    text(ctx, `${tf} failing`, 6 * u, ky + 16 * u, {
+    text(ctx, T("ops.failing", { n: tf }), 6 * u, ky + 16 * u, {
       size: 4.8 * u,
       color: C.red,
       mono: true,
@@ -1055,7 +1106,7 @@ export function drawAlertStrip(
   const rx = W - 10 * u - right;
   if (n === 0) {
     dot(ctx, 9 * u, cy, 3 * u, C.green);
-    text(ctx, "All clear · nothing needs you", 16 * u, cy, {
+    text(ctx, T("ops.allClear"), 16 * u, cy, {
       size: 11 * u,
       weight: 600,
       color: C.text,
@@ -1065,7 +1116,7 @@ export function drawAlertStrip(
   }
   const high = m.alerts.some((a) => a.severity === "high");
   const col = high ? C.amber : "#FBBF24";
-  const tag = `${n} ALERT${n === 1 ? "" : "S"}`;
+  const tag = up(n === 1 ? T("ops.c.alert1", { n }) : T("ops.alerts", { n }));
   const tw = chip(ctx, tag, 4 * u, cy, 10 * u, col, true);
   let x = 4 * u + tw + 5 * u;
   m.alerts.forEach((a, i) => {
@@ -1084,43 +1135,6 @@ export function drawAlertStrip(
     });
     x += w + 4 * u;
   });
-}
-
-export function drawTicker(ctx: Ctx2D, W: number, H: number, m: OpsModel) {
-  const u = H / 24;
-  ctx.fillStyle = C.bg0;
-  ctx.fillRect(0, 0, W, H);
-  const cy = H / 2;
-  const lw = chip(ctx, "LIVE", 4 * u, cy, 8 * u, C.red, true);
-  let x = 4 * u + lw + 5 * u;
-  if (m.ticker.length === 0) {
-    text(ctx, "Waiting for activity…", x, cy, { size: 9 * u, color: C.muted });
-    return;
-  }
-  for (const it of m.ticker) {
-    if (x > W - 30 * u) break;
-    const t = text(ctx, it.clock, x, cy, {
-      size: 8.4 * u,
-      color: C.muted,
-      mono: true,
-    });
-    x += t + 2.5 * u;
-    const p = text(ctx, it.project, x, cy, {
-      size: 8.6 * u,
-      weight: 700,
-      color: STATUS_COLORS[it.status] === STATUS_COLORS.ended ? C.sub : C.text,
-    });
-    x += p + 2.5 * u;
-    const s = text(ctx, it.text, x, cy, {
-      size: 8.6 * u,
-      color: C.sub,
-      max: Math.min(W * 0.32, W - x - 4 * u),
-    });
-    x += s + 4 * u;
-    ctx.fillStyle = C.line;
-    ctx.fillRect(x, cy - 5 * u, Math.max(1, 0.3 * u), 10 * u);
-    x += 4 * u;
-  }
 }
 
 // ============================================================================
@@ -1158,7 +1172,7 @@ export function drawSessionCard(
       color: C.muted,
       align: "center",
     });
-    text(ctx, "No live sessions", W / 2, H * 0.58, {
+    text(ctx, T("ops.c.noLive"), W / 2, H * 0.58, {
       size: 6 * u,
       color: C.muted,
       align: "center",
@@ -1192,7 +1206,7 @@ export function drawSessionCard(
   ctx.font = font(5.6 * u, 500);
   const lines = wrapText(
     ctx,
-    r.summary ?? r.branch ?? "No description yet",
+    r.summary ?? r.branch ?? T("hud.overview.noSummary"),
     W - 2 * pad,
     2,
   );
@@ -1212,7 +1226,10 @@ export function drawSessionCard(
     color: r.status === "needs_you" ? sc : C.text,
     max: W * 0.45,
   });
-  const det = [r.phaseDetail, r.phaseElapsed ? `for ${r.phaseElapsed}` : null]
+  const det = [
+    r.phaseDetail,
+    r.phaseElapsed ? T("ops.for", { span: r.phaseElapsed }) : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   if (det)
@@ -1225,7 +1242,11 @@ export function drawSessionCard(
   // Status-line row: context bar + metrics.
   const my = 45 * u;
   const tone = TONE_COLORS[contextTone(r.contextPct)];
-  text(ctx, "CONTEXT", pad, my, { size: 3.8 * u, weight: 600, color: C.muted });
+  text(ctx, up(T("ops.col.context")), pad, my, {
+    size: 3.8 * u,
+    weight: 600,
+    color: C.muted,
+  });
   bar(
     ctx,
     pad + 15 * u,
@@ -1242,26 +1263,32 @@ export function drawSessionCard(
     my,
     { size: 4.6 * u, mono: true, color: C.text },
   );
-  const metrics: Array<[string, string, string]> = [
-    ["COST", fmtUsd(r.costUsd), C.text],
-    ["TIME", fmtSpan(r.durationMs), C.text],
+  const metrics: Array<[string, string, string, boolean]> = [
+    [up(T("ops.c.cost")), fmtUsd(r.costUsd), C.text, true],
+    [up(T("ops.c.time")), fmtSpan(r.durationMs), C.text, true],
     [
-      "LINES",
+      up(T("ops.col.lines")),
       r.linesAdded != null
         ? `+${fmtCount(r.linesAdded)} −${fmtCount(r.linesRemoved)}`
         : "—",
       C.add,
+      true,
     ],
-    ["MODEL", [r.model, r.effort].filter(Boolean).join(" · ") || "—", C.text],
+    [
+      up(T("ops.col.model")),
+      [r.model, r.effort].filter(Boolean).join(" · ") || "—",
+      C.text,
+      false,
+    ],
   ];
   const mw = (W - 2 * pad) / metrics.length;
-  metrics.forEach(([k, v, col], i) => {
+  metrics.forEach(([k, v, col, mono], i) => {
     const mx = pad + i * mw;
     text(ctx, k, mx, 53 * u, { size: 3.8 * u, weight: 600, color: C.muted });
     text(ctx, v, mx, 59 * u, {
       size: 4.8 * u,
       weight: 600,
-      mono: k !== "MODEL",
+      mono,
       color: col,
       max: mw - 2 * u,
     });
@@ -1274,7 +1301,7 @@ export function drawSessionCard(
   const half = (W - 2 * pad) / 2;
   text(
     ctx,
-    `TODOS ${r.todoTotal ? `${r.todoDone}/${r.todoTotal}` : ""}`,
+    `${up(T("hud.overview.todos"))} ${r.todoTotal ? `${r.todoDone}/${r.todoTotal}` : ""}`,
     pad,
     ty,
     { size: 3.8 * u, weight: 600, color: C.muted },
@@ -1296,7 +1323,7 @@ export function drawSessionCard(
       max: half - 6 * u,
     });
   });
-  text(ctx, `RECENT · ${r.subagents} subagents`, pad + half, ty, {
+  text(ctx, up(T("ops.c.recentSub", { n: r.subagents })), pad + half, ty, {
     size: 3.8 * u,
     weight: 600,
     color: C.muted,
@@ -1330,18 +1357,12 @@ const CI_COLORS: Record<CheckState, string> = {
   none: "#64748B",
 };
 
-const CI_LABEL: Record<CheckState, string> = {
-  success: "CI ✓",
-  failure: "CI ✗",
-  running: "CI …",
-  queued: "CI queued",
-  cancelled: "CI cancelled",
-  none: "CI —",
-};
-
-export function ciColor(s: CheckState | null): string {
-  return s ? CI_COLORS[s] : C.muted;
-}
+const ciLabel = (s: CheckState): string =>
+  s === "queued"
+    ? T("ops.ci.queued")
+    : s === "cancelled"
+      ? T("ops.ci.cancelled")
+      : { success: "CI ✓", failure: "CI ✗", running: "CI …", none: "CI —" }[s];
 
 /**
  * Static part of the project map (lines, stations, session nodes, hub). The
@@ -1367,16 +1388,19 @@ export function drawProjectMap(
     ctx,
     u,
     W,
-    "Project map",
-    `${map.lines.length + map.moreLines} projects · ${live} live sessions`,
+    T("ops.map"),
+    T("ops.map.sub", {
+      projects: map.lines.length + map.moreLines,
+      live,
+    }),
     null,
   );
   // Legend (right of the header).
   let lx = W - 6 * u;
   for (const [label, col] of [
-    ["idle", STATUS_COLORS.done],
-    ["working", STATUS_COLORS.working],
-    ["needs you", STATUS_COLORS.needs_you],
+    [low(T("ops.c.idle")), STATUS_COLORS.done],
+    [low(T("ops.c.working")), STATUS_COLORS.working],
+    [low(T("ops.c.needsYou")), STATUS_COLORS.needs_you],
   ] as const) {
     const tw = measure(ctx, label, 4.4 * u, 500);
     lx -= tw;
@@ -1386,7 +1410,7 @@ export function drawProjectMap(
     lx -= 5 * u;
   }
   if (map.lines.length === 0) {
-    text(ctx, "No projects yet", W / 2, H / 2, {
+    text(ctx, T("ops.map.empty"), W / 2, H / 2, {
       size: 7 * u,
       weight: 600,
       color: C.muted,
@@ -1424,9 +1448,10 @@ export function drawProjectMap(
     let cx = p.x - 1.5 * u + nw + 2.5 * u;
     if (l.ci) {
       cx +=
-        chip(ctx, CI_LABEL[l.ci], cx, ny, 3.8 * u, CI_COLORS[l.ci]) + 1.5 * u;
+        chip(ctx, ciLabel(l.ci), cx, ny, 3.8 * u, CI_COLORS[l.ci]) + 1.5 * u;
     }
-    if (l.openPrs > 0) chip(ctx, `${l.openPrs} PR`, cx, ny, 3.8 * u, "#A78BFA");
+    if (l.openPrs > 0)
+      chip(ctx, T("ops.prs", { n: l.openPrs }), cx, ny, 3.8 * u, "#A78BFA");
   }
   // Session nodes.
   for (const n of map.nodes) {
@@ -1455,14 +1480,16 @@ export function drawProjectMap(
     color: C.accent,
     align: "center",
   });
-  text(ctx, "control room", h.x, h.y + h.r * 1.75, {
+  text(ctx, T("ops.c.controlRoom"), h.x, h.y + h.r * 1.75, {
     size: 3.8 * u,
     color: C.muted,
     align: "center",
   });
   const more: string[] = [];
-  if (map.moreLines > 0) more.push(`+${map.moreLines} more projects`);
-  if (map.moreNodes > 0) more.push(`+${map.moreNodes} more sessions`);
+  if (map.moreLines > 0)
+    more.push(T("ops.c.moreProjects", { n: map.moreLines }));
+  if (map.moreNodes > 0)
+    more.push(T("ops.c.moreSessions", { n: map.moreNodes }));
   if (more.length)
     text(ctx, more.join(" · "), 6 * u, H - 4 * u, {
       size: 4.2 * u,
@@ -1495,8 +1522,8 @@ export function drawProjectsPanel(
     ctx,
     u,
     W,
-    "Projects",
-    ciKnown ? "sessions · pull requests · CI" : "sessions per project",
+    T("ops.c.projects"),
+    ciKnown ? T("ops.c.projSubCi") : T("ops.c.projSub"),
     null,
   );
   const x0 = 6 * u;
@@ -1505,7 +1532,7 @@ export function drawProjectsPanel(
   const rh = Math.min(24 * u, (H - y - 6 * u) / Math.max(4, rows.length));
   const shown = rows.slice(0, Math.max(1, Math.floor((H - y - 4 * u) / rh)));
   if (rows.length === 0)
-    text(ctx, "No projects yet", W / 2, H / 2, {
+    text(ctx, T("ops.map.empty"), W / 2, H / 2, {
       size: 7 * u,
       weight: 600,
       color: C.muted,
@@ -1548,7 +1575,7 @@ export function drawProjectsPanel(
     // CI (right).
     const rx = x0 + iw - 3 * u;
     if (r.group.ci) {
-      const s = CI_LABEL[r.group.ci];
+      const s = ciLabel(r.group.ci);
       const cw = measure(ctx, s, 4.4 * u, 600, true) + 4 * u;
       chip(
         ctx,
@@ -1572,7 +1599,7 @@ export function drawProjectsPanel(
       : r.pipeline
         ? `${r.pipeline.workflow}`
         : r.group.openPrs
-          ? `${r.group.openPrs} open PRs`
+          ? T("ops.c.openPrs", { n: r.group.openPrs })
           : "";
     if (right) {
       const st = pr?.state ?? r.pipeline?.state ?? null;
@@ -1586,10 +1613,16 @@ export function drawProjectsPanel(
     y += rh;
   }
   if (rows.length > shown.length)
-    text(ctx, `+${rows.length - shown.length} more`, x0, H - 3.5 * u, {
-      size: 4.2 * u,
-      color: C.muted,
-    });
+    text(
+      ctx,
+      T("ops.c.more", { n: rows.length - shown.length }),
+      x0,
+      H - 3.5 * u,
+      {
+        size: 4.2 * u,
+        color: C.muted,
+      },
+    );
 }
 
 // ============================================================================
@@ -1605,8 +1638,16 @@ export function drawEventLog(
 ) {
   ctx.fillStyle = C.bg0;
   ctx.fillRect(0, 0, W, H);
-  const lw = chip(ctx, "LIVE", 4 * u, 5.5 * u, 4.6 * u, C.red, true);
-  text(ctx, "Event log", 4 * u + lw + 3 * u, 5.5 * u, {
+  const lw = chip(
+    ctx,
+    up(T("ops.c.liveTag")),
+    4 * u,
+    5.5 * u,
+    4.6 * u,
+    C.red,
+    true,
+  );
+  text(ctx, T("ops.c.eventLog"), 4 * u + lw + 3 * u, 5.5 * u, {
     size: 4.6 * u,
     weight: 700,
     caps: true,
@@ -1615,7 +1656,7 @@ export function drawEventLog(
   const lines = Math.max(1, Math.floor((H - 11 * u) / (7.2 * u)));
   const items = m.ticker.slice(0, lines);
   if (!items.length)
-    text(ctx, "Waiting for activity…", 4 * u, 15 * u, {
+    text(ctx, T("ops.waiting"), 4 * u, 15 * u, {
       size: 5.2 * u,
       color: C.muted,
     });
@@ -1666,7 +1707,7 @@ export function drawFeedCaption(
   ctx.fillStyle = "#06080C";
   ctx.fillRect(x, imgY, w, imgH);
   if (!s) {
-    text(ctx, "NO SIGNAL", x + w / 2, imgY + imgH / 2, {
+    text(ctx, up(T("ops.c.noSignal")), x + w / 2, imgY + imgH / 2, {
       size: 6 * u,
       weight: 700,
       color: "rgba(148,163,184,0.5)",
@@ -1738,14 +1779,14 @@ export function drawWallBoard(
   const c = m.counts;
   // Title row.
   const ty = 9 * u;
-  const tw = text(ctx, "SESSIONS", 7 * u, ty, {
+  const tw = text(ctx, up(T("ops.sessions")), 7 * u, ty, {
     size: 8 * u,
     weight: 700,
     color: C.sub,
   });
   text(
     ctx,
-    `${c.live} live · ${c.subagents} subagents`,
+    T("ops.c.liveSub", { live: c.live, sub: c.subagents }),
     7 * u + tw + 5 * u,
     ty,
     {
@@ -1754,16 +1795,16 @@ export function drawWallBoard(
     },
   );
   let cx = W - 7 * u;
-  const chips: Array<[string, number, string]> = [
-    ["IDLE", c.done, STATUS_COLORS.done],
-    ["WORKING", c.working, STATUS_COLORS.working],
-    ["NEEDS YOU", c.needs_you, STATUS_COLORS.needs_you],
+  const chips: Array<[string, number, string, boolean]> = [
+    [up(T("ops.c.idle")), c.done, STATUS_COLORS.done, false],
+    [up(T("ops.c.working")), c.working, STATUS_COLORS.working, false],
+    [up(T("ops.c.needsYou")), c.needs_you, STATUS_COLORS.needs_you, true],
   ];
-  for (const [label, n, col] of chips) {
+  for (const [label, n, col, pulse] of chips) {
     const s = `${n} ${label}`;
     const w = measure(ctx, s, 6.5 * u, 600, true) + 6.5 * u * 0.9;
     cx -= w;
-    chip(ctx, s, cx, ty, 6.5 * u, col, label === "NEEDS YOU" && n > 0);
+    chip(ctx, s, cx, ty, 6.5 * u, col, pulse && n > 0);
     cx -= 3 * u;
   }
   ctx.fillStyle = C.line;
@@ -1773,23 +1814,17 @@ export function drawWallBoard(
   const top = 21 * u;
   const bodyH = H - top - 3 * u;
   if (live.length === 0) {
-    text(ctx, "No live sessions", W / 2, top + bodyH * 0.42, {
+    text(ctx, T("ops.c.noLive"), W / 2, top + bodyH * 0.42, {
       size: 13 * u,
       weight: 700,
       color: C.sub,
       align: "center",
     });
-    text(
-      ctx,
-      "Start Claude Code anywhere and it shows up here",
-      W / 2,
-      top + bodyH * 0.42 + 14 * u,
-      {
-        size: 7 * u,
-        color: C.muted,
-        align: "center",
-      },
-    );
+    text(ctx, T("ops.c.startHint"), W / 2, top + bodyH * 0.42 + 14 * u, {
+      size: 7 * u,
+      color: C.muted,
+      align: "center",
+    });
     return;
   }
   const rowH = Math.max(
@@ -1840,8 +1875,8 @@ export function drawWallBoard(
       max: colCtx - colPhase - 10 * u,
     });
     const det = [
-      r.phaseElapsed ? `for ${r.phaseElapsed}` : null,
-      r.subagents ? `${r.subagents} agents` : null,
+      r.phaseElapsed ? T("ops.for", { span: r.phaseElapsed }) : null,
+      r.subagents ? T("ops.c.agentsN", { n: r.subagents }) : null,
     ]
       .filter(Boolean)
       .join(" · ");
@@ -1856,7 +1891,9 @@ export function drawWallBoard(
     const bw = x0 + iw - colCtx - 6 * u;
     text(
       ctx,
-      r.contextPct != null ? `ctx ${fmtPct(r.contextPct)}` : "ctx —",
+      T("ops.c.ctx", {
+        pct: r.contextPct != null ? fmtPct(r.contextPct) : "—",
+      }),
       colCtx,
       l1,
       {
@@ -1888,7 +1925,7 @@ export function drawWallBoard(
   if (rest > 0)
     text(
       ctx,
-      `+${rest} more live · press B for the full dashboard`,
+      T("ops.c.moreLiveB", { n: rest }),
       x0 + 2 * u,
       top + shown.length * rowH + 6 * u,
       {
