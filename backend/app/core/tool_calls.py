@@ -334,6 +334,9 @@ class ToolCallTracker:
         self._pending_caller: dict[str, str] = {}
         # agent id -> the call whose activity its node shows.
         self._activity_call: dict[str, str] = {}
+        # Calls closed by inference (orphaned "running" at turn / agent /
+        # session end): a late real post still settles them.
+        self._closed_by_inference: set[str] = set()
 
     # -- read API (WS3) -----------------------------------------------------
 
@@ -388,8 +391,11 @@ class ToolCallTracker:
             self._set_main_state("working", ts, result)
         elif et == EventType.STOP:
             self._infer_denied("main", ts, result)
+            self._close_orphans("main", ts, result)
             self._set_main_state("idle", ts, result)
         elif et == EventType.SESSION_END:
+            self._infer_denied(None, ts, result)
+            self._close_orphans(None, ts, result, keep_live_spawns=False)
             main = self._set_main_state("ended", ts, result)
             if main.ended_at is None:
                 main.ended_at = ts
@@ -492,6 +498,7 @@ class ToolCallTracker:
         while len(self._calls) > self._max_calls:
             old_id, _ = self._calls.popitem(last=False)
             self._pending_caller.pop(old_id, None)
+            self._closed_by_inference.discard(old_id)
             self._evicted += 1
         node = self.tree.ensure(agent_id, ts, result)
         node.tool_calls += 1
@@ -555,15 +562,54 @@ class ToolCallTracker:
         if status in _ENDED:
             self._end_activity(call, result)
 
-    def _infer_denied(self, agent_id: str, ts: str, result: ApplyResult) -> None:
-        """A call still waiting for permission when its agent moves on was denied."""
+    def _infer_denied(self, agent_id: str | None, ts: str, result: ApplyResult) -> None:
+        """A call still waiting for permission when its agent moves on was denied.
+
+        ``agent_id=None`` applies to every agent (session end).
+        """
         for call in reversed(self._calls.values()):
-            if call.agent_id == agent_id and call.status == "waiting_permission":
+            if agent_id is not None and call.agent_id != agent_id:
+                continue
+            if call.status == "waiting_permission":
                 self._set_status(call, "denied", result)
                 call.ended_at = ts
                 call.duration_ms = _ms_between(call.started_at, ts)
                 call.permission_wait_ms = _ms_between(call.permission_requested_at, ts)
                 self._bump(call, result)
+
+    def _close_orphans(
+        self,
+        agent_id: str | None,
+        ts: str,
+        result: ApplyResult,
+        keep_live_spawns: bool = True,
+    ) -> None:
+        """Close calls still ``running`` when their agent's turn / life ends.
+
+        Their post never arrived (the hook POST timed out, or the tool was cut
+        off), so they are marked ``interrupted`` instead of pulsing forever. A
+        late real post still settles them (``_closed_by_inference``).
+        ``agent_id=None`` closes every agent's calls (session end). For
+        ``main``, hook copies whose caller id is not resolved yet are skipped:
+        they belong to a subagent that may still be working. Spawn calls whose
+        child is still running stay open unless *keep_live_spawns* is False.
+        """
+        for call in self._calls.values():
+            if call.status != "running":
+                continue
+            if agent_id is not None and call.agent_id != agent_id:
+                continue
+            if agent_id == "main" and call.id in self._pending_caller:
+                continue
+            if keep_live_spawns and call.spawned_agent_id:
+                child = self.tree.get(call.spawned_agent_id)
+                if child is not None and child.ended_at is None:
+                    continue
+            self._set_status(call, "interrupted", result)
+            call.ended_at = ts
+            call.duration_ms = _ms_between(call.started_at, ts)
+            self._closed_by_inference.add(call.id)
+            self._bump(call, result)
 
     def _on_pre(self, event: ToolEvent, ts: str, result: ApplyResult) -> None:
         data = event.data
@@ -656,8 +702,12 @@ class ToolCallTracker:
             created = False
         # A real post overrides an inferred denial; any other ended call means
         # this post is a second copy (hook + poller) of one already seen.
-        duplicate = not created and (
-            call.status in ("ok", "error", "interrupted") or call.status == "spawned"
+        inferred = call.id in self._closed_by_inference
+        self._closed_by_inference.discard(call.id)
+        duplicate = (
+            not created
+            and not inferred
+            and (call.status in ("ok", "error", "interrupted") or call.status == "spawned")
         )
         if not created:
             self._merge_identity(
@@ -820,6 +870,9 @@ class ToolCallTracker:
         if preview:
             node.result_preview = _clip(preview, RESULT_PREVIEW_MAX_CHARS)
         self.tree.bump(node, result)
+        # Its own calls cannot outlive it.
+        self._infer_denied(node.id, ts, result)
+        self._close_orphans(node.id, ts, result)
 
         call = self._calls.get(node.spawn_tool_use_id) if node.spawn_tool_use_id else None
         if call is not None:

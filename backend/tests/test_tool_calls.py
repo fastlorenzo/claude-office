@@ -327,6 +327,70 @@ def test_inferred_denied_on_next_pre_and_on_stop() -> None:
     assert d2 is not None and d2.status == "ok" and d2.permission_wait_ms == 4000
 
 
+def test_orphaned_main_calls_close_at_stop_and_late_post_settles() -> None:
+    tr = _tracker()
+    tr.apply(_ev("pre_tool_use", 0, tool_name="Bash", tool_use_id="m1"))
+    # A hook copy of a subagent call whose caller is not linked yet: not main's.
+    tr.apply(
+        _ev(
+            "pre_tool_use",
+            1,
+            tool_name="Read",
+            tool_use_id="m2",
+            caller_native_agent_id="anative_unknown",
+        )
+    )
+    res = tr.apply(_ev("stop", 5))
+    m1 = tr.get("m1")
+    assert m1 is not None and m1.status == "interrupted" and m1.duration_ms == 5000
+    assert any(c.id == "m1" for c in res.calls), "closing must emit a frame"
+    m2 = tr.get("m2")
+    assert m2 is not None and m2.status == "running"
+    # The lost post shows up late: it still settles the call (not a duplicate).
+    late = tr.apply(_ev("post_tool_use", 7, tool_name="Bash", tool_use_id="m1", success=True))
+    assert late.outcome == "updated"
+    m1 = tr.get("m1")
+    assert m1 is not None and m1.status == "ok" and m1.duration_ms == 7000
+    # A second copy after that is a duplicate again.
+    dup = tr.apply(_ev("post_tool_use", 8, agent_id=SUB, tool_use_id="m1", success=True))
+    assert dup.outcome == "merged_duplicate"
+
+
+def test_orphaned_subagent_calls_close_on_its_stop() -> None:
+    sm = StateMachine()
+    sub = "subagent_toolu_orph"
+    _run(
+        sm,
+        [
+            _ev("subagent_start", 0, agent_id=sub, tool_use_id="toolu_orph", agent_name="O"),
+            _ev("pre_tool_use", 1, agent_id=sub, tool_name="Bash", tool_use_id="toolu_o1"),
+            _ev("pre_tool_use", 2, tool_name="Read", tool_use_id="toolu_main"),
+        ],
+    )
+    sm.transition(_ev("subagent_stop", 9, agent_id=sub))
+    o1 = sm.tool_calls.get("toolu_o1")
+    assert o1 is not None and o1.status == "interrupted"
+    assert any(c.id == "toolu_o1" for c in sm.last_console.calls)
+    spawn = sm.tool_calls.get("toolu_orph")
+    assert spawn is not None and spawn.status == "ok"
+    main_call = sm.tool_calls.get("toolu_main")
+    assert main_call is not None and main_call.status == "running"
+
+
+def test_main_stop_keeps_spawn_call_of_live_async_child_open() -> None:
+    sm = StateMachine()
+    # Async spawn whose hook post was lost: running, child still alive.
+    sm.transition(
+        _ev("subagent_start", 0, agent_id="subagent_toolu_live", tool_use_id="toolu_live")
+    )
+    sm.transition(_ev("stop", 3))
+    spawn = sm.tool_calls.get("toolu_live")
+    assert spawn is not None and spawn.status == "running"
+    sm.transition(_ev("session_end", 10))
+    spawn = sm.tool_calls.get("toolu_live")
+    assert spawn is not None and spawn.status == "interrupted"
+
+
 def test_failure_is_error_with_message() -> None:
     tr = _tracker()
     tr.apply(_ev("pre_tool_use", 0, tool_name="Bash", tool_use_id="e1"))
@@ -767,6 +831,7 @@ async def test_restored_tracker_equals_live() -> None:
             ),
             _ev("pre_tool_use", 66, sid, tool_name="Edit", tool_use_id="toolu_r2"),
             _ev("permission_request", 67, sid, tool_name="Edit", tool_use_id="toolu_r2"),
+            _ev("pre_tool_use", 68, sid, tool_name="Bash", tool_use_id="toolu_r3"),
             _ev("stop", 70, sid),
         ]
         await _ingest(ep, sid, _fixture_events(sid) + extra)
@@ -779,6 +844,7 @@ async def test_restored_tracker_equals_live() -> None:
         assert rest_nodes == live_nodes
         statuses = {c[0]: c[4] for c in live_calls}
         assert statuses["toolu_r1"] == "error" and statuses["toolu_r2"] == "denied"
+        assert statuses["toolu_r3"] == "interrupted"  # orphan closed at turn end
         # History dedupe matches too (the persisted synthetic CLEANUP row only
         # exists for the restore: live never routes it through the pipeline).
         rest_ids = [h["id"] for h in restored.history if h["type"] != "cleanup"]
