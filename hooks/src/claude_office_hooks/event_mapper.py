@@ -333,12 +333,15 @@ def _handle_user_prompt_submit(
             output_file = root.findtext("output-file", "")
             status = root.findtext("status", "completed")
             summary_text = root.findtext("summary", "")
+            notif_tool_use_id = root.findtext("tool-use-id", "")
 
             payload["event_type"] = "background_task_notification"
             data["background_task_id"] = task_id
             data["background_task_output_file"] = output_file
             data["background_task_status"] = status
             data["background_task_summary"] = summary_text
+            if notif_tool_use_id:
+                data["tool_use_id"] = notif_tool_use_id
             data["summary"] = f"Background task {task_id[:8]}... {status}"
             return
         except ET.ParseError:

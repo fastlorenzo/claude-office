@@ -178,3 +178,16 @@ class TestNativeSubagentStop:
         }
         result = map_event("subagent_stop", raw, SESSION_ID)
         assert result is None
+
+
+def test_task_notification_passes_tool_use_id() -> None:
+    prompt = (
+        "<task-notification><task-id>abc12345</task-id>"
+        "<tool-use-id>toolu_01XYZ</tool-use-id>"
+        "<output-file>/tmp/o</output-file><status>completed</status>"
+        "<summary>done</summary></task-notification>"
+    )
+    result = map_event("user_prompt_submit", {"prompt": prompt}, SESSION_ID)
+    assert result is not None
+    assert result["event_type"] == "background_task_notification"
+    assert result["data"]["tool_use_id"] == "toolu_01XYZ"
