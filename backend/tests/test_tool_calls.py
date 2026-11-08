@@ -1279,6 +1279,13 @@ async def test_poller_no_zombie_while_tool_in_flight_and_resumes_offset(
     poller = TranscriptPoller(collect)
     await poller.start_polling(SUB, "ws2-test", str(path), from_start=True)
     state = poller._sessions[SUB]  # pyright: ignore[reportPrivateUsage]
+    # The poll loop's own first read races a manual _check (both read the same
+    # offset): let the loop read it, then run one more check, which must not
+    # re-emit anything.
+    for _ in range(100):
+        if seen:
+            break
+        await asyncio.sleep(0.01)
     await poller._check(SUB, state)  # pyright: ignore[reportPrivateUsage]
     assert [e.event_type for e in seen] == ["pre_tool_use"]
     assert seen[0].timestamp == datetime(2026, 11, 8, 10, 0, tzinfo=UTC)  # record time
