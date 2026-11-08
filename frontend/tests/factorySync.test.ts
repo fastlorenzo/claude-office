@@ -195,6 +195,14 @@ describe("lineAdapter", () => {
     expect(laneAbsX(laneNorm(3), k)).toBeGreaterThan(
       Math.abs(layout.cells[0].trunk.x),
     );
+    // A grouped 7th station ("+N") is not drawn: the normaliser still counts
+    // it, drawn stations stay exact and the extra one sits before QA.
+    const k7 = laneKnots(lane, 7);
+    expect(laneAbsX(2.5 + 2, k7)).toBeCloseTo(Math.abs(lane.stationX[2]));
+    const x6 = laneAbsX(2.5 + 6, k7);
+    expect(x6).toBeLessThan(Math.abs(lane.stationX[5]));
+    expect(x6).toBeGreaterThan(Math.abs(lane.qaX));
+    expect(laneAbsX(2.5 + 7, k7)).toBeCloseTo(Math.abs(lane.qaX));
     // Monotonic toward the spine.
     for (let u = 0; u < laneNorm(3); u += 0.1)
       expect(laneAbsX(u + 0.1, k)).toBeLessThanOrEqual(laneAbsX(u, k) + 1e-9);

@@ -198,18 +198,27 @@ export function laneKnots(
   lane: LaneLayout,
   stations: number,
 ): [number, number][] {
-  const S = Math.min(stations, lane.stationX.length);
+  // `stations` is the model's full count (it sets the motion's normaliser);
+  // stations past the drawn row (a grouped "+N") share the gap before QA.
+  const S = Math.max(0, Math.floor(stations));
+  const drawn = Math.min(S, lane.stationX.length);
+  const qa = Math.abs(lane.qaX);
+  const gate = Math.abs(lane.gateX);
   const k: [number, number][] = [
     [0, LINE.LANE_START_X],
     [1, Math.abs(lane.reworkX) + 1],
     [1.5, Math.abs(lane.reworkX)],
   ];
+  const lastX = drawn > 0 ? Math.abs(lane.stationX[drawn - 1]) - 1 : qa + 1;
   for (let i = 0; i < S; i++) {
-    const x = Math.abs(lane.stationX[i]);
-    k.push([2 + i, x + 1], [2.5 + i, x], [2.99 + i, x - 1]);
+    if (i < drawn) {
+      const x = Math.abs(lane.stationX[i]);
+      k.push([2 + i, x + 1], [2.5 + i, x], [2.99 + i, x - 1]);
+    } else {
+      const x = lastX + ((qa + 1 - lastX) * (i - drawn + 1)) / (S - drawn + 1);
+      k.push([2 + i, x], [2.99 + i, x]);
+    }
   }
-  const qa = Math.abs(lane.qaX);
-  const gate = Math.abs(lane.gateX);
   k.push([2 + S, qa + 1], [2.5 + S, qa], [2.99 + S, qa - 0.8]);
   k.push([3 + S, gate + 1.2], [3.5 + S, gate], [laneNorm(S), LINE.LANE_END_X]);
   // Keep |x| non-increasing (short lanes / custom layouts).
@@ -254,7 +263,7 @@ export function lineCtx(
   cell: CellLayout,
   line: LineModel | null,
 ): LineCtx {
-  const stations = Math.min(line?.stations.length ?? 0, MAX_STATIONS);
+  const stations = line?.stations.length ?? 0;
   return {
     cell,
     floorY: layout.floorY,
