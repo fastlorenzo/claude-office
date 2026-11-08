@@ -18,6 +18,11 @@
  *   frames=40                frames to wait before "ready" when shot=1
  *   t=20000                  demo clock (ms) used when shot=1 (frozen)
  *   ops=1                    show the DOM Ops dashboard (control room) over the world
+ *   live=1                   feed the live backend campus (/ws/campus) instead of
+ *                            the demo campus (real projects / PRs on the factory)
+ *   demoFactory=1            demo factory data on the production lines
+ *   panel=1                  press F on the first factory target in view and dock
+ *                            the panel it opens (needs live=1 for panel data)
  *   walk=x,y,z,yawDeg;x,z;…  scripted walk with the real player collider from
  *                            the start pose through the waypoints (stairs);
  *                            progress in __worldStats.walk
@@ -25,6 +30,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { OpsDashboard } from "@/components/world/hud/ops/OpsDashboard";
+import { isFactoryKind } from "@/engine/interaction/factoryTargets";
+import { useCampusStore } from "@/stores/campusStore";
+import { useWorldUiStore } from "@/stores/worldUiStore";
+import { FactoryPanelDock } from "./FactoryPanelDock";
+import { connectLiveCampus, type LiveCampus } from "./liveFeed";
 import {
   applyPreset,
   defaultGraphicsSettings,
@@ -135,6 +145,9 @@ function parseParams() {
     frames: Number(q.get("frames") ?? 40) || 40,
     t: q.get("t") ? Number(q.get("t")) : undefined,
     ops: q.get("ops") === "1",
+    live: q.get("live") === "1",
+    demoFactory: q.get("demoFactory") === "1",
+    panel: q.get("panel") === "1",
     tierSteps: (q.get("tierStep") ?? "")
       .split(",")
       .map((x) => x.split("@"))
@@ -150,6 +163,7 @@ export default function WorldDebugPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [status, setStatus] = useState("loading…");
+  const [prompt, setPrompt] = useState<string | null>(null);
   const [ops, setOps] = useState<{
     campus: CampusSession[];
     stats: CampusStats;
@@ -186,14 +200,30 @@ export default function WorldDebugPage() {
           walk: p.walk,
           preserveDrawingBuffer: p.shot,
           headBob: !p.camera && !p.walk,
+          demoFactory: p.demoFactory,
         },
       );
       if (p.brand) world.setBranding?.(p.brand);
       offs.push(world.on("stats", (s) => setStats(s)));
       offs.push(world.on("error", (e) => setStatus(`error: ${e.message}`)));
+      let pressed = false;
+      offs.push(
+        world.on("interaction", (e) => {
+          setPrompt(e ? `${e.target.kind} · ${e.target.roomLabel}` : null);
+          if (p.panel && e && !pressed && isFactoryKind(e.target.kind)) {
+            pressed = true;
+            world?.triggerAction("inspect");
+          }
+        }),
+        world.on("action", ({ action, target }) => {
+          if (action === "inspect" && isFactoryKind(target.kind))
+            useWorldUiStore.getState().openFactory(target);
+        }),
+      );
       offs.push(
         world.on("ready", () => {
           setStatus("ready");
+          useWorldUiStore.getState().setReady(true);
           if (p.inspect) {
             const w = world as unknown as { debugInspect?: () => void };
             w.debugInspect?.();
@@ -226,11 +256,32 @@ export default function WorldDebugPage() {
       );
       // Screenshot mode freezes the demo clock so frames are deterministic.
       const t0 = Date.now();
+      let live: LiveCampus | null = null;
+      if (p.live)
+        offs.push(
+          connectLiveCampus((s) => {
+            live = s;
+            feed();
+          }),
+        );
       const feed = () => {
         const demo = createDemoCampus(
           p.n,
           p.shot ? (p.t ?? 20000) : Date.now() - t0 + 20000,
         );
+        if (live) {
+          useCampusStore.getState().setSessions(live.campus);
+          useCampusStore.getState().setProjects(live.projects);
+          world?.sync({
+            campus: live.campus,
+            sessions: live.sessions,
+            selectedSessionId: live.sessions[0]?.id ?? null,
+            stats: live.stats,
+            projects: live.projects,
+          });
+          return;
+        }
+        if (p.live) return;
         world?.sync({
           campus: demo.campus,
           sessions: demo.sessions,
@@ -280,6 +331,7 @@ export default function WorldDebugPage() {
             {stats.effective ?? stats.tier} · {stats.postProcesses ?? 0} pp
           </div>
         )}
+        {prompt && <div>F · {prompt}</div>}
       </div>
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/80" />
       {ops && (
@@ -291,6 +343,7 @@ export default function WorldDebugPage() {
           onClose={() => setOps(null)}
         />
       )}
+      <FactoryPanelDock />
     </div>
   );
 }

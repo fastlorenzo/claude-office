@@ -86,6 +86,7 @@ import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
 import { Factory } from "@/engine/world/factory/Factory";
+import { FactoryLines } from "@/engine/world/factory/FactoryLines";
 import { cellStairFoot } from "@/engine/world/factory/FactoryHall";
 import { computeCellVisibility } from "@/engine/world/factoryVisibility";
 import { ControlRoom } from "@/engine/world/ControlRoom";
@@ -114,6 +115,8 @@ export interface WorldDebugOptions {
     start: { x: number; y: number; z: number; yaw: number };
     points: { x: number; z: number }[];
   };
+  /** Demo factory data instead of the feed's projects (`?demoFactory=1`). */
+  demoFactory?: boolean;
 }
 
 const POSE_MS = 100;
@@ -199,6 +202,8 @@ class World implements IWorld {
   private building: Building | null = null;
   /** Software-factory level under the offices (shell + machine pools). */
   private factory: Factory | null = null;
+  /** Production lines (pools + motion) fed from the campus projects. */
+  private factoryLines: FactoryLines | null = null;
   private factoryLayout: FactoryLayout;
   private lastFactoryVisAt = 0;
   private readonly zonePt = new Vector3();
@@ -442,6 +447,11 @@ class World implements IWorld {
         lighting: this.lighting,
       });
       this.factory.setLayout(this.factoryLayout, this.layout);
+      this.factoryLines = new FactoryLines(
+        this.factory,
+        { scene: this.scene, lighting: this.lighting },
+        { demo: !!this.debug.demoFactory, branding: this.branding },
+      );
       this.feeds = new FeedScheduler(this.scene);
       this.buildControlRoom();
       this.updateFixtures();
@@ -575,9 +585,9 @@ class World implements IWorld {
     }
     this.building?.setCampus(input.campus, groups.length); // control-room LED panel counts
     this.pushControlRoom();
-    // Factory seam (P2.5): build the FactoryModel from input.projects +
-    // sessions (lanesFor from this.factoryLayout, prev = last model) and hand
-    // it to `this.factory.sync(model)`; pools plug in via `factory.attach`.
+    // Factory (P2.5): FactoryModel from the projects (prev model for lane
+    // stability); pushed to the pools only when its key changed.
+    this.factoryLines?.feed(input.projects, input.campus);
   }
 
   /** Create / rebuild / drop project rooms to match the layout (+ feeds). */
@@ -947,6 +957,7 @@ class World implements IWorld {
   setBranding(opts: BrandingOptions): void {
     this.branding = opts;
     this.building?.setBranding(opts);
+    this.factoryLines?.setBranding(opts);
   }
 
   /** Characters / screens / feeds detail fan-out (each target is feature-detected). */
@@ -1072,6 +1083,7 @@ class World implements IWorld {
         actors: this.actorHub.stats(),
         zone: zone.kind,
         kinds: this.activeKinds(),
+        factory: this.factoryLines?.stats(),
         ...(this.debug.walk
           ? {
               walk: {

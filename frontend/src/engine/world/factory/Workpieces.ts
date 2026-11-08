@@ -41,6 +41,11 @@ import {
   screenFonts,
   whenFontsReady,
 } from "@/engine/screens/canvasKit";
+import type { InteractionTarget } from "@/engine/contracts";
+import {
+  registerThinResolver,
+  unregisterThinResolver,
+} from "@/engine/interaction/factoryTargets";
 import {
   BELT_HEIGHT,
   BODY_DIMS,
@@ -553,6 +558,49 @@ export class Workpieces {
     }
     if (!changed) return;
     this.uploadTags();
+  }
+
+  /**
+   * Thin-instance picking: F on a pallet / body / status band resolves the
+   * piece id through `fn` (null = not interactable); `null` turns it off.
+   * Instance order mirrors `packPieces` (pallet / band = input order, bodies
+   * = pieces of that variant, drafts excluded).
+   */
+  setPicker(fn: ((id: string) => InteractionTarget | null) | null): void {
+    const parts: [Mesh, (i: number) => string | undefined][] = [
+      [this.pallet, (i) => this.resolved[i]?.id],
+      [this.band, (i) => this.resolved[i]?.id],
+      ...this.bodies.map(
+        (m, v): [Mesh, (i: number) => string | undefined] => [
+          m,
+          (i) => this.nthId((r) => !r.draft && r.variant === v, i),
+        ],
+      ),
+    ];
+    for (const [mesh, idAt] of parts) {
+      if (!fn) {
+        unregisterThinResolver(mesh);
+        mesh.isPickable = false;
+        continue;
+      }
+      registerThinResolver(mesh, (_m, i) => {
+        const id = idAt(i);
+        return id ? fn(id) : null;
+      });
+    }
+  }
+
+  private nthId(
+    pred: (r: ResolvedPiece) => boolean,
+    n: number,
+  ): string | undefined {
+    let k = 0;
+    for (const r of this.resolved)
+      if (pred(r)) {
+        if (k === n) return r.id;
+        k++;
+      }
+    return undefined;
   }
 
   dispose(): void {
