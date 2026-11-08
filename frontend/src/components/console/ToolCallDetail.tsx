@@ -177,14 +177,14 @@ export function ToolCallDetail({
                 className="h-4 w-4 shrink-0 text-slate-300"
               />
               <span className="shrink-0 text-sm font-semibold text-slate-50">
-                {sum.label}
+                {sum.label || t("console.unknownTool")}
               </span>
               <span
                 className={`min-w-0 break-all font-mono text-[13px] ${call.status === "denied" ? "text-slate-500 line-through" : "text-slate-200"}`}
               >
                 {sum.target}
                 {sum.suffix && (
-                  <span className="text-slate-500">{sum.suffix}</span>
+                  <span className="ml-2 text-slate-500">{sum.suffix}</span>
                 )}
               </span>
             </div>

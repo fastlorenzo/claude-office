@@ -85,6 +85,8 @@ class PolledAgent:
     file_position: int = 0
     last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
     active_tool_ids: set[str] = field(default_factory=lambda: set[str]())
+    # tool_use_id -> tool name for calls in flight, so a result names its tool.
+    tool_names: dict[str, str] = field(default_factory=lambda: dict[str, str]())
     # Nested Task/Agent calls in flight: active (no zombie) but no post row.
     spawn_tool_ids: set[str] = field(default_factory=lambda: set[str]())
     last_thinking_hash: int = 0
@@ -191,6 +193,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             if previous is not None:
                 agent.active_tool_ids = set(previous.active_tool_ids)
                 agent.spawn_tool_ids = set(previous.spawn_tool_ids)
+                agent.tool_names = dict(previous.tool_names)
                 agent.turn_end = previous.turn_end
         else:
             agent.catching_up = True
@@ -420,6 +423,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                         if event:
                             events.append(event)
                             agent.active_tool_ids.add(tool_id)
+                            agent.tool_names[tool_id] = str(block.get("name") or "")
                         elif block.get("name") in ("Task", "Agent") and tool_id:
                             agent.spawn_tool_ids.add(tool_id)
 
@@ -459,6 +463,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
                             if event:
                                 events.append(event)
                             agent.active_tool_ids.discard(tool_use_id)
+                            agent.tool_names.pop(tool_use_id, None)
                         agent.spawn_tool_ids.discard(tool_use_id)
 
         return events
@@ -529,6 +534,7 @@ class TranscriptPoller(BasePoller[PolledAgent]):
             timestamp=stamp or datetime.now(UTC),
             data=ToolEventData(
                 agent_id=agent.agent_id,
+                tool_name=agent.tool_names.get(tool_use_id) or None,
                 tool_use_id=tool_use_id,
                 success=not is_error,
             ),

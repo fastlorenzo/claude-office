@@ -227,7 +227,8 @@ export const CallRow = memo(function CallRow({
   const isTask = sum.renderer === "task";
   const waiting = call.status === "waiting_permission";
   const statusLabel = t(st.labelKey);
-  const label = [v.name, sum.label, sum.target, statusLabel, dur ?? ""]
+  const toolLabel = sum.label || t("console.unknownTool");
+  const label = [v.name, toolLabel, sum.target, statusLabel, dur ?? ""]
     .filter(Boolean)
     .join(", ");
   const errLine =
@@ -304,7 +305,7 @@ export const CallRow = memo(function CallRow({
           <span
             className={`truncate text-[13px] font-semibold text-slate-100 ${tight ? "" : "min-w-[3.5rem]"}`}
           >
-            {sum.label}
+            {toolLabel}
           </span>
         </span>
         {showAgentChip && v.kind !== "main" && !compact && <AgentChip v={v} />}
@@ -349,7 +350,7 @@ export const CallRow = memo(function CallRow({
             title={sum.target}
           >
             {target}
-            {sum.suffix && <span className="text-slate-500">{sum.suffix}</span>}
+            {sum.suffix && <span className="ml-2 text-slate-500">{sum.suffix}</span>}
           </span>
         )}
         {showAgentChip && v.kind !== "main" && compact && (

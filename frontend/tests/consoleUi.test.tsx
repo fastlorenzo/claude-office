@@ -523,4 +523,46 @@ describe("connected console", () => {
     });
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("ToolCallDetailModal labels a blank tool name and spaces the suffix", () => {
+    const call = makeToolCall(2, {
+      toolName: "",
+      status: "error",
+      error: "Tool call failed",
+    });
+    mount(
+      <ToolCallDetailModal
+        sessionId="s"
+        call={call}
+        agents={new Map([["main", MAIN_AGENT]])}
+        onClose={() => {}}
+      />,
+    );
+    expect(document.querySelector("[role=dialog]")?.textContent).toContain(
+      "Unknown tool",
+    );
+  });
+
+  it("ToolCallDetailModal separates the subagent type chip from the target", () => {
+    const call = makeToolCall(3, {
+      toolName: "Agent",
+      target: "WS3 backend console API",
+      inputPreview: {
+        description: "WS3 backend console API",
+        subagent_type: "general-purpose",
+      },
+    });
+    mount(
+      <ToolCallDetailModal
+        sessionId="s"
+        call={call}
+        agents={new Map([["main", MAIN_AGENT]])}
+        onClose={() => {}}
+      />,
+    );
+    const el = Array.from(document.querySelectorAll("span")).find(
+      (e) => e.textContent === "general-purpose" && e.className.includes("ml-2"),
+    );
+    expect(el).toBeTruthy();
+  });
 });

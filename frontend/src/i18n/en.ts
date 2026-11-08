@@ -727,6 +727,7 @@ const en = {
   "console.keysHint":
     "j/k move · Enter open · [ ] errors · / search · f follow",
   "console.callDetail": "Tool call detail",
+  "console.unknownTool": "Unknown tool",
   "console.back": "Back",
   "console.close": "Close console",
   "console.copyInput": "Copy input",

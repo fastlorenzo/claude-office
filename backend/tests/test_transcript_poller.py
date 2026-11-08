@@ -146,6 +146,8 @@ class TestTranscriptPoller:
             types = [e.event_type for e in events]
             assert EventType.PRE_TOOL_USE in types
             assert EventType.POST_TOOL_USE in types
+            post = next(e for e in events if e.event_type == EventType.POST_TOOL_USE)
+            assert post.data.tool_name == "Bash"  # type: ignore[union-attr]
         finally:
             Path(temp_path).unlink(missing_ok=True)
 

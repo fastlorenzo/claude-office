@@ -741,6 +741,7 @@ const ptBR: Record<TranslationKey, string> = {
   "console.keysHint":
     "j/k mover · Enter abrir · [ ] erros · / buscar · f seguir",
   "console.callDetail": "Detalhe da chamada",
+  "console.unknownTool": "Ferramenta desconhecida",
   "console.back": "Voltar",
   "console.close": "Fechar console",
   "console.copyInput": "Copiar entrada",

@@ -743,6 +743,7 @@ const es: Record<TranslationKey, string> = {
   "console.keysHint":
     "j/k mover · Enter abrir · [ ] errores · / buscar · f seguir",
   "console.callDetail": "Detalle de la llamada",
+  "console.unknownTool": "Herramienta desconocida",
   "console.back": "Atrás",
   "console.close": "Cerrar consola",
   "console.copyInput": "Copiar entrada",
