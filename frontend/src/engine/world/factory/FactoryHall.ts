@@ -1120,7 +1120,7 @@ export class FactoryHall {
     // under the hall slab past the well (≥ 4 m headroom there).
     for (const st of fl.spineStairs) {
       steelFlight(b, this.ctx.colliders, G, spineFlight(st, fy), {
-        guardFloor: fy,
+        floorY: fy,
       });
     }
     // Per-cell switchback stairs (balcony → entry bay): three 2 m flights.
@@ -1145,6 +1145,7 @@ export class FactoryHall {
         G,
         R(S.top.x0, S.top.x1, S.top.z0, S.top.z1),
         0,
+        fy,
       );
       // Dividers: f1|f2 share the far landing (y −2), f2|f3 the near one
       // (y −4); their guards stop 0.7 m short of that end.
@@ -1161,7 +1162,7 @@ export class FactoryHall {
         if (k === 2) trims.push({ x: X(div[1]), end: "top", len: TRIM });
         // Guards sit 0.025 inside the band edge.
         for (const t of trims) t.x += band.x0 < t.x - 0.5 ? -0.025 : 0.025;
-        steelFlight(b, this.ctx.colliders, G, f, { guardFloor: fy, trims });
+        steelFlight(b, this.ctx.colliders, G, f, { floorY: fy, trims });
       });
       steelLanding(
         b,
@@ -1169,6 +1170,7 @@ export class FactoryHall {
         G,
         R(S.far.x0, S.far.x1, S.far.z0, S.far.z1),
         -2,
+        fy,
       );
       steelLanding(
         b,
@@ -1176,6 +1178,7 @@ export class FactoryHall {
         G,
         R(S.near.x0, S.near.x1, S.near.z0, S.near.z1),
         -4,
+        fy,
       );
       // Landing guards on the open edges (never across a flight entry).
       const g = 0.03;
@@ -1299,7 +1302,8 @@ export class FactoryHall {
    * flight up each side onto a grating deck 2 m above the floor (over the
    * tallest workpiece), handrails continuous along the flights and the deck,
    * legs outside the belt. Colliders: both ramps (flush with the floor and
-   * the deck), the deck plate, side guards over the flights, deck rails.
+   * the deck), the deck plate, side guard bands over the flights, deck
+   * rails, and the space under flights and deck closed (< 2 m headroom).
    */
   private buildCrossovers(b: ArtBatcher, fl: FactoryLayout): void {
     const fy = fl.floorY;
@@ -1311,8 +1315,8 @@ export class FactoryHall {
       const d0 = x.z - C.DECK_HALF;
       const d1 = x.z + C.DECK_HALF;
       for (const f of crossoverFlights(x, fy))
-        steelFlight(b, cols, G, f, { guardFloor: fy });
-      steelLanding(b, cols, G, { x0: xa, x1: xb, z0: d0, z1: d1 }, x.deckY);
+        steelFlight(b, cols, G, f, { floorY: fy });
+      steelLanding(b, cols, G, { x0: xa, x1: xb, z0: d0, z1: d1 }, x.deckY, fy);
       for (const gx of [xa + 0.025, xb - 0.025]) {
         steelRail(b, cols, G, "z", gx, d0, d1, x.deckY);
         // Toe board along the deck edge.

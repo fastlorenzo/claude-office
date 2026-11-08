@@ -72,8 +72,12 @@ import {
 } from "@/engine/world/wayfinding";
 import {
   flight,
+  guardBoxes,
+  nookRail,
   rampBox,
+  rampDepth,
   STAIR_RAIL_TOP,
+  underBlockers,
   type Flight,
 } from "@/engine/world/stairs";
 
@@ -623,6 +627,11 @@ export class EntranceHall {
     // head), sinking under the lower floor past the foot.
     const ramp = rampBox(f);
     this.col(ramp.c, ramp.s, { pitch: ramp.pitch });
+    // Open underneath (floating folded box): the lobby floor under it stays
+    // walkable wherever the soffit is ≥ 2 m up; lower, the nook is closed.
+    const depth = Math.max(STAIR_D, rampDepth(f));
+    for (const k of underBlockers(f, 0, depth)) this.col(k.c, k.s);
+    nookRail(b, "blackMetal", f, 0, depth);
     return f;
   }
 
@@ -743,8 +752,6 @@ export class EntranceHall {
     const ly = st.landingY - this.floorY; // local landing height (3)
     const lo = st.lower;
     const up = st.upper;
-    const zHead = st.rect.z1; // flights' north ends (foot / head)
-    const zLand = st.landing.z1; // flights' south ends (at the landing)
     // Lower flight: floor (north) up to the landing (south); upper flight:
     // landing up to the reception (north).
     const [fl, fu] = entranceFlights(st, this.floorY).map((f) =>
@@ -772,13 +779,10 @@ export class EntranceHall {
     this.flightRail(b, xLoIn, fl, false);
     this.flightRail(b, xUpOut, fu, false);
     this.flightRail(b, xUpIn, fu);
-    // One full-height see-through guard between the flights.
-    const xDiv = (xLoIn + xUpOut) / 2;
-    this.col(
-      new Vector3(xDiv, (UP + RAIL_TOP) / 2, (zHead + zLand) / 2),
-      new Vector3(Math.abs(xLoIn - xUpOut) + 0.1, UP + RAIL_TOP, zHead - zLand),
-      { see: true },
-    );
+    // Between the flights: a see-through guard band over each flight's own
+    // treads (never down to the lobby floor under the upper flight).
+    for (const g of guardBoxes(fl, xLoIn)) this.col(g.c, g.s, { see: true });
+    for (const g of guardBoxes(fu, xUpOut)) this.col(g.c, g.s, { see: true });
     // Landing: lobby side and the façade side.
     const xLandIn = s > 0 ? L.x0 + 0.012 : L.x1 - 0.012;
     this.levelRail(b, "z", xLandIn, L.z0 + 0.02, L.z1, ly);

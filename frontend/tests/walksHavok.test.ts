@@ -49,7 +49,12 @@ import { groupSessions } from "@/engine/logic/projectGroups";
 import type { Lighting } from "@/engine/fx/Lighting";
 import { Materials } from "@/engine/materials/Materials";
 import { EntranceHall } from "@/engine/world/EntranceHall";
-import { FactoryHall } from "@/engine/world/factory/FactoryHall";
+import {
+  CELL_STAIR,
+  cellStairFlights,
+  FactoryHall,
+  spineFlight,
+} from "@/engine/world/factory/FactoryHall";
 import { controlPlan } from "@/engine/world/controlRoomPlan";
 import { addDeckColliders } from "@/engine/world/controlRoomColliders";
 import { factoryColliderBoxes } from "@/engine/world/factory/factoryColliders";
@@ -58,6 +63,7 @@ import {
   type StationInstance,
 } from "@/engine/world/factory/stationPlan";
 import { endWallBoxes } from "@/engine/world/projectRoomColliders";
+import { nosingY, STAIR_HEADROOM, steelDepth } from "@/engine/world/stairs";
 import { walk, walkWorld, type WalkWorld } from "./helpers/havokWalk";
 
 const deg = Math.PI / 180;
@@ -248,6 +254,41 @@ describe("acceptance walks (Havok, entrance and forecourt)", () => {
     expect(r.feet.z).toBeGreaterThan(-6.0);
   });
 
+  it("under the east stair: lobby → under the upper flight → under the lower flight's head → under the landing → lobby", () => {
+    // Upper flight x 10.15–11.55 (landing 3 m → reception 6 m, ≥ 2.5 m
+    // clear under it), lower flight 11.65–13.05 (≥ 2 m clear only in its
+    // last ~0.9 m before the landing), landing z −11.85…−10.6 (2.5 m clear).
+    const r = walk(
+      w,
+      { x: 9.3, y: -6, z: -8.3, yaw: 90 * deg },
+      [
+        { x: 10.85, z: -8.3 },
+        { x: 10.85, z: -9.9 },
+        { x: 12.35, z: -9.9 },
+        { x: 12.35, z: -11.2 },
+        { x: 9.3, z: -11.2 },
+      ],
+      25,
+    );
+    expect(r.reached).toBe(5);
+    // Crossed between the flights inside their z range (not round the end).
+    expect(r.log.some((q) => q.x > 11.9 && q.z > -10.4)).toBe(true);
+    expect(Math.max(...r.log.map((q) => q.y))).toBeLessThan(-6 + 0.15);
+    expect(r.feet.x).toBeLessThan(9.8);
+  });
+
+  it("under the east stair's lower flight foot: the nook stops the walker", () => {
+    // 1.5 m up the lower flight from its foot: ~0.6 m under it.
+    const r = walk(
+      w,
+      { x: 10.85, y: -6, z: -7.5, yaw: 90 * deg },
+      [{ x: 13.5, z: -7.5 }],
+      8,
+    );
+    expect(r.reached).toBe(0);
+    expect(r.feet.x).toBeLessThan(11.65 - 0.2);
+  });
+
   it("forecourt: from the doors to the fence line, stopped by the fence", () => {
     const r = walk(
       w,
@@ -350,6 +391,115 @@ describe("acceptance walks (Havok, factory crossovers and stairs)", () => {
     );
     expect(r.reached).toBe(1);
     expect(Math.abs(r.feet.x - x.x)).toBeLessThan(0.5);
+  });
+
+  it("under a spine flight: across beneath it where headroom ≥ 2 m", () => {
+    const st = fl.spineStairs[0];
+    const f = spineFlight(st, fl.floorY);
+    // 1.6 m down the run from the well edge: ~4.7 m clear under the flight.
+    const z = f.zTop + f.dir * 1.6;
+    expect(nosingY(f, z) - steelDepth(f) - fl.floorY).toBeGreaterThan(
+      STAIR_HEADROOM + 2,
+    );
+    for (const dir of [1, -1]) {
+      const x0 = dir > 0 ? f.xa - 1.2 : f.xb + 1.2;
+      const x1 = dir > 0 ? f.xb + 1.2 : f.xa - 1.2;
+      const r = walk(
+        w,
+        { x: x0, y: fl.floorY, z, yaw: (dir * Math.PI) / 2 },
+        [{ x: x1, z }],
+        10,
+      );
+      expect(r.reached).toBe(1);
+      // Out the other side, on the floor all the way.
+      expect(dir * (r.feet.x - x1)).toBeGreaterThan(-0.3);
+      expect(Math.max(...r.log.map((q) => q.y))).toBeLessThan(fl.floorY + 0.15);
+      expect(r.feet.y).toBeLessThan(fl.floorY + 0.15);
+    }
+  });
+
+  it("under a spine flight's low end: the nook stops the walker", () => {
+    const st = fl.spineStairs[0];
+    const f = spineFlight(st, fl.floorY);
+    // 2.2 m up the run from the foot: ~1.3 m under the flight (< 2 m).
+    const z = f.zBot - f.dir * 2.2;
+    expect(nosingY(f, z) - steelDepth(f) - fl.floorY).toBeLessThan(
+      STAIR_HEADROOM,
+    );
+    const r = walk(
+      w,
+      { x: f.xa - 1.2, y: fl.floorY, z, yaw: Math.PI / 2 },
+      [{ x: f.xb + 1.2, z }],
+      8,
+    );
+    expect(r.reached).toBe(0);
+    expect(r.feet.x).toBeLessThan(f.xa - 0.2);
+    expect(r.feet.y).toBeLessThan(fl.floorY + 0.15);
+  });
+
+  it("under a cell stair: along beneath the switchback, and across under flights 1 and 2", () => {
+    const S = CELL_STAIR;
+    for (const c of fl.cells) {
+      const W = 4.8;
+      const m = c.stair.top.z - c.z0 > W / 2;
+      const Z = (o: number) => (m ? c.z0 + W - o : c.z0 + o);
+      const [f1, f2] = cellStairFlights(c, fl.floorY);
+      const s = Math.sign(f1.xm);
+      expect(-2 - steelDepth(f1) - fl.floorY).toBeGreaterThan(STAIR_HEADROOM);
+      // (The cell's end wall stands ~0.7 m past the far landing.)
+      const zOut = Z(S.far.z1 + 0.3);
+      const out = (r: ReturnType<typeof walk>, from: number) => {
+        expect(r.reached).toBe(1);
+        // Out from under the far landing, on the floor all the way.
+        expect(
+          Math.sign(zOut - from) * (r.feet.z - Z(S.far.z1)),
+        ).toBeGreaterThan(0.2);
+        expect(Math.max(...r.log.map((q) => q.y))).toBeLessThan(
+          fl.floorY + 0.15,
+        );
+      };
+      // Along flight 1's centre line, the whole length of the switchback at
+      // floor level: top landing (y 0), flight 1 (0 → −2), far landing (−2).
+      const za = Z(S.top.z0 - 0.6);
+      out(
+        walk(
+          w,
+          { x: f1.xm, y: fl.floorY, z: za, yaw: zOut > za ? 0 : Math.PI },
+          [{ x: f1.xm, z: zOut }],
+          12,
+        ),
+        za,
+      );
+      // From the entry-bay walkway side, across under flight 1 (through
+      // both its guard planes) to under flight 2 (≥ 2.7 m clear there),
+      // then out under the far landing between its posts.
+      const zm = Z(2.6);
+      expect(nosingY(f2, zm) - steelDepth(f2) - fl.floorY).toBeGreaterThan(
+        STAIR_HEADROOM + 0.5,
+      );
+      const x0 = s > 0 ? f1.xa - 1.0 : f1.xb + 1.0;
+      const r = walk(
+        w,
+        { x: x0, y: fl.floorY, z: zm, yaw: (s * Math.PI) / 2 },
+        [
+          { x: f2.xm, z: zm },
+          { x: s * 15.4, z: Z(S.far.z0) },
+          { x: s * 15.4, z: zOut },
+        ],
+        15,
+      );
+      // It got under flight 2.
+      expect(r.log.some((q) => q.x > f2.xa + 0.2 && q.x < f2.xb - 0.2)).toBe(
+        true,
+      );
+      expect(r.reached).toBe(3);
+      // Out from under the far landing (the harness overshoots and turns
+      // back to a waypoint it brushed past, so read the log, not the end).
+      expect(
+        r.log.some((q) => Math.sign(zOut - zm) * (q.z - Z(S.far.z1)) > 0.2),
+      ).toBe(true);
+      expect(Math.max(...r.log.map((q) => q.y))).toBeLessThan(fl.floorY + 0.15);
+    }
   });
 
   it("spine stair: hall well head down to the factory floor", () => {

@@ -10,17 +10,27 @@
  * positive pitch lowers its +z end.
  *
  *   flight(...)       pure numbers (risers, going, pitch, slope normal)
- *   rampBox(f)        the hidden walkable ramp: its TOP face runs exactly
- *                     through the top and bottom nosings (flush with both
- *                     floors, no lip) and only extends below the bottom one
- *                     (sinking under the lower floor)
- *   guardBox(...)     vertical side guard over the flight's own z range only
- *                     (never pokes into a landing)
+ *   rampBox(f)        the hidden walkable ramp: a thin slab whose TOP face
+ *                     runs exactly through the top and bottom nosings (flush
+ *                     with both floors, no lip) and only extends below the
+ *                     bottom one (sinking under the lower floor)
+ *   guardBoxes(...)   side guard: a band from just under the treads up to
+ *                     guard height, stepped along the slope over the
+ *                     flight's own z range only (never pokes into a landing,
+ *                     never reaches down to the floor under the flight)
+ *   underBlockers(...) the closed nook under the low end: fills the space
+ *                     under the flight where headroom < STAIR_HEADROOM (the
+ *                     player capsule could wedge there); the rest of the
+ *                     underside stays walkable
  *   railBox(...)      handrail bar along the nosing line (visual)
  *   balusterSpots(f)  baluster feet along a flight edge
  *   steelFlight(...)  galvanised treads + yellow nosings + painted stringers
  *                     + black flat-bar handrails, with ramp and guards
  *   steelLanding / steelRail / steelPost   the matching level parts
+ *
+ * Under a flight or landing the floor stays free wherever the structure's
+ * underside is at least STAIR_HEADROOM above it; lower than that a blocker
+ * closes it (a real stair's closed soffit / storage nook).
  */
 import { Vector3 } from "@/engine/babylon";
 import { paintOf, type ArtBatcher } from "@/engine/art/geometry";
@@ -33,6 +43,18 @@ export const STAIR_MAX_DEG = 35;
 export const STAIR_RAIL_TOP = 0.95;
 /** Side guards and level guard rails reach this far above their floor. */
 export const STAIR_GUARD_H = 1.1;
+/** Clear height a walker needs under a flight or landing (capsule 1.8 m). */
+export const STAIR_HEADROOM = 2.0;
+/** Hidden ramp thickness (perpendicular to the slope). */
+const RAMP_T = 0.2;
+/** Side guard segments: length along z, reach below the nosing line. */
+const GUARD_SEG = 0.6;
+const GUARD_BELOW = 0.25;
+/** Under-flight blocker slices (length along z). */
+const BLOCK_SEG = 0.4;
+/** Steel stringer: height (perpendicular) and centre below the nosing line. */
+const STRINGER_H = 0.26;
+const STRINGER_OFF = 0.08;
 /** Baluster spacing under the steel handrails. */
 const BALUSTER_PITCH = 0.24;
 /** Safety yellow of the steel nosings. */
@@ -106,6 +128,22 @@ export function flight(
   };
 }
 
+/** Nosing-line height at z (clamped to the flight's run). */
+export function nosingY(f: Flight, z: number): number {
+  const t = Math.min(1, Math.max(0, ((z - f.zTop) * f.dir) / f.run));
+  return f.yTop - t * f.drop;
+}
+
+/** Vertical depth of the hidden ramp's underside below the nosing line. */
+export const rampDepth = (f: Flight): number => RAMP_T / f.ny;
+
+/**
+ * Vertical depth of a steel flight's underside (stringer bottom; the ramp
+ * underside if deeper) below the nosing line.
+ */
+export const steelDepth = (f: Flight): number =>
+  Math.max(rampDepth(f), (STRINGER_OFF + STRINGER_H / 2) / f.ny);
+
 /** Pitch of a flight in degrees. */
 export const pitchDeg = (f: Flight): number => (f.th * 180) / Math.PI;
 
@@ -143,7 +181,7 @@ export interface StairBox {
  * Hidden walkable ramp (thickness `T`): top face through both nosings,
  * extended `ext` past the bottom only (it sinks under the lower floor).
  */
-export function rampBox(f: Flight, T = 0.2, ext = 0.15): StairBox {
+export function rampBox(f: Flight, T = RAMP_T, ext = 0.15): StairBox {
   const w = f.xb - f.xa;
   const dz = (f.dir * f.run) / f.len;
   const dy = -f.drop / f.len;
@@ -159,21 +197,110 @@ export function rampBox(f: Flight, T = 0.2, ext = 0.15): StairBox {
 }
 
 /**
- * Vertical side guard at x from `floorY` to the top nosing + guard height,
- * over [za, zb] (default: the flight's own z range).
+ * Side guard at x over [za, zb] (default: the flight's own z range): vertical
+ * segments ≤ GUARD_SEG long, each from GUARD_BELOW under the nosing line to
+ * STAIR_GUARD_H over it (at the segment's uphill end), so the band follows
+ * the slope, stops the walker stepping off the open side anywhere along the
+ * flight, and leaves the space under the flight free.
  */
-export function guardBox(
+export function guardBoxes(
   f: Flight,
   x: number,
-  floorY: number,
   za = f.zTop,
   zb = f.zBot,
   thick = 0.05,
-): StairBox {
-  const top = f.yTop + STAIR_GUARD_H;
+): StairBox[] {
+  const len = Math.abs(zb - za);
+  if (len < 1e-6) return [];
+  const n = Math.max(1, Math.ceil(len / GUARD_SEG - 1e-9));
+  const out: StairBox[] = [];
+  for (let i = 0; i < n; i++) {
+    const z0 = za + ((zb - za) * i) / n;
+    const z1 = za + ((zb - za) * (i + 1)) / n;
+    const hi = Math.max(nosingY(f, z0), nosingY(f, z1));
+    const y0 = hi - GUARD_BELOW;
+    const y1 = hi + STAIR_GUARD_H;
+    out.push({
+      c: new Vector3(x, (y0 + y1) / 2, (z0 + z1) / 2),
+      s: new Vector3(thick, y1 - y0, len / n),
+      pitch: 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * z (along the run) where the headroom under the flight reaches `clear`:
+ * headroom is the underside (`depth` under the nosing line) above `floorY`.
+ * Between the low end and this z the flight is too low to walk under; null
+ * when the whole underside clears it.
+ */
+export function headroomZ(
+  f: Flight,
+  floorY: number,
+  depth: number,
+  clear = STAIR_HEADROOM,
+): number | null {
+  const h0 = f.yBot - depth - floorY;
+  if (h0 >= clear) return null;
+  const u = Math.min(f.run, ((clear - h0) / f.drop) * f.run);
+  return f.zBot - f.dir * u;
+}
+
+/**
+ * The closed nook under a flight's low end: full-width vertical slices from
+ * `floorY` up to just under the flight's underside (`depth` below the
+ * nosing line), over the run where the headroom is below `clear`. Uphill of
+ * it the floor under the flight is free.
+ */
+export function underBlockers(
+  f: Flight,
+  floorY: number,
+  depth: number,
+  clear = STAIR_HEADROOM,
+): StairBox[] {
+  const zHi = headroomZ(f, floorY, depth, clear);
+  if (zHi === null) return [];
+  const slope = f.drop / f.run;
+  const h0 = f.yBot - depth - floorY;
+  // Run (from the bottom nosing) where the underside leaves the floor.
+  const uLo = Math.max(0, -h0 / slope);
+  const uHi = Math.abs(zHi - f.zBot);
+  if (uHi <= uLo + 1e-6) return [];
+  const n = Math.max(1, Math.ceil((uHi - uLo) / BLOCK_SEG - 1e-9));
+  const w = f.xb - f.xa;
+  const out: StairBox[] = [];
+  for (let i = 0; i < n; i++) {
+    const u0 = uLo + ((uHi - uLo) * i) / n;
+    const u1 = uLo + ((uHi - uLo) * (i + 1)) / n;
+    // Headroom at the slice's downhill end: the box never reaches the ramp.
+    const h = h0 + slope * u0 - 0.01;
+    if (h < 0.05) continue;
+    out.push({
+      c: new Vector3(f.xm, floorY + h / 2, f.zBot - f.dir * ((u0 + u1) / 2)),
+      s: new Vector3(w, h, u1 - u0),
+      pitch: 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * Blocker under a level landing / deck (plan `r`, underside at `bottomY`)
+ * when it is lower than `clear` above `floorY`; null when it clears it.
+ */
+export function landingBlocker(
+  r: PlanBox,
+  bottomY: number,
+  floorY: number,
+  clear = STAIR_HEADROOM,
+): StairBox | null {
+  if (bottomY - floorY >= clear) return null;
+  const h = bottomY - floorY - 0.01;
+  if (h < 0.05) return null;
   return {
-    c: new Vector3(x, (floorY + top) / 2, (za + zb) / 2),
-    s: new Vector3(thick, top - floorY, Math.abs(zb - za)),
+    c: new Vector3((r.x0 + r.x1) / 2, floorY + h / 2, (r.z0 + r.z1) / 2),
+    s: new Vector3(r.x1 - r.x0, h, r.z1 - r.z0),
     pitch: 0,
   };
 }
@@ -226,8 +353,11 @@ function painted(b: ArtBatcher, hex: string, fn: () => void): void {
 export interface SteelFlightOpts {
   /** Handrails on the xa / xb edges. */
   rails?: { a: boolean; b: boolean };
-  /** Side guards run from here up (default: the bottom nosing). */
-  guardFloor?: number;
+  /**
+   * The floor under the flight (default: the bottom nosing): where the
+   * headroom over it is below STAIR_HEADROOM the underside is closed.
+   */
+  floorY?: number;
   /**
    * Side guards to shorten (world x of the side, which end, length): where
    * two flights meet a shared landing at the same level the divider stops
@@ -241,7 +371,10 @@ export interface SteelFlightOpts {
 /**
  * Industrial steel flight: galvanised treads with yellow nosings, two
  * painted stringers, slim black flat-bar handrails at 0.95 m with balusters
- * below (visual), plus the ramp and the vertical side guards (colliders).
+ * below (visual), plus the ramp, the side guard bands and the low-end
+ * nook (colliders). Where the flight also has walkable headroom under it, a
+ * yellow guard rail marks the nook's open faces (front at the 2 m line,
+ * both sides back to the stringers).
  */
 export function steelFlight(
   b: ArtBatcher,
@@ -252,7 +385,7 @@ export function steelFlight(
 ): void {
   const rails = opts.rails ?? { a: true, b: true };
   const guards = opts.guards ?? { a: true, b: true };
-  const guardFloor = opts.guardFloor ?? f.yBot;
+  const floorY = opts.floorY ?? f.yBot;
   const w = f.xb - f.xa;
   for (const t of treads(f)) {
     b.box(
@@ -296,9 +429,41 @@ export function steelFlight(
     let zb = f.zBot;
     if (trim?.end === "top") za = f.zTop + f.dir * trim.len;
     if (trim?.end === "bottom") zb = f.zBot - f.dir * trim.len;
-    addBox(sink, group, guardBox(f, sd.x, guardFloor, za, zb));
+    for (const g of guardBoxes(f, sd.x, za, zb)) addBox(sink, group, g);
   }
   addBox(sink, group, rampBox(f));
+  const depth = steelDepth(f);
+  for (const k of underBlockers(f, floorY, depth)) addBox(sink, group, k);
+  painted(b, NOSING_YELLOW, () => nookRail(b, "paint", f, floorY, depth));
+}
+
+/**
+ * Guard rail round the nook under a flight's low end (where `underBlockers`
+ * closes it), drawn only when the flight also has walkable headroom under
+ * it: posts at both edges on the 2 m headroom line, front and side rails at
+ * 0.5 and 1.0 m (each side rail runs downhill until it meets the underside).
+ */
+export function nookRail(
+  b: ArtBatcher,
+  mat: "paint" | "blackMetal",
+  f: Flight,
+  floorY: number,
+  depth: number,
+): void {
+  const zHi = headroomZ(f, floorY, depth);
+  if (zHi === null || Math.abs(zHi - f.zTop) < 0.05) return;
+  const xs = [f.xa + 0.04, f.xb - 0.04];
+  const hPost = nosingY(f, zHi) - depth - floorY;
+  for (const x of xs)
+    b.box(mat, v3(x, floorY + hPost / 2, zHi), v3(0.05, hPost, 0.05));
+  for (const h of [0.5, 1.0]) {
+    b.box(mat, v3(f.xm, floorY + h, zHi), v3(xs[1] - xs[0], 0.04, 0.04));
+    const zEnd = headroomZ(f, floorY, depth, h) ?? f.zBot;
+    const len = Math.abs(zHi - zEnd);
+    if (len < 0.05) continue;
+    for (const x of xs)
+      b.box(mat, v3(x, floorY + h, (zHi + zEnd) / 2), v3(0.04, 0.04, len));
+  }
 }
 
 export interface PlanBox {
@@ -308,13 +473,18 @@ export interface PlanBox {
   z1: number;
 }
 
-/** Grating landing plate with an edge channel and a collider (top at y). */
+/**
+ * Grating landing plate with an edge channel and a collider (top at y).
+ * With `floorY`, a landing lower than STAIR_HEADROOM over that floor gets a
+ * blocker under it (no wedging under a head-height deck).
+ */
 export function steelLanding(
   b: ArtBatcher,
   sink: ColliderSink | null,
   group: string,
   r: PlanBox,
   y: number,
+  floorY?: number,
 ): void {
   const cx = (r.x0 + r.x1) / 2;
   const cz = (r.z0 + r.z1) / 2;
@@ -329,6 +499,9 @@ export function steelLanding(
     s: new Vector3(r.x1 - r.x0, 0.2, r.z1 - r.z0),
     pitch: 0,
   });
+  if (floorY === undefined) return;
+  const k = landingBlocker(r, y - 0.2, floorY);
+  if (k) addBox(sink, group, k);
 }
 
 /**

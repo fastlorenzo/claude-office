@@ -31,10 +31,12 @@ import type {
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import {
   flight,
-  guardBox,
+  guardBoxes,
   rampBox,
+  rampDepth,
   STAIR_RAIL_TOP,
   treads,
+  underBlockers,
   type Flight,
 } from "@/engine/world/stairs";
 import {
@@ -103,7 +105,8 @@ export const DOCK_SPAWN = { x: 3, y: 0.05, z: -3.5 } as const;
 /**
  * Static colliders in the dock-local frame: the platform slab, the door wall
  * above it, side walls, and the stair's hidden ramp (top face through the top
- * and bottom nosing, no lip) with vertical side guards over the flight only.
+ * and bottom nosing, no lip) with side guard bands over the flight only and
+ * the closed space under it (too low to walk under anywhere).
  */
 export function addDockColliders(sink: ColliderSink, group: string): void {
   const pH = DOCK.platformH;
@@ -126,10 +129,13 @@ export function addDockColliders(sink: ColliderSink, group: string): void {
   const f = dockStairFlight();
   const ramp = rampBox(f);
   sink.addBox(group, ramp.c, ramp.s, 0, { pitch: ramp.pitch });
-  for (const sx of [-1, 1]) {
-    const g = guardBox(f, st.x + (sx * (st.width - 0.05)) / 2, 0);
-    sink.addBox(group, g.c, g.s);
-  }
+  for (const sx of [-1, 1])
+    for (const g of guardBoxes(f, st.x + (sx * (st.width - 0.05)) / 2))
+      sink.addBox(group, g.c, g.s);
+  // Under 1.2 m everywhere: the nook under the flight is closed (stringers
+  // 0.26 deep).
+  for (const k of underBlockers(f, 0, Math.max(0.26, rampDepth(f))))
+    sink.addBox(group, k.c, k.s);
 }
 
 /** The loading stair as a `stairs.ts` flight (dock-local, top at the platform edge). */

@@ -40,6 +40,9 @@ WALKS=(
   # WS3: over the west feeder crossover (deck 2 m above the floor, 33.7°
   # flights) and back down into the central strip beyond it.
   "crossover|-4.8,-6,-2.6,0;-4.8,2.4;-4.8,7.4;-4.8,8.5|reached==3 and maxy>-4.6 and abs(y+6)<0.2 and z>8"
+  # Under the east spine flight (x 2.3-3.5, ~4.7 m clear at z 8): across
+  # beneath it on the factory floor, out the other side, never on the stair.
+  "under_stair|1.2,-6,8.0,90;4.6,8.0|reached==1 and x>4.2 and abs(y+6)<0.2 and maxy<-5.7"
 )
 
 check() { # json predicate -> prints "x y z reached done RESULT"
