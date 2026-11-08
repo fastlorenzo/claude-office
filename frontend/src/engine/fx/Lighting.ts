@@ -454,11 +454,14 @@ export class Lighting {
       const want = `${p.csm}:${p.cascades}:${p.pcss}`;
       if (!this.csm || this.csmKey !== want) {
         this.csm?.dispose();
-        // Red-only float map: a depth needs one channel (RGBA32F is 4×).
+        // Red-only map: a depth needs one channel (RGBA32F is 4×). PCF
+        // compares against the depth-stencil texture and never samples the
+        // colour target, so it can be half float; PCSS (ultra) reads it for
+        // the blocker search and keeps full float.
         const csm = new CascadedShadowGenerator(
           p.csm,
           this.key,
-          true,
+          p.pcss,
           this.camera,
           true,
         );
@@ -489,7 +492,8 @@ export class Lighting {
     // Static daylight map.
     if (!this.sunShadow || this.sunShadow.mapSize !== p.sun) {
       this.sunShadow?.dispose();
-      const sg = new ShadowGenerator(p.sun, this.sun, true, undefined, true);
+      // PCF: the colour target is never sampled (half float, red only).
+      const sg = new ShadowGenerator(p.sun, this.sun, false, undefined, true);
       // PCF (not PCSS): contact hardening on this render-once map left the
       // whole lobby unoccluded under SwiftShader (WS5 L1 shots).
       sg.usePercentageCloserFiltering = true;

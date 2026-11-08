@@ -27,7 +27,9 @@
  *   setAnisotropy(n)          anisotropic filtering of every tiled texture (1–16)
  *   setTextureQuality(q)      "low" | "medium" | "high" → max texture edge
  *                             256 / 512 / native (512–1024 by tile size,
- *                             `textureEdge`); reloads the maps in place
+ *                             `textureEdge`); reloads the maps in place.
+ *                             glTF model / character textures loaded later
+ *                             are capped at 512 / 512 / 1024 (textureCap)
  * ---------------------------------------------------------------------------
  */
 import {
@@ -48,6 +50,11 @@ import {
   type MaterialRole,
   type PbrMaterialAsset,
 } from "@/engine/assets/materials2";
+import {
+  capTextureUploads,
+  MODEL_TEXTURE_CAP,
+  MODEL_TEXTURE_URL,
+} from "@/engine/assets/textureCap";
 import {
   createDetailMap,
   createMossTextures,
@@ -682,7 +689,13 @@ export class Materials {
     private readonly assetBase: string,
   ) {
     Materials.registry.set(scene, this);
+    // glTF characters / props: 1024² at high, 512² below (WS5b P12).
+    this.uncap = capTextureUploads(scene.getEngine(), (url) =>
+      MODEL_TEXTURE_URL.test(url) ? MODEL_TEXTURE_CAP[this.quality] : 0,
+    );
   }
+
+  private readonly uncap: () => void;
 
   /** Shared material for a surface. */
   get(key: SurfaceKey): PBRMaterial {
@@ -1171,6 +1184,7 @@ export class Materials {
   }
 
   dispose(): void {
+    this.uncap();
     for (const m of this.cache.values()) m.dispose(false, false);
     for (const t of this.textures) t.dispose();
     for (const t of this.ownedTextures) t.dispose();
