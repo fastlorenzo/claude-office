@@ -1,8 +1,10 @@
 /**
  * Control-room interior: a ROUND ops centre at the far end of the hall,
  * laid out by the pure plan in ./controlRoomPlan (parametric in the
- * footprint `layout.controlRoom`). Building supplies the floor + the outer
- * shell; everything inside (walls, ceiling, cove, wall, consoles) is here.
+ * footprint `layout.controlRoom`). Building supplies the floor; everything
+ * inside (plaster lining with the window reveals, neck, ceiling, cove,
+ * wall, consoles) is here, and the drum exterior (cladding, ribbon windows,
+ * roof, slab, columns) is ./ControlRoomShell, built alongside.
  *
  *   - Curved seamless video wall (±70°), two tiers on a vented plinth:
  *       upper:  project map · usage · SESSIONS BOARD · activity · projects
@@ -96,15 +98,20 @@ import {
 } from "@/engine/screens/opsCanvas";
 import {
   CONSOLE,
+  DRUM,
+  SURROUND_HALF,
   WALL_Y,
   controlPlan,
+  drumPlan,
   feedCells,
   onArc,
   upperSpans,
   type ControlPlan,
+  type DrumPlan,
   type FeedCell,
   type UpperPanel,
 } from "./controlRoomPlan";
+import { buildControlShell } from "./ControlRoomShell";
 
 export interface ControlRoomContext {
   scene: Scene;
@@ -238,7 +245,10 @@ function arcStrip(
 export class ControlRoom {
   private readonly scene: Scene;
   private readonly plan: ControlPlan;
+  private readonly drum: DrumPlan;
   private readonly statics: Mesh[] = [];
+  /** Drum exterior (ControlRoomShell): lit by the factory, not isolated. */
+  private readonly exterior: Mesh[];
   private readonly canvases: Record<"L" | "C" | "R" | "lowL" | "lowR", Canvas>;
   private readonly upper: UpperLayout[] = [];
   private readonly feedSlots: FeedSlot[] = [];
@@ -289,8 +299,10 @@ export class ControlRoom {
     this.scene = scene;
     const p = controlPlan(layout);
     this.plan = p;
+    this.drum = drumPlan(p);
     this.setLayout(layout);
-    this.buildStatics(layout);
+    this.buildStatics();
+    this.exterior = buildControlShell(ctx, p, this.drum, GROUP);
 
     // ---- Video wall canvases (upper: 3, lower: 2)
     const spans = upperSpans(p);
@@ -563,7 +575,13 @@ export class ControlRoom {
       f.mat.dispose();
       f.mesh.dispose();
     }
-    for (const m of [...this.statics, this.monitor, this.dots]) m.dispose();
+    for (const m of [
+      ...this.statics,
+      ...this.exterior,
+      this.monitor,
+      this.dots,
+    ])
+      m.dispose();
     for (const mo of this.monitors) mo.proxy.dispose();
     this.monTex.dispose();
     this.monMat.dispose();
@@ -577,7 +595,7 @@ export class ControlRoom {
   // Geometry
   // -------------------------------------------------------------------------
 
-  private buildStatics(layout: BuildingLayout): void {
+  private buildStatics(): void {
     const { scene, materials, colliders, assets } = this.ctx;
     const p = this.plan;
     const { cx, cz, R, roomR, H } = p;
@@ -600,79 +618,99 @@ export class ControlRoom {
     const segs = (a: number, b2: number, per = 2 * deg) =>
       Math.max(4, Math.ceil(Math.abs(b2 - a) / per));
 
-    // ---- Room shell: semicircle + straight sides + front header band.
-    b.arc(plaster, C, roomR, roomR + 0.15, -90 * deg, 90 * deg, 0, H, 90);
-    for (const sx of [-1, 1]) {
-      const zlen = cz - p.z0;
-      b.box(
+    // ---- Room lining: the drum's plaster (full circle) with the ribbon
+    // window openings on the flanks (plaster reveals: sill-less, glass to
+    // the floor), the neck to the hall door and the lintel over it. The
+    // cladding, glass, roof and slab are ControlRoomShell's (lit by the
+    // factory, not by the zone lights).
+    const d = this.drum;
+    const wallSeg = (a: number, b2: number) => segs(a, b2, 1.5 * deg);
+    const wins = [...d.windows].sort((x, y) => x.a0 - y.a0);
+    const solids: Array<[number, number]> =
+      wins.length === 2
+        ? [
+            [-d.aNeck, wins[0].a0],
+            [wins[0].a1, wins[1].a0],
+            [wins[1].a1, d.aNeck],
+          ]
+        : [[-d.aNeck, d.aNeck]];
+    for (const [s0, s1] of solids)
+      b.arc(plaster, C, roomR, d.rWall, s0, s1, 0, H + 0.1, wallSeg(s0, s1));
+    for (const w of wins)
+      b.arc(
         plaster,
-        v3(cx + sx * (roomR + 0.075), H / 2, p.z0 + zlen / 2),
-        v3(0.15, H, zlen),
+        C,
+        roomR,
+        d.rWall,
+        w.a0,
+        w.a1,
+        DRUM.head,
+        H + 0.1,
+        wallSeg(w.a0, w.a1),
       );
-      // Light acoustic felt panels on the straight walls.
-      for (let z = p.z0 + 1.2; z < cz - 0.4; z += 1.25)
-        b.rbox(
-          felt,
-          v3(cx + sx * (roomR - 0.02), 2.2, z),
-          v3(0.04, 3.2, 1.15),
-          { r: 0.012 },
-        );
-      colliders.addBox(
-        GROUP,
-        new Vector3(cx + sx * (roomR + 0.075), H / 2, p.z0 + zlen / 2),
-        new Vector3(0.15, H, zlen),
+    b.arc(
+      plaster,
+      C,
+      roomR,
+      d.rWall,
+      d.aNeck,
+      2 * Math.PI - d.aNeck,
+      DRUM.neckH + 0.1,
+      H + 0.1,
+      wallSeg(d.aNeck, 2 * Math.PI - d.aNeck),
+    );
+    // Neck side walls (plaster, the skin is the shell's).
+    const nk = p.neckHW;
+    const zNeck = cz - Math.sqrt((roomR + 0.1) ** 2 - (nk + 0.1) ** 2);
+    for (const sx of [-1, 1]) {
+      const c0 = new Vector3(
+        cx + sx * (nk + DRUM.wallT / 2),
+        (DRUM.neckH - 0.1) / 2,
+        (p.z0 + zNeck) / 2,
       );
+      const sz0 = new Vector3(DRUM.wallT, DRUM.neckH + 0.1, zNeck - p.z0);
+      b.box(plaster, c0, sz0);
+      colliders.addBox(GROUP, c0, sz0);
     }
-    for (let a = -90 * deg; a < 90 * deg - 1e-3; a += 10 * deg) {
-      const m = a + 5 * deg;
-      const q = onArc(cx, cz, roomR + 0.075, m);
+    // Colliders: 6° chords round the circle, except across the neck.
+    const cr = roomR + DRUM.wallT / 2;
+    for (let a = -d.aNeck; a < d.aNeck - 1e-3; a += 6 * deg) {
+      const m = Math.min(d.aNeck, a + 6 * deg);
+      const q = onArc(cx, cz, cr, (a + m) / 2);
       colliders.addBox(
         GROUP,
         new Vector3(q.x, H / 2, q.z),
-        new Vector3(2 * (roomR + 0.075) * Math.sin(5 * deg) + 0.1, H, 0.2),
-        m,
+        new Vector3(2 * cr * Math.sin((m - a) / 2) + 0.1, H, DRUM.wallT),
+        (a + m) / 2,
       );
     }
-    // Felt on the curved side walls beyond the video wall.
-    for (const sx of [-1, 1])
-      for (let a = 74 * deg; a < 89 * deg; a += 4.5 * deg) {
-        const q = onArc(cx, cz, roomR - 0.02, sx * a);
+    // Felt panels on the piers between the video wall and the windows.
+    if (wins.length === 2)
+      for (const sx of [-1, 1]) {
+        const am = sx * (SURROUND_HALF + DRUM.pierWall / 2);
+        const q = onArc(cx, cz, roomR - 0.02, am);
         b.rbox(
           felt,
           v3(q.x, 2.2, q.z),
-          v3(roomR * 4.5 * deg - 0.1, 3.2, 0.04),
-          {
-            r: 0.012,
-            yaw: sx * a,
-          },
+          v3(roomR * DRUM.pierWall - 0.3, 3.2, 0.04),
+          { r: 0.012, yaw: am },
         );
       }
-    const hy0 = layout.controlRoom.size.y;
-    if (H > hy0 + 0.01)
-      b.box(
-        plaster,
-        v3(cx, (hy0 + H) / 2, p.z0 + 0.12),
-        v3(2 * roomR + 0.3, H - hy0, 0.04),
-      );
 
     // ---- Ceiling + ring cove + downlights + halo ring over the consoles.
-    b.box(
-      ceiling,
-      v3(cx, H + 0.05, (p.z0 + p.z1) / 2),
-      v3(2 * roomR + 0.6, 0.1, p.z1 - p.z0),
-    );
+    b.arc(ceiling, C, 0, roomR + 0.02, 0, 2 * Math.PI, H, H + 0.1, 120);
     const soffit0 = R - 1.15;
-    b.arc(ceiling, C, soffit0, roomR, -90 * deg, 90 * deg, H - 0.42, H, 90);
+    b.arc(ceiling, C, soffit0, roomR, 0, 2 * Math.PI, H - 0.42, H, 180);
     b.arc(
       "lightPanelDim",
       C,
       soffit0 - 0.012,
       soffit0,
-      -90 * deg,
-      90 * deg,
+      0,
+      2 * Math.PI,
       H - 0.42,
       H - 0.34,
-      90,
+      180,
       { keepUVs: true },
     );
     b.arc(
@@ -687,13 +725,7 @@ export class ControlRoom {
       70,
       { keepUVs: true },
     );
-    for (const sx of [-1, 1])
-      b.box(
-        ceiling,
-        v3(cx + sx * (roomR - 0.6), H - 0.21, (p.z0 + cz) / 2),
-        v3(1.2, 0.42, cz - p.z0),
-      );
-    for (let a = -88 * deg; a <= 88 * deg + 1e-3; a += 8 * deg) {
+    for (let a = -176 * deg; a <= 176 * deg + 1e-3; a += 8 * deg) {
       const q = onArc(cx, cz, R - 0.55, a);
       b.cylinder("blackMetal", v3(q.x, H - 0.425, q.z), 0.012, 0.16, 0.16, 16);
       b.cylinder("lightPanel", v3(q.x, H - 0.432, q.z), 0.004, 0.12, 0.12, 16);
@@ -1098,31 +1130,37 @@ export class ControlRoom {
         { group: GROUP },
       );
     for (const sx of [-1, 1]) {
-      // Foliage sits IN a planter (base at the soil line), never on the floor.
-      for (const [x, z, yaw] of [
-        [cx + sx * (roomR - 0.7), p.z0 + 0.8, sx],
-        [cx + sx * (roomR - 0.8), cz - 0.6, -sx],
+      // Foliage sits IN a planter (base at the soil line), never on the
+      // floor: one on each pier by the video wall, one by the neck.
+      const pw = SURROUND_HALF + DRUM.pierWall / 2;
+      const pn = this.drum.aNeck - DRUM.pierNeck / 2;
+      for (const [a, r, yaw] of [
+        [sx * pw, roomR - 0.75, sx],
+        [sx * pn, roomR - 0.75, -sx],
       ] as const) {
+        const q = onArc(cx, cz, r, a);
         assets.instantiate(
           "planterTall",
           null,
-          { position: { x, y: 0, z }, yaw: 0 },
+          { position: { x: q.x, y: 0, z: q.z }, yaw: 0 },
           { group: GROUP },
         );
         assets.instantiate(
           "plantTall",
           null,
-          { position: { x, y: PLANTER_SOIL_Y.planterTall, z }, yaw },
+          { position: { x: q.x, y: PLANTER_SOIL_Y.planterTall, z: q.z }, yaw },
           { group: GROUP },
         );
       }
     }
+    const camA = this.drum.aNeck - DRUM.pierNeck / 2;
+    const cam = onArc(cx, cz, roomR - 0.3, camA);
     assets.instantiate(
       "securityCamera",
       null,
       {
-        position: { x: cx + roomR - 0.3, y: H - 0.6, z: p.z0 + 0.4 },
-        yaw: -2.3,
+        position: { x: cam.x, y: H - 0.6, z: cam.z },
+        yaw: camA + Math.PI / 2,
       },
       { group: GROUP },
     );
@@ -1780,6 +1818,8 @@ export class ControlRoom {
               roomLabel: f.room?.name ?? "",
             },
             interactRange: WALL_INTERACT_RANGE,
+            // Curved strip: a frame fitted to its AABB would be a deep slab.
+            noFocusFrame: true,
           }
         : null;
     }
@@ -1818,8 +1858,6 @@ export class ControlRoom {
       this.dots.thinInstanceSetBuffer("color", this.dotCol, 4, false);
     }
     const t = performance.now() / 1000;
-            // Curved strip: a frame fitted to its AABB would be a deep slab.
-            noFocusFrame: true,
     const span = panel.a1 - panel.a0;
     const yTop = WALL_Y.upper1;
     const yH = WALL_Y.upper1 - WALL_Y.upper0;

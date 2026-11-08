@@ -11,8 +11,8 @@
  *  - Shell (rebuilt when the bay count changes): hall with a microcement
  *    floor, twin recessed LED slots and a central oak slat raft, graphite
  *    piers with planters, inter-bay walls, exterior walls with deep-reveal
- *    windows (+ daylight portals), and the control room (dark NOC: black
- *    acoustic baffles, graphite walls, curved console with LED accents).
+ *    windows (+ daylight portals), and the control room's floor (its round
+ *    drum, interior and slab are ControlRoom / ControlRoomShell).
  *  - Empty bays: plaster front with a felt panel cluster + "Available" plate.
  *  - Exterior: plaza paving; the sky / city is the exterior HDRI skybox
  *    (Lighting), visible through every window at infinity.
@@ -47,6 +47,8 @@ import { Exterior } from "@/engine/world/Exterior";
 import { BrandSign } from "@/engine/world/BrandSign";
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
+import { controlPlan, drumPlan } from "@/engine/world/controlRoomPlan";
+import { floorOutline, prismData } from "@/engine/world/ControlRoomShell";
 import { roomStatus } from "@/engine/logic/status";
 import { buildFactoryLayout } from "@/engine/layout/factoryLayout";
 import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
@@ -848,38 +850,9 @@ export class Building {
       0.003,
     );
 
-    // Project rooms bring their own end walls (ProjectShell); the shell only
-    // closes the room bands against the control room and the outside.
-    const CH = layout.controlRoom.size.y;
-    // ---- Hall-side wall of the control room (full footprint width, up to
-    // its clear height): solid outside the hall band, glazed partition +
-    // door + solid bulkhead (LED panel) across the hall.
-    const cw = layout.controlRoom.size.x / 2;
-    for (const sx of [-1, 1]) {
-      const x0 = sx * (hallHalf - 0.08);
-      const x1 = sx * (cw + T);
-      b.box(
-        "wall",
-        v3((x0 + x1) / 2, CH / 2, L + T / 2),
-        v3(Math.abs(x1 - x0), CH, T),
-      );
-      b.box(
-        "wallDark",
-        v3((x0 + x1) / 2, CH / 2, L + T + 0.01),
-        v3(Math.abs(x1 - x0) - 0.4, CH, 0.02),
-      );
-      colliders.addBox(
-        g,
-        new Vector3((x0 + x1) / 2, CH / 2, L + T / 2),
-        new Vector3(Math.abs(x1 - x0), CH, T),
-      );
-    }
-    // Above the hall ceiling, over the partition (seen from the control room).
-    b.box(
-      "wallDark",
-      v3(0, (H + CH) / 2, L + 0.05),
-      v3(hallHalf * 2, CH - H, T),
-    );
+    // Project rooms bring their own end walls (ProjectShell); the round
+    // control room's drum + neck (ControlRoomShell) meets the hall at the
+    // glazed partition below: no square wall across the room bands.
 
     if (layout.hall.overlook) {
       const sx = layout.hall.overlook === "east" ? 1 : -1;
@@ -940,51 +913,41 @@ export class Building {
     return part;
   }
 
-  /** Dark NOC: graphite walls, black baffles, curved console, LED accents. */
+  /**
+   * Control-room floor only: the round room (+ the neck to the hall door,
+   * glazed floor strips cut out along the ribbon windows). The drum, slab,
+   * columns and interior are engine/world/ControlRoom(+Shell).ts, built by
+   * World on top of `controlShell` (isolateZone runs over shell + interior).
+   */
   private buildControlRoom(layout: BuildingLayout, part: Part): void {
     const { scene, materials, colliders } = this.ctx;
     const g = "shell";
-    const L = layout.hall.length;
-    const T = 0.2;
+    const p = controlPlan(layout);
+    const d = drumPlan(p);
     const cb = new ArtBatcher(scene, materials, "control", 7);
-    const cz1 = layout.controlRoom.origin.z + layout.controlRoom.size.z / 2;
-    const cH = layout.controlRoom.size.y;
-    const cw = layout.controlRoom.size.x / 2;
-    cb.box("floorDark", v3(0, -0.05, (L + cz1) / 2), v3(cw * 2, 0.1, cz1 - L));
+    const floor = new Mesh("control:floor", scene);
+    prismData(floorOutline(p, d), { x: p.cx, z: p.cz }, -0.1, 0).applyToMesh(
+      floor,
+    );
+    cb.add("floorDark", floor);
+    // Colliders: z strips inscribed in the circle (walls stop you at the
+    // edge; the glazed strips are walkable) + the neck.
+    const r = d.rIn + 0.05;
+    for (let z = p.cz - r; z < p.cz + r - 1e-3; z += 0.6) {
+      const z1 = Math.min(p.cz + r, z + 0.6);
+      const dz = Math.max(Math.abs(z - p.cz), Math.abs(z1 - p.cz));
+      const hw = Math.sqrt(Math.max(0, r * r - dz * dz)) + 0.3;
+      colliders.addBox(
+        g,
+        new Vector3(p.cx, -0.1, (z + z1) / 2),
+        new Vector3(2 * hw, 0.2, z1 - z + 0.02),
+      );
+    }
+    const zn = p.cz - Math.sqrt(r * r - p.neckHW * p.neckHW) + 0.6;
     colliders.addBox(
       g,
-      new Vector3(0, -0.1, (L + cz1) / 2),
-      new Vector3(cw * 2, 0.2, cz1 - L),
-    );
-    // Ceiling: the round ops room is double height (ControlRoom builds its
-    // own ceiling, cove and walls at CONTROL_CEIL_H inside this footprint).
-    // Shell only: the interior (video wall, console, feeds, baffles, props,
-    // zone lights) is engine/world/ControlRoom.ts, built by World on top of
-    // `controlShell` (isolateZone runs there, over shell + interior).
-    for (const sx of [-1, 1])
-      wallWithOpenings(
-        cb,
-        colliders,
-        g,
-        "wallDark",
-        "z",
-        sx * (cw + T / 2),
-        T,
-        L,
-        cz1 + T,
-        cH,
-      );
-    wallWithOpenings(
-      cb,
-      colliders,
-      g,
-      "wallDark",
-      "x",
-      cz1 + T / 2,
-      T,
-      -cw - T,
-      cw + T,
-      cH,
+      new Vector3(p.cx, -0.1, (p.z0 + zn) / 2),
+      new Vector3(2 * p.neckHW, 0.2, zn - p.z0),
     );
     const controlMeshes = cb.build({ receiveShadows: true });
     tagStatic(controlMeshes);
