@@ -178,7 +178,7 @@ const AgentNodeRow = memo(function AgentNodeRow({
           <StateGlyph st={st} />
         </span>
       </div>
-      <div className="mt-0.5 flex items-center gap-1.5 overflow-hidden whitespace-nowrap pl-[22px] text-xs text-slate-500">
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-[22px] text-xs text-slate-500">
         {v.type && (
           <span
             className="shrink-0 rounded px-1.5 leading-5 text-slate-300"
@@ -190,7 +190,7 @@ const AgentNodeRow = memo(function AgentNodeRow({
         <span>{stateLabel}</span>
         <span>· {t("console.nCalls", { count: node.toolCalls })}</span>
         {node.errors > 0 && (
-          <span className="text-rose-400">
+          <span className="whitespace-nowrap text-rose-400">
             · {t("console.nErrors", { count: node.errors })}
           </span>
         )}
