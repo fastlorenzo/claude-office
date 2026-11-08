@@ -6,6 +6,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n/en";
 import { lineView, type LineView, type PipelineRow } from "./factoryPanelModel";
 import { AgoText, Chip, Empty, Section, Stat, StateDot } from "./parts";
+import type { InteractionTarget } from "@/engine/contracts";
 import { useFactoryData } from "./useFactoryData";
 import {
   CI_COLORS,
@@ -175,9 +176,13 @@ export const LinePanelView = memo(function LinePanelView({
   );
 });
 
-export function LinePanel(): ReactNode {
+export function LinePanel({
+  target: explicit,
+}: {
+  target?: InteractionTarget | null;
+}): ReactNode {
   const { t } = useTranslation();
-  const { data } = useFactoryData();
+  const { data } = useFactoryData(explicit);
   const view = useMemo(
     () =>
       data ? lineView(data.project, data.line, data.now, data.demo) : null,

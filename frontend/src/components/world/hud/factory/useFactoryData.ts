@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { CampusProject } from "@/engine/contracts";
+import type { CampusProject, InteractionTarget } from "@/engine/contracts";
 import {
   getFactoryLive,
   liveLine,
@@ -36,11 +36,13 @@ export interface FactoryData {
  * screen, D3). Without a published model (no world mounted) it falls back to
  * campusStore + a single-project build.
  */
-export function useFactoryData(): {
-  target: ReturnType<typeof useWorldUiStore.getState>["factoryTarget"];
+export function useFactoryData(explicit?: InteractionTarget | null): {
+  target: InteractionTarget | null;
   data: FactoryData | null;
 } {
-  const target = useWorldUiStore((s) => s.factoryTarget);
+  const stored = useWorldUiStore((s) => s.factoryTarget);
+  // An explicit target (dashboard) wins; undefined falls back to the HUD's.
+  const target = explicit === undefined ? stored : explicit;
   const storeProject = useCampusStore((s) =>
     findProject(s.projects, target?.projectId),
   );

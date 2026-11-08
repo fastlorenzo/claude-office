@@ -45,7 +45,12 @@ export interface OpsDashboardProps {
   nowMs: number;
   /** Session highlighted on open (console monitor F). */
   focusId?: string | null;
-  onClose: () => void;
+  /**
+   * `overlay` (default): the full-screen dialog of the 3D HUD.
+   * `page`: flows inside a page (dashboard), no dialog root and no close button.
+   */
+  variant?: "overlay" | "page";
+  onClose?: () => void;
   onEnter?: (sessionId: string) => void;
   onInspect?: (sessionId: string, label: string) => void;
 }
@@ -69,16 +74,33 @@ export function OpsDashboard(props: OpsDashboardProps): ReactNode {
     () => buildOpsModel(campus, stats, nowMs, labels),
     [campus, stats, nowMs, labels],
   );
+  const page = props.variant === "page";
   return (
     <div
-      role="dialog"
+      {...(page ? { role: "region" as const } : { role: "dialog" as const })}
       aria-label={t("ops.title")}
-      className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-[#04070C]/85 text-slate-100 backdrop-blur-md animate-[hud-sheet-up_180ms_ease-out]"
+      className={
+        page
+          ? "flex min-h-0 flex-col text-slate-100"
+          : "pointer-events-auto absolute inset-0 z-40 flex flex-col bg-[#04070C]/85 text-slate-100 backdrop-blur-md animate-[hud-sheet-up_180ms_ease-out]"
+      }
     >
-      <Header m={m} t={t} onClose={props.onClose} />
+      <Header m={m} t={t} onClose={page ? undefined : props.onClose} />
       <AlertStrip alerts={m.alerts} t={t} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 sm:px-4">
-        <div className="grid gap-3 landscape:lg:h-full landscape:lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,1fr)]">
+      <div
+        className={
+          page
+            ? "px-3 pb-3 sm:px-4"
+            : "min-h-0 flex-1 overflow-y-auto px-3 pb-3 sm:px-4"
+        }
+      >
+        <div
+          className={
+            page
+              ? "grid gap-3 lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,1fr)]"
+              : "grid gap-3 landscape:lg:h-full landscape:lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,1fr)]"
+          }
+        >
           <div className="flex min-h-0 flex-col gap-3">
             <SessionsBoard m={m} t={t} {...props} />
             <OpsProjectMap
@@ -108,7 +130,7 @@ function Header({
 }: {
   m: OpsModel;
   t: T;
-  onClose: () => void;
+  onClose?: () => void;
 }): ReactNode {
   const c = m.counts;
   const chips: Array<[TranslationKey, number, string]> = [
@@ -146,17 +168,21 @@ function Header({
         <span className="font-mono text-sm text-slate-400">
           {fmtClock(new Date(m.nowMs).toISOString())}
         </span>
-        <span className="hidden items-center gap-1.5 text-xs text-slate-500 sm:flex">
-          <Keycap>B</Keycap>/<Keycap>Esc</Keycap>
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("hud.close")}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        {onClose && (
+          <span className="hidden items-center gap-1.5 text-xs text-slate-500 sm:flex">
+            <Keycap>B</Keycap>/<Keycap>Esc</Keycap>
+          </span>
+        )}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("hud.close")}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </header>
   );
@@ -212,14 +238,18 @@ function AlertStrip({ alerts, t }: { alerts: OpsAlert[]; t: T }): ReactNode {
 
 const ROW_GRID =
   "landscape:md:grid landscape:md:grid-cols-[minmax(0,2.3fr)_minmax(0,1.5fr)_minmax(0,1.05fr)_minmax(0,0.75fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.55fr)] landscape:md:items-center landscape:md:gap-3";
+const ROW_GRID_PAGE =
+  "md:grid md:grid-cols-[minmax(0,2.3fr)_minmax(0,1.5fr)_minmax(0,1.05fr)_minmax(0,0.75fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.55fr)] md:items-center md:gap-3";
 
 function SessionsBoard({
   m,
   t,
   focusId,
+  variant,
   onEnter,
   onInspect,
 }: { m: OpsModel; t: T } & OpsDashboardProps): ReactNode {
+  const page = variant === "page";
   const live = m.rows.filter((r) => r.status !== "ended");
   const ended = m.rows.length - live.length;
   return (
@@ -233,7 +263,7 @@ function SessionsBoard({
         )}
       </div>
       <div
-        className={`${ROW_GRID} hidden border-b border-white/[0.06] px-4 pb-1.5 ${SUB}`}
+        className={`${page ? ROW_GRID_PAGE : ROW_GRID} hidden border-b border-white/[0.06] px-4 pb-1.5 ${SUB}`}
       >
         <span>{t("ops.col.project")}</span>
         <span>{t("ops.col.now")}</span>
@@ -255,6 +285,7 @@ function SessionsBoard({
             r={r}
             t={t}
             focused={r.sessionId === focusId}
+            page={page}
             onEnter={onEnter}
             onInspect={onInspect}
           />
@@ -268,12 +299,14 @@ function Row({
   r,
   t,
   focused,
+  page,
   onEnter,
   onInspect,
 }: {
   r: OpsRow;
   t: T;
   focused: boolean;
+  page: boolean;
   onEnter?: (id: string) => void;
   onInspect?: (id: string, label: string) => void;
 }): ReactNode {
@@ -305,7 +338,7 @@ function Row({
         needs
           ? "border-amber-500/40 bg-amber-500/[0.08] hover:bg-amber-500/[0.13]"
           : "border-white/[0.05] bg-[#101826] hover:bg-[#152033]"
-      } ${focused ? "ring-2 ring-sky-400/60" : ""} ${ROW_GRID} grid grid-cols-2 gap-x-3 gap-y-2`}
+      } ${focused ? "ring-2 ring-sky-400/60" : ""} ${page ? ROW_GRID_PAGE : ROW_GRID} grid grid-cols-2 gap-x-3 gap-y-2`}
       onClick={() => onEnter?.(r.sessionId)}
       title={t("ops.enter")}
     >
@@ -314,7 +347,9 @@ function Row({
         style={{ background: sc }}
       />
       {/* Project + summary */}
-      <div className="col-span-2 min-w-0 landscape:md:col-span-1">
+      <div
+        className={`col-span-2 min-w-0 ${page ? "md:col-span-1" : "landscape:md:col-span-1"}`}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <span
             className={`h-2 w-2 shrink-0 rounded-full ${r.alive ? "" : "border border-slate-500"}`}
@@ -358,7 +393,9 @@ function Row({
         </p>
       </div>
       {/* Phase */}
-      <div className="col-span-2 min-w-0 landscape:md:col-span-1">
+      <div
+        className={`col-span-2 min-w-0 ${page ? "md:col-span-1" : "landscape:md:col-span-1"}`}
+      >
         <div
           className="flex items-center gap-1.5 text-[13px] font-semibold"
           style={{ color: needs ? sc : "#E2E8F0" }}

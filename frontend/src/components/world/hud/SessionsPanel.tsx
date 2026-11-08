@@ -14,7 +14,7 @@ import {
   sessionProject,
 } from "../sessionMeta";
 import { PhasePill, RefChips, midTruncate } from "./GlanceParts";
-import { enterSession } from "../enterSession";
+import { primaryAction, useSessionNav } from "@/components/shared/sessionNav";
 import { LABEL } from "./glass";
 import {
   sessionBranch,
@@ -77,6 +77,7 @@ export function SessionsPanel({
   const { t } = useTranslation();
   const campus = useCampusStore((s) => s.sessions);
   const [editing, setEditing] = useState<string | null>(null);
+  const nav = useSessionNav();
 
   const byId = useMemo(
     () => new Map(campus.map((c) => [c.sessionId, c])),
@@ -88,7 +89,7 @@ export function SessionsPanel({
   );
 
   const enter = (s: Session): void => {
-    void enterSession(s.id);
+    primaryAction(nav)(s.id);
   };
 
   if (sessionsLoading && sessions.length === 0) {
@@ -220,18 +221,20 @@ export function SessionsPanel({
                 })}
               </span>
               <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                <button
-                  type="button"
-                  aria-label={t("world.action.enter")}
-                  title={t("world.action.enter")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    enter(s);
-                  }}
-                  className="rounded-md p-1.5 text-[#D97757] hover:bg-[#D97757]/20 hover:text-white"
-                >
-                  <DoorOpen className="h-3.5 w-3.5" />
-                </button>
+                {nav.enterRoom && (
+                  <button
+                    type="button"
+                    aria-label={t("world.action.enter")}
+                    title={t("world.action.enter")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      enter(s);
+                    }}
+                    className="rounded-md p-1.5 text-[#D97757] hover:bg-[#D97757]/20 hover:text-white"
+                  >
+                    <DoorOpen className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-label={t("hud.sessions.rename")}

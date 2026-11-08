@@ -5,7 +5,7 @@ import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import type { Session } from "@/hooks/useSessions";
 import { labelMap } from "../../sessionMeta";
-import { enterSession } from "../../enterSession";
+import { useSessionNav } from "@/components/shared/sessionNav";
 import { useNow } from "../GlanceParts";
 import { OpsDashboard } from "./OpsDashboard";
 
@@ -16,6 +16,7 @@ export function OpsOverlay({ sessions }: { sessions: Session[] }): ReactNode {
   const campus = useCampusStore((s) => s.sessions);
   const stats = useCampusStore((s) => s.stats);
   const projects = useCampusStore((s) => s.projects);
+  const nav = useSessionNav();
   const nowMs = useNow();
   const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
   if (!open) return null;
@@ -31,7 +32,7 @@ export function OpsOverlay({ sessions }: { sessions: Session[] }): ReactNode {
       onClose={() => ui.closeOps()}
       onEnter={(id) => {
         ui.closeOps();
-        void enterSession(id);
+        nav.enterRoom?.(id);
       }}
       onInspect={(id, label) => {
         ui.closeOps();

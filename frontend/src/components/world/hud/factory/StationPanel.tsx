@@ -19,6 +19,7 @@ import {
   StateChip,
   StateDot,
 } from "./parts";
+import type { InteractionTarget } from "@/engine/contracts";
 import { useFactoryData } from "./useFactoryData";
 import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
@@ -122,9 +123,13 @@ export const StationPanelView = memo(function StationPanelView({
   );
 });
 
-export function StationPanel(): ReactNode {
+export function StationPanel({
+  target: explicit,
+}: {
+  target?: InteractionTarget | null;
+}): ReactNode {
   const { t } = useTranslation();
-  const { target, data } = useFactoryData();
+  const { target, data } = useFactoryData(explicit);
   const view = useMemo(
     () =>
       target && data

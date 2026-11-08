@@ -1,6 +1,10 @@
 "use client";
 
-import { useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import {
+  SessionNavProvider,
+  WORLD_SESSION_NAV,
+} from "@/components/shared/sessionNav";
 import { GitStatusPanel } from "@/components/layout/GitStatusPanel";
 import { ConversationHistory } from "@/components/layout/ConversationHistory";
 import { EventLog } from "@/components/layout/EventLog";
@@ -34,6 +38,7 @@ import { Minimap } from "./hud/Minimap";
 import { OverviewStrip } from "./hud/OverviewStrip";
 import { SessionsPanel, type SessionHandlers } from "./hud/SessionsPanel";
 import { useHudKeys } from "./hud/useHudKeys";
+import { PANELS } from "./hud/panels";
 import { OpsOverlay } from "./hud/ops/OpsOverlay";
 import { ControlsCard } from "./hud/ControlsCard";
 import { useApplyReducedMotion } from "./hud/reducedMotion";
@@ -125,6 +130,13 @@ function PanelBody({
           <InspectPanel sessions={props.sessions} />
         </HudPanelFrame>
       );
+    case "console":
+      // Phase 1 stand-in: the Session Console replaces this body in phase 2.
+      return (
+        <HudPanelFrame id={id} flatten>
+          <EventLog />
+        </HudPanelFrame>
+      );
     case "factoryPr":
       return (
         <HudPanelFrame id={id}>
@@ -152,12 +164,33 @@ function PanelBody({
   }
 }
 
+/** Debug: `?hud=console|ops|events|sessions|...` opens it once the world is ready. */
+function useHudQueryParam(sessionId: string): void {
+  const ready = useWorldUiStore((s) => s.ready);
+  useEffect(() => {
+    if (!ready) return;
+    const want = new URLSearchParams(window.location.search).get("hud");
+    if (!want) return;
+    const ui = useWorldUiStore.getState();
+    if (want === "ops") ui.openOps();
+    else if (want === "console") {
+      if (sessionId) ui.openConsole(sessionId);
+    } else if (want in PANELS) ui.open(want as HudPanel);
+    // Once per ready, not on every session change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+}
+
 function WorldHudBody(props: WorldHudProps): ReactNode {
-  useHudKeys();
+  useHudKeys(props.sessionId);
+  useHudQueryParam(props.sessionId);
   useApplyReducedMotion();
   const portrait = usePortrait();
   const panels = useWorldUiStore(selectPanels);
   const ready = useWorldUiStore((s) => s.ready);
+  const sheet = useWorldUiStore(
+    (s) => s.consolePresentation === "sheet" && s.panels.includes("console"),
+  );
   const { isMobile } = props;
 
   if (!ready) return null;
@@ -195,7 +228,7 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
         </div>
       )}
 
-      {docked && (
+      {docked && !sheet && (
         <div
           className={
             portrait
@@ -210,6 +243,12 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
       )}
 
       <OpsOverlay sessions={props.sessions} />
+
+      {sheet && (
+        <div className="absolute inset-x-2 bottom-2 top-12 z-50 flex animate-[hud-sheet-up_200ms_ease-out]">
+          <PanelBody id="console" props={props} />
+        </div>
+      )}
     </div>
   );
 }
@@ -218,7 +257,7 @@ function WorldHudBody(props: WorldHudProps): ReactNode {
 export function WorldHud(props: WorldHudProps): ReactNode {
   const conn = useCampusConnection();
   return (
-    <>
+    <SessionNavProvider value={WORLD_SESSION_NAV}>
       <ConnectionBanner status={conn} />
       <div
         className={`pointer-events-none absolute inset-0 transition-opacity duration-300 ${
@@ -227,6 +266,6 @@ export function WorldHud(props: WorldHudProps): ReactNode {
       >
         <WorldHudBody {...props} />
       </div>
-    </>
+    </SessionNavProvider>
   );
 }

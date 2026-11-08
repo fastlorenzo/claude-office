@@ -23,6 +23,7 @@ import {
   StateDot,
   ToneChip,
 } from "./parts";
+import type { InteractionTarget } from "@/engine/contracts";
 import { useFactoryData } from "./useFactoryData";
 import {
   MUTED_GREY,
@@ -187,9 +188,13 @@ export const PrPanelView = memo(function PrPanelView({
   );
 });
 
-export function PrPanel(): ReactNode {
+export function PrPanel({
+  target: explicit,
+}: {
+  target?: InteractionTarget | null;
+}): ReactNode {
   const { t } = useTranslation();
-  const { target, data } = useFactoryData();
+  const { target, data } = useFactoryData(explicit);
   const view = useMemo(
     () =>
       target && data ? prView(data.project, data.line, target, data.now) : null,

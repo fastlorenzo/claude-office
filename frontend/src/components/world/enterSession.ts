@@ -23,7 +23,7 @@ export function canEnterSession(): boolean {
 
 /**
  * Enter a session as a game action: walk/teleport into its room, select it,
- * open Events + Conversation and flash an "Entered <room>" banner. Every entry
+ * open the console dock and flash an "Entered <room>" banner. Every entry
  * point (Enter key, panels, popups) goes through here.
  */
 export async function enterSession(sessionId: string): Promise<void> {
@@ -33,7 +33,7 @@ export async function enterSession(sessionId: string): Promise<void> {
   if (!inside) getWorld()?.teleport({ sessionId });
 
   ui.setPeerPopup(null);
-  ui.setPanels(["events", "conversation"]);
+  ui.openConsole(sessionId);
   const label = ctx?.label(sessionId) ?? sessionId.slice(0, 8);
   const t = getTranslation(usePreferencesStore.getState().language);
   ui.showBanner(t("world.enter.toast", { label }));

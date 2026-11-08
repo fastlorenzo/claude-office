@@ -20,7 +20,7 @@ import {
   sessionProject,
   toSessionMeta,
 } from "../sessionMeta";
-import { enterSession } from "../enterSession";
+import { primaryAction, useSessionNav } from "@/components/shared/sessionNav";
 import { GLASS, LABEL } from "./glass";
 import { PhasePill, RefChips, midTruncate } from "./GlanceParts";
 import {
@@ -153,6 +153,7 @@ function SessionCard({
   dotsOnly,
 }: CardProps): ReactNode {
   const { t } = useTranslation();
+  const go = primaryAction(useSessionNav());
   const [hover, setHover] = useState(false);
   const status = roomStatus(cs);
   const color = STATUS_COLORS[status];
@@ -173,7 +174,7 @@ function SessionCard({
         tabIndex={-1}
         title={`${label}: ${title}`}
         aria-label={label}
-        onClick={() => void enterSession(cs.sessionId)}
+        onClick={() => go(cs.sessionId)}
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${GLASS}`}
       >
         <StatusDot color={color} pulse={needs} size={9} />
@@ -185,11 +186,11 @@ function SessionCard({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => void enterSession(cs.sessionId)}
+      onClick={() => go(cs.sessionId)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          void enterSession(cs.sessionId);
+          go(cs.sessionId);
         }
       }}
       onMouseEnter={() => setHover(true)}

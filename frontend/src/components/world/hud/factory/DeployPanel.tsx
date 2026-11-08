@@ -6,6 +6,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { deployView, type DeployView } from "./factoryPanelModel";
 import { PipelineList } from "./LinePanel";
 import { AgoText, Chip, Empty, Section, StateChip } from "./parts";
+import type { InteractionTarget } from "@/engine/contracts";
 import { useFactoryData } from "./useFactoryData";
 import { SESSION_COLORS } from "@/engine/logic/statusPalette";
 
@@ -110,9 +111,13 @@ export const DeployPanelView = memo(function DeployPanelView({
   );
 });
 
-export function DeployPanel(): ReactNode {
+export function DeployPanel({
+  target: explicit,
+}: {
+  target?: InteractionTarget | null;
+}): ReactNode {
   const { t } = useTranslation();
-  const { data } = useFactoryData();
+  const { data } = useFactoryData(explicit);
   const view = useMemo(
     () => (data ? deployView(data.project, data.line, data.now) : null),
     [data],

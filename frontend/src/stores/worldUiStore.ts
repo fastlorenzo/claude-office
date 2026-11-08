@@ -25,10 +25,20 @@ export type HudPanel =
   | "help"
   | "graphics"
   | "inspect"
+  | "console"
   | "factoryPr"
   | "factoryStation"
   | "factoryLine"
   | "factoryDeploy";
+
+/** Session shown by the console panel (and optionally one focused tool call). */
+export interface ConsoleTarget {
+  sessionId: string;
+  callId?: string;
+}
+
+/** Console presentation: right/bottom dock, or a sheet laid over the ops dashboard. */
+export type ConsolePresentation = "dock" | "sheet";
 
 /** Popup for a character that belongs to a non-selected session. */
 export interface PeerPopupTarget {
@@ -52,6 +62,11 @@ interface WorldUiState {
   /** Top-most open panel (null when none). Kept in sync with `panels`. */
   openPanel: HudPanel | null;
   inspectTarget: InteractionTarget | null;
+  /** Session shown by the exclusive `console` panel. */
+  consoleTarget: ConsoleTarget | null;
+  consolePresentation: ConsolePresentation;
+  /** Where Esc returns to when the console was opened from ops. */
+  returnTo: "ops" | null;
   /** Factory target shown by the factory panels (ids only; data is read live). */
   factoryTarget: InteractionTarget | null;
   prompt: InteractionEvent | null;
@@ -94,6 +109,14 @@ interface WorldUiState {
   closeTop: () => boolean;
   closeAll: () => void;
   openInspect: (target: InteractionTarget) => void;
+  /**
+   * Open the (exclusive) console for a session. `from: "ops"` lays it over the
+   * ops dashboard as a sheet; Esc then returns to ops.
+   */
+  openConsole: (
+    sessionId: string,
+    opts?: { from?: "ops"; callId?: string },
+  ) => void;
   /** Open the factory panel matching the target kind (pr / station / line / deploy). */
   openFactory: (target: InteractionTarget) => void;
   setPrompt: (prompt: InteractionEvent | null) => void;
@@ -127,7 +150,10 @@ function withPanels(
 }
 
 function pushPanel(panels: HudPanel[], panel: HudPanel): HudPanel[] {
-  const next = panels.filter((p) => p !== panel);
+  // The console is exclusive: it replaces every panel, and any other panel
+  // dismisses it.
+  if (panel === "console") return ["console"];
+  const next = panels.filter((p) => p !== panel && p !== "console");
   next.push(panel);
   // Drop the oldest when over the cap so the dock never overflows.
   while (next.length > MAX_OPEN_PANELS) next.shift();
@@ -137,6 +163,9 @@ function pushPanel(panels: HudPanel[], panel: HudPanel): HudPanel[] {
 const INITIAL = {
   ...withPanels([]),
   inspectTarget: null,
+  consoleTarget: null as ConsoleTarget | null,
+  consolePresentation: "dock" as ConsolePresentation,
+  returnTo: null as "ops" | null,
   factoryTarget: null,
   prompt: null,
   pose: null,
@@ -178,7 +207,14 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   ...INITIAL,
   worldEpoch: 0,
 
-  setPanels: (panels) => set(withPanels(panels.slice(-MAX_OPEN_PANELS))),
+  setPanels: (panels) =>
+    set(
+      withPanels(
+        panels.includes("console")
+          ? ["console"]
+          : panels.slice(-MAX_OPEN_PANELS),
+      ),
+    ),
   showBanner: (text) => set({ banner: { id: ++bannerSeq, text } }),
   pulseFade: () => set((s) => ({ fadeSeq: s.fadeSeq + 1 })),
   clearBanner: (id) =>
@@ -193,7 +229,10 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   close: (panel) =>
     set((s) =>
       s.panels.includes(panel)
-        ? withPanels(s.panels.filter((p) => p !== panel))
+        ? {
+            ...withPanels(s.panels.filter((p) => p !== panel)),
+            ...(panel === "console" ? { returnTo: null } : {}),
+          }
         : s,
     ),
   toggle: (panel) => {
@@ -204,10 +243,27 @@ export const useWorldUiStore = create<WorldUiState>()((set, get) => ({
   closeTop: () => {
     const { panels } = get();
     if (panels.length === 0) return false;
-    set(withPanels(panels.slice(0, -1)));
+    const closing = panels[panels.length - 1];
+    // Closing a console opened from ops returns to ops (it stays open below).
+    set({
+      ...withPanels(panels.slice(0, -1)),
+      ...(closing === "console" ? { returnTo: null } : {}),
+    });
     return true;
   },
-  closeAll: () => set((s) => (s.panels.length ? withPanels([]) : s)),
+  closeAll: () =>
+    set((s) => (s.panels.length ? { ...withPanels([]), returnTo: null } : s)),
+  openConsole: (sessionId, opts) =>
+    set((s) => {
+      const fromOps = opts?.from === "ops";
+      return {
+        consoleTarget: { sessionId, callId: opts?.callId },
+        consolePresentation: fromOps ? "sheet" : "dock",
+        returnTo: fromOps ? "ops" : null,
+        opsOpen: fromOps ? true : s.opsOpen,
+        ...withPanels(["console"]),
+      };
+    }),
   openInspect: (target) => {
     set({ inspectTarget: target });
     get().open("inspect");

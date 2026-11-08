@@ -1,5 +1,6 @@
 import {
   Bot,
+  Terminal,
   Factory,
   GitPullRequest,
   PackageCheck,
@@ -101,6 +102,14 @@ export const PANELS: Record<HudPanel, PanelMeta> = {
     titleKey: "hud.panel.inspect",
     hintKey: null,
   },
+  console: {
+    id: "console",
+    keyLabel: "I",
+    keys: ["i"],
+    icon: Terminal,
+    titleKey: "hud.panel.console",
+    hintKey: "hud.keys.console",
+  },
   factoryPr: {
     id: "factoryPr",
     keyLabel: "F",
@@ -141,6 +150,7 @@ export const HINT_ORDER: HudPanel[] = [
   "git",
   "conversation",
   "events",
+  "console",
   "agents",
   "minimap",
   "graphics",

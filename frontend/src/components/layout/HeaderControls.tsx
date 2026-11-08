@@ -85,6 +85,12 @@ export function HeaderControls({
               : t("settings.rendererPixel")}
           </button>
         ))}
+        <a
+          href="/dashboard"
+          className="px-2.5 py-1 rounded-sm text-[11px] font-bold tracking-wide text-slate-500 transition-colors hover:text-slate-300"
+        >
+          {t("header.dashboards")}
+        </a>
       </div>
 
       {unreadCount > 0 && (

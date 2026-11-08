@@ -11,7 +11,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n/en";
 import type { CheckState } from "@/engine/contracts";
 import { stateColor } from "@/engine/logic/factoryModel";
-import { enterSession } from "../../enterSession";
+import { primaryAction, useSessionNav } from "@/components/shared/sessionNav";
 import { LABEL } from "../glass";
 import { TONE_COLOR, type Ago, type Tone } from "./factoryPanelModel";
 
@@ -175,11 +175,12 @@ export function CiLegend(): ReactNode {
 
 export function EnterButton({ sessionId }: { sessionId: string }): ReactNode {
   const { t } = useTranslation();
+  const go = primaryAction(useSessionNav());
   return (
     <button
       type="button"
       onClick={() => {
-        void enterSession(sessionId);
+        go(sessionId);
       }}
       className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#D97757] px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-[#e58a6b]"
     >

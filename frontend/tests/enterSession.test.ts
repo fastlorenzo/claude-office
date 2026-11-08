@@ -28,7 +28,8 @@ describe("enterSession", () => {
     expect(teleport).toHaveBeenCalledWith({ sessionId: "s1" });
     expect(select).toHaveBeenCalledWith("s1");
     const s = useWorldUiStore.getState();
-    expect(s.panels).toEqual(["events", "conversation"]);
+    expect(s.panels).toEqual(["console"]);
+    expect(s.consoleTarget?.sessionId).toBe("s1");
     expect(s.banner?.text).toContain("My Room");
   });
 

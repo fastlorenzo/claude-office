@@ -20,7 +20,10 @@ function key(code: string, k: string): KeyboardEvent {
   } as unknown as KeyboardEvent;
 }
 
+let activeEl: unknown = null;
+
 beforeEach(() => {
+  activeEl = null;
   vi.stubGlobal("window", {
     addEventListener: (_: string, h: Handler) => {
       handler = h;
@@ -29,7 +32,7 @@ beforeEach(() => {
   });
   vi.stubGlobal("document", {
     querySelector: () => null,
-    activeElement: null,
+    activeElement: activeEl,
   });
   useWorldUiStore.getState().reset();
   useWorldUiStore.getState().setReady(true);
@@ -57,5 +60,50 @@ describe("useHudKeys", () => {
     handler(key("KeyG", "g"));
     handler(key("KeyH", "h"));
     expect(useWorldUiStore.getState().panels).toEqual(["git", "help"]);
+  });
+
+  it("toggles the console on I for the room you stand in", () => {
+    useWorldUiStore.getState().setPose({
+      x: 0,
+      z: 0,
+      yaw: 0,
+      zone: { kind: "room", sessionId: "s1" },
+    });
+    handler(key("KeyI", "i"));
+    const st = useWorldUiStore.getState();
+    expect(st.panels).toEqual(["console"]);
+    expect(st.consoleTarget?.sessionId).toBe("s1");
+    handler(key("KeyI", "i"));
+    expect(useWorldUiStore.getState().panels).toEqual([]);
+  });
+
+  it("falls back to the selected session for I", () => {
+    useHudKeys("sel");
+    handler(key("KeyI", "i"));
+    expect(useWorldUiStore.getState().consoleTarget?.sessionId).toBe("sel");
+  });
+
+  it("ignores keys inside a keytrap except Esc", () => {
+    useWorldUiStore.getState().open("help");
+    activeEl = { tagName: "DIV", closest: () => ({}) };
+    // activeElement was captured at stub time: re-stub with the trap active.
+    vi.stubGlobal("document", {
+      querySelector: () => null,
+      activeElement: activeEl,
+    });
+    handler(key("KeyG", "g"));
+    expect(useWorldUiStore.getState().panels).toEqual(["help"]);
+    handler(key("Escape", "Escape"));
+    expect(useWorldUiStore.getState().panels).toEqual([]);
+  });
+
+  it("Esc closes the console before ops", () => {
+    const ui = useWorldUiStore.getState();
+    ui.openOps();
+    ui.openConsole("s1", { from: "ops" });
+    handler(key("Escape", "Escape"));
+    const st = useWorldUiStore.getState();
+    expect(st.panels).toEqual([]);
+    expect(st.opsOpen).toBe(true);
   });
 });

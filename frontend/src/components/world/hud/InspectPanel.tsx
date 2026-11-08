@@ -6,7 +6,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import { canFocusTerminal, useAttentionStore } from "@/stores/attentionStore";
-import { STATUS_COLORS } from "@/engine/contracts";
+import { STATUS_COLORS, type InteractionTarget } from "@/engine/contracts";
 import type { Session } from "@/hooks/useSessions";
 import {
   campusStatus,
@@ -15,7 +15,7 @@ import {
   sessionProject,
 } from "../sessionMeta";
 import { PhasePill, RefChips } from "./GlanceParts";
-import { enterSession } from "../enterSession";
+import { primaryAction, useSessionNav } from "@/components/shared/sessionNav";
 import { LABEL } from "./glass";
 import {
   sessionBranch,
@@ -50,9 +50,18 @@ function time(iso: string): string {
       });
 }
 
-export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
+export function InspectPanel({
+  sessions,
+  target: explicit,
+}: {
+  sessions: Session[];
+  /** Explicit target (dashboard); falls back to the 3D HUD's inspect target. */
+  target?: InteractionTarget | null;
+}): ReactNode {
   const { t } = useTranslation();
-  const target = useWorldUiStore((s) => s.inspectTarget);
+  const go = primaryAction(useSessionNav());
+  const stored = useWorldUiStore((s) => s.inspectTarget);
+  const target = explicit === undefined ? stored : explicit;
   const cs = useCampusStore((s) =>
     target
       ? s.sessions.find((x) => x.sessionId === target.sessionId)
@@ -161,7 +170,7 @@ export function InspectPanel({ sessions }: { sessions: Session[] }): ReactNode {
           <button
             type="button"
             onClick={() => {
-              void enterSession(target.sessionId);
+              go(target.sessionId);
             }}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#D97757] px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-[#e58a6b]"
           >

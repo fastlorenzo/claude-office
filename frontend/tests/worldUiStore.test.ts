@@ -58,3 +58,41 @@ describe("preference parsing", () => {
     expect(parseGraphicsQuality("high")).toBe("high");
   });
 });
+
+describe("console panel", () => {
+  beforeEach(() => useWorldUiStore.getState().reset());
+
+  it("is exclusive and carries a target", () => {
+    const s = useWorldUiStore.getState();
+    s.open("git");
+    s.open("events");
+    s.openConsole("s1", { callId: "c1" });
+    let st = useWorldUiStore.getState();
+    expect(st.panels).toEqual(["console"]);
+    expect(st.consoleTarget).toEqual({ sessionId: "s1", callId: "c1" });
+    expect(st.consolePresentation).toBe("dock");
+    expect(st.returnTo).toBeNull();
+    // Another panel dismisses it.
+    st.open("git");
+    st = useWorldUiStore.getState();
+    expect(st.panels).toEqual(["git"]);
+    // Opening it again replaces everything.
+    st.open("console");
+    expect(useWorldUiStore.getState().panels).toEqual(["console"]);
+  });
+
+  it("opened from ops it is a sheet over ops, and closing returns to ops", () => {
+    const s = useWorldUiStore.getState();
+    s.openOps();
+    s.openConsole("s2", { from: "ops" });
+    let st = useWorldUiStore.getState();
+    expect(st.consolePresentation).toBe("sheet");
+    expect(st.returnTo).toBe("ops");
+    expect(st.opsOpen).toBe(true);
+    expect(st.closeTop()).toBe(true);
+    st = useWorldUiStore.getState();
+    expect(st.panels).toEqual([]);
+    expect(st.opsOpen).toBe(true);
+    expect(st.returnTo).toBeNull();
+  });
+});

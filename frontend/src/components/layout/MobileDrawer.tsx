@@ -11,6 +11,7 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  LayoutDashboard,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR as dateFnsPtBR, es as dateFnsEs } from "date-fns/locale";
@@ -154,6 +155,13 @@ export function MobileDrawer({
 
           {/* Mobile Controls */}
           <div className="flex flex-col gap-2 mb-6">
+            <a
+              href="/dashboard"
+              className="flex items-center gap-2 px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 rounded text-sm font-bold transition-colors"
+            >
+              <LayoutDashboard size={16} />
+              {t("mobile.dashboards")}
+            </a>
             <button
               onClick={handleSimulate}
               className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 rounded text-sm font-bold transition-colors"
