@@ -208,7 +208,11 @@ export const PRESETS: Record<
     areaLights: true,
     maxDynamicLights: 4,
     iblShadows: false,
-    screenSpaceReflections: "medium",
+    // Off (WS5b): SSR only traces surfaces with reflectivity > 0.25, i.e.
+    // metals, and the zone probes already reflect the room in them; the
+    // pass changed < 0.1 % of the pixels by > 8 levels (dock A/B) and was
+    // the 13th post-process (budget 12).
+    screenSpaceReflections: "off",
     reflectionProbes: true,
     bloom: true,
     glow: true,

@@ -12,6 +12,7 @@ import {
   firstChangedStage,
   planFx,
   resolveEffective,
+  SSR_BY_QUALITY,
   structuralKeys,
 } from "@/engine/fx/fxPlan";
 import { QualityGovernor } from "@/engine/fx/Quality";
@@ -61,10 +62,9 @@ describe("planFx presets", () => {
     expect(of("high").ssao?.expensiveBlur).toBe(false);
     expect(of("ultra").ssao?.samples).toBeGreaterThan(16);
     expect(of("medium").ssr).toBeNull();
-    expect(of("high").ssr?.downsample).toBe(0);
-    expect(of("high").ssr?.blur).toBe(0); // single SSR pass at high
+    expect(of("high").ssr).toBeNull(); // probes reflect; 12-pass budget (WS5b)
     expect(of("ultra").ssr?.downsample).toBe(0);
-    expect(of("ultra").ssr!.maxSteps).toBeGreaterThan(of("high").ssr!.maxSteps);
+    expect(of("ultra").ssr!.maxSteps).toBeGreaterThan(SSR_BY_QUALITY.medium.maxSteps);
   });
   it("drops the sharpen pass when TAA is on", () => {
     expect(of("high").taa).not.toBeNull();
@@ -104,11 +104,11 @@ describe("diffPlan / structural stages", () => {
     expect(firstChangedStage(structuralKeys(a), structuralKeys(b))).toBe(-1);
   });
   it("rebuilds from the first changed stage", () => {
-    const a = structuralKeys(of("high"));
+    const a = structuralKeys(of("ultra"));
     const noSsr = structuralKeys(
       planFx(
         updateSetting(
-          applyPreset("high", base),
+          applyPreset("ultra", base),
           "screenSpaceReflections",
           "off",
         ),
