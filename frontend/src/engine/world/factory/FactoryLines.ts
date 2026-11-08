@@ -20,6 +20,7 @@
  * through thin-instance resolvers (lane plates + boards come from `Cells`).
  */
 import { BoundingInfo, Vector3, type Scene } from "@/engine/babylon";
+import { framedSink, type Colliders } from "@/engine/physics/Colliders";
 import type {
   BrandingOptions,
   BuildingLayout,
@@ -45,7 +46,7 @@ import type {
 import type { FactoryVisibility } from "@/engine/world/factoryVisibility";
 import { Cells } from "./Cell";
 import { Conveyors } from "./Conveyors";
-import { DOCK, Dock } from "./Dock";
+import { DOCK, Dock, addDockColliders } from "./Dock";
 import type { Factory, FactoryPart } from "./Factory";
 import { FactorySync, type FactorySyncStats } from "./factorySync";
 import {
@@ -71,6 +72,8 @@ import type { PieceInstance } from "./workpiecePlacement";
 export interface FactoryLinesContext {
   scene: Scene;
   lighting: Lighting;
+  /** Static collider registry (absent in headless tests). */
+  colliders?: Colliders;
 }
 
 export interface FactoryLinesOptions {
@@ -121,6 +124,8 @@ const PHASES: readonly MotionPhase[] = [
   "scrapped",
 ];
 const PHASE_ID = new Map(PHASES.map((p, i) => [p, i]));
+
+const DOCK_GROUP = "factoryDock";
 
 export class FactoryLines implements FactoryPart {
   readonly feedSync = new FactorySync();
@@ -311,6 +316,7 @@ export class FactoryLines implements FactoryPart {
     this.workpieces?.dispose();
     this.cells?.dispose();
     this.dock?.dispose();
+    this.ctx.colliders?.disposeGroup(DOCK_GROUP);
     this.motions.clear();
   }
 
@@ -381,6 +387,18 @@ export class FactoryLines implements FactoryPart {
       this.dockKey = "";
       this.applyDock();
     } else this.dock.root.position.set(want.x, want.y, want.z);
+    this.placeDockColliders(want);
+  }
+
+  /** Platform slab, door wall, side walls and the stair ramp (static). */
+  private placeDockColliders(at: { x: number; y: number; z: number }): void {
+    const cols = this.ctx.colliders;
+    if (!cols) return;
+    cols.disposeGroup(DOCK_GROUP);
+    addDockColliders(
+      framedSink(cols, new Vector3(at.x, at.y, at.z), 0),
+      DOCK_GROUP,
+    );
   }
 
   private rebuildContexts(): void {

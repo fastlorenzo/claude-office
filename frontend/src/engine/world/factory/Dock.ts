@@ -21,7 +21,9 @@ import {
   TransformNode,
   VertexBuffer,
   VertexData,
+  Vector3,
 } from "@/engine/babylon";
+import type { ColliderSink } from "@/engine/physics/Colliders";
 import type {
   BrandingOptions,
   PipelineRun,
@@ -73,6 +75,69 @@ export const DOCK = {
   /** Draws contributed by the dock itself (truck adds 2 more). */
   draws: 7,
 } as const;
+
+/**
+ * Loading stair on the platform's plant-side (-z) face, dock-local. Top flush
+ * with the platform edge (z = -depth), bottom flush with the plant floor.
+ * Pitch = atan(1.2 / 2.4) = 26.6 deg, well under the 35 deg walk limit.
+ */
+export const DOCK_STAIR = {
+  x: -6,
+  width: 1.5,
+  run: 2.4,
+  steps: 7,
+  railTop: 0.95,
+} as const;
+
+/** Teleport landing on the platform in front of the truck's door (dock-local). */
+export const DOCK_SPAWN = { x: 3, y: 0.05, z: -3.5 } as const;
+
+/**
+ * Static colliders in the dock-local frame: the platform slab, the door wall
+ * above it, side walls, and the stair's hidden ramp (top face through the top
+ * and bottom nosing, no lip) with vertical side guards over the flight only.
+ */
+export function addDockColliders(sink: ColliderSink, group: string): void {
+  const pH = DOCK.platformH;
+  const W = DOCK.width;
+  const D = DOCK.depth;
+  const v = (x: number, y: number, z: number): Vector3 => new Vector3(x, y, z);
+  sink.addBox(group, v(0, pH / 2, -D / 2), v(W, pH, D));
+  sink.addBox(
+    group,
+    v(0, (pH + DOCK.wallH) / 2, -0.15),
+    v(W, DOCK.wallH - pH, 0.3),
+  );
+  for (const sx of [-1, 1])
+    sink.addBox(
+      group,
+      v(sx * (W / 2 - 0.15), (pH + DOCK.wallH) / 2, -D / 2),
+      v(0.3, DOCK.wallH - pH, D),
+    );
+  const st = DOCK_STAIR;
+  const len = Math.hypot(st.run, pH);
+  const th = Math.atan2(pH, st.run);
+  // Bottom is toward -z, so +z end is the top: pitch negative (see addBox).
+  const pitch = -th;
+  const ny = Math.cos(th);
+  const nz = -Math.sin(th);
+  const T = 0.2;
+  const ext = 0.15;
+  const zm = -D - st.run / 2;
+  const ym = pH / 2;
+  // Top face centre shifted down-slope by ext / 2 (bottom end sinks into floor).
+  const cz = zm - ((st.run / len) * ext) / 2 - nz * (T / 2);
+  const cy = ym - ((pH / len) * ext) / 2 - ny * (T / 2);
+  sink.addBox(group, v(st.x, cy, cz), v(st.width, T, len + ext), 0, { pitch });
+  for (const sx of [-1, 1]) {
+    const top = pH + 1.1;
+    sink.addBox(
+      group,
+      v(st.x + (sx * (st.width - 0.05)) / 2, top / 2, -D - st.run / 2),
+      v(0.05, top, st.run),
+    );
+  }
+}
 
 /** Shelf bay centre z, rack face x (dock-local). */
 const BAY_Z0 = -11.4;
@@ -398,6 +463,85 @@ export class Dock {
     }
     // Main-line axis marking toward the gantry.
     matte.span(-0.04, pH + 0.005, -D, 0.04, pH + 0.008, -6.2, yellow);
+
+    // ---- Loading stair: galvanised treads, yellow nosings, painted stringers,
+    // black handrails + balusters on both sides (open middle = walking path).
+    {
+      const st = DOCK_STAIR;
+      const x0 = st.x - st.width / 2;
+      const x1 = st.x + st.width / 2;
+      const rise = pH / st.steps;
+      const going = st.run / st.steps;
+      for (let i = 1; i <= st.steps; i++) {
+        const yt = pH - (i - 1) * rise;
+        const zFar = -D - (i - 1) * going;
+        const zNear = -D - i * going;
+        if (i > 1) {
+          metal.span(x0 + 0.05, yt - 0.04, zNear, x1 - 0.05, yt, zFar, satin);
+          matte.span(
+            x0 + 0.06,
+            yt,
+            zFar - 0.05,
+            x1 - 0.06,
+            yt + 0.006,
+            zFar,
+            yellow,
+          );
+        }
+      }
+      const slab = (
+        zA: number,
+        yA: number,
+        zB: number,
+        yB: number,
+        t: number,
+      ) =>
+        [
+          [zA, yA],
+          [zB, yB],
+          [zB, yB - t],
+          [zA, yA - t],
+        ] as [number, number][];
+      for (const [xa, xb] of [
+        [x0, x0 + 0.06],
+        [x1 - 0.06, x1],
+      ] as const) {
+        metal.prismZY(slab(-D, pH, -D - st.run, 0, 0.26), xa, xb, graphite);
+        const xr = (xa + xb) / 2;
+        const rt = st.railTop;
+        metal.prismZY(
+          slab(-D, pH + rt + 0.025, -D - st.run, rt + 0.025, 0.05),
+          xr - 0.025,
+          xr + 0.025,
+          black,
+        );
+        const nb = 8;
+        for (let k = 0; k <= nb; k++) {
+          const t = k / nb;
+          const z = -D - t * st.run;
+          const y = pH - t * pH;
+          metal.span(
+            xr - 0.012,
+            y,
+            z - 0.012,
+            xr + 0.012,
+            y + rt,
+            z + 0.012,
+            black,
+          );
+        }
+        // Newel post on the platform where the rail returns to the edge.
+        metal.span(
+          xr - 0.03,
+          pH,
+          -D - 0.03,
+          xr + 0.03,
+          pH + rt + 0.05,
+          -D + 0.03,
+          black,
+        );
+      }
+    }
 
     // ---- Front wall (piers + header), side walls, fascia.
     const wallT = 0.3;

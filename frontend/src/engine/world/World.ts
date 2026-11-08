@@ -88,6 +88,7 @@ import { Building } from "@/engine/world/Building";
 import { Factory } from "@/engine/world/factory/Factory";
 import { FactoryLines } from "@/engine/world/factory/FactoryLines";
 import { cellStairFoot } from "@/engine/world/factory/FactoryHall";
+import { DOCK, DOCK_SPAWN } from "@/engine/world/factory/Dock";
 import { computeCellVisibility } from "@/engine/world/factoryVisibility";
 import { ControlRoom } from "@/engine/world/ControlRoom";
 import { ProjectRoom } from "@/engine/world/ProjectRoom";
@@ -449,7 +450,11 @@ class World implements IWorld {
       this.factory.setLayout(this.factoryLayout, this.layout);
       this.factoryLines = new FactoryLines(
         this.factory,
-        { scene: this.scene, lighting: this.lighting },
+        {
+          scene: this.scene,
+          lighting: this.lighting,
+          colliders: this.colliders,
+        },
         { demo: !!this.debug.demoFactory, branding: this.branding },
       );
       this.feeds = new FeedScheduler(this.scene);
@@ -1166,9 +1171,16 @@ class World implements IWorld {
       return;
     }
     if (typeof to === "object" && "factoryDock" in to) {
-      // Dock floor just past the main line's end, facing the doors (+z).
+      // On the loading platform in front of the truck's door, facing +z.
       const d = fl.dock;
-      this.player.teleport(new Vector3(3, fl.floorY + 0.05, d.z0 + 2), 0);
+      this.player.teleport(
+        new Vector3(
+          DOCK_SPAWN.x,
+          fl.floorY + DOCK.platformH + DOCK_SPAWN.y,
+          d.z1 + DOCK_SPAWN.z,
+        ),
+        0,
+      );
       return;
     }
     if (to === "lobby") {
