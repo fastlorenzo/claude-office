@@ -65,6 +65,11 @@ import {
 import { LiftController, type LiftLevel } from "@/engine/world/entranceLift";
 import { forecourtBoxes } from "@/engine/world/forecourtColliders";
 import {
+  buildSignMesh,
+  entranceSigns,
+  signHardware,
+} from "@/engine/world/wayfinding";
+import {
   flight,
   rampBox,
   STAIR_RAIL_TOP,
@@ -139,6 +144,8 @@ export class EntranceHall {
     this.buildGallery(b);
     this.buildBenches(b);
     this.buildForecourt(b);
+    const signs = entranceSigns(e, UP, TOP);
+    signHardware(b, signs);
     // Ground-floor frame: local y 0 = FLOOR_Y.
     this.frame = new TransformNode("entrance:frame", scene);
     this.frame.position.y = e.floorY;
@@ -185,6 +192,19 @@ export class EntranceHall {
     this.liftCar = this.buildCar();
     this.buildLiftTargets();
     this.buildDirectory();
+    const sm = buildSignMesh(
+      scene,
+      G,
+      signs.map((s) => ({
+        ...s,
+        y: s.y + e.floorY,
+        hangTo: s.hangTo === undefined ? undefined : s.hangTo + e.floorY,
+      })),
+    );
+    if (sm) {
+      this.meshes.push(sm.mesh);
+      this.textures.push(sm.texture);
+    }
 
     // Neon brand above the factory door, on the graphite feature wall.
     this.brand = new BrandSign(
@@ -1048,13 +1068,18 @@ export class EntranceHall {
       drawDirectory,
     );
     this.textures.push(tex);
-    const p = texturedPlane(scene, "entranceDirectory", tex, 1.2, 0.75, {
+    // 2.2 × 1.375 m, centre 1.75 m: the row titles are ~0.17 m tall,
+    // legible from the spawn just inside the doors (≈ 5 m) and from the
+    // forecourt outside them.
+    const W = 2.2;
+    const H = 1.375;
+    const p = texturedPlane(scene, "entranceDirectory", tex, W, H, {
       emissive: 0.9,
     });
     p.position.set(
-      fd.x - fd.width / 2 - 1.3,
-      this.floorY + 1.6,
-      fd.z - ENTR_WALL_T - 0.06,
+      fd.x - fd.width / 2 - 0.35 - W / 2,
+      this.floorY + 1.75,
+      fd.z - ENTR_WALL_T - FEATURE_D - 0.012,
     );
     this.meshes.push(p);
   }
@@ -1258,26 +1283,26 @@ function drawDirectory(
   roundRect(ctx, 0, 0, w, h, h * 0.04);
   ctx.fill();
   drawSpark(ctx, w * 0.1, h * 0.17, h * 0.06, "#D97757");
-  ctx.fillStyle = "#8E8A84";
+  ctx.fillStyle = "#A5A19A";
   ctx.textBaseline = "middle";
-  ctx.font = `500 ${Math.round(h * 0.07)}px ${FONT_STACK}`;
+  ctx.font = `600 ${Math.round(h * 0.08)}px ${FONT_STACK}`;
   ctx.fillText("DIRECTORY", w * 0.17, h * 0.17);
-  ctx.fillStyle = "#2A2B2E";
-  ctx.fillRect(w * 0.06, h * 0.29, w * 0.88, 2);
+  ctx.fillStyle = "#3A3B3E";
+  ctx.fillRect(w * 0.06, h * 0.28, w * 0.88, 3);
   const row = (y: number, title: string, sub: string, arrow: string) => {
-    ctx.fillStyle = "#F2EFEA";
+    ctx.fillStyle = "#F7F4EF";
     ctx.textAlign = "left";
-    ctx.font = `500 ${Math.round(h * 0.1)}px ${FONT_STACK}`;
-    ctx.fillText(title, w * 0.07, y);
-    ctx.fillStyle = "#9A968F";
-    ctx.font = `400 ${Math.round(h * 0.06)}px ${FONT_STACK}`;
-    ctx.fillText(sub, w * 0.07, y + h * 0.095);
-    ctx.fillStyle = "#D97757";
+    ctx.font = `600 ${Math.round(h * 0.125)}px ${FONT_STACK}`;
+    ctx.fillText(title, w * 0.07, y, w * 0.72);
+    ctx.fillStyle = "#B4B0A8";
+    ctx.font = `500 ${Math.round(h * 0.07)}px ${FONT_STACK}`;
+    ctx.fillText(sub, w * 0.07, y + h * 0.11, w * 0.72);
+    ctx.fillStyle = "#E08060";
     ctx.textAlign = "right";
-    ctx.font = `300 ${Math.round(h * 0.16)}px ${FONT_STACK}`;
-    ctx.fillText(arrow, w * 0.93, y + h * 0.03);
+    ctx.font = `400 ${Math.round(h * 0.2)}px ${FONT_STACK}`;
+    ctx.fillText(arrow, w * 0.94, y + h * 0.04);
     ctx.textAlign = "left";
   };
-  row(h * 0.44, "Reception · Offices", "Level 1 · stairs or lift", "↑");
+  row(h * 0.43, "Offices · Reception", "Level 1 · stairs or lift", "↑");
   row(h * 0.74, "Factory floor", "Production lines · dock", "→");
 }

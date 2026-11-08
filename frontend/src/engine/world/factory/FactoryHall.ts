@@ -68,6 +68,11 @@ import {
 } from "@/engine/layout/factoryLayout";
 import { rectMinusHoles } from "@/engine/world/architecture";
 import {
+  buildSignMesh,
+  hallSigns,
+  signHardware,
+} from "@/engine/world/wayfinding";
+import {
   flight,
   type Flight,
   NOSING_YELLOW,
@@ -197,6 +202,8 @@ export class FactoryHall {
   private meshes: Mesh[] = [];
   private textures: DynamicTexture[] = [];
   private stencil: PBRMaterial | null = null;
+  /** Wayfinding signs (one merged unlit mesh, one draw; not a caster). */
+  private signs: Mesh | null = null;
   private fixtureList: FixturePoint[] = [];
   private key = "";
   private layout: FactoryLayout | null = null;
@@ -235,8 +242,16 @@ export class FactoryHall {
     this.buildColumns(b, fl, building);
     this.buildStairs(b, fl);
     this.buildCrossovers(b, fl);
+    this.buildMainLineEnd(b, fl);
     this.buildHighBays(b, fl);
+    const signs = hallSigns(fl, LAYOUT.WALL_H);
+    signHardware(b, signs);
     const meshes = b.build({ receiveShadows: true });
+    const sm = buildSignMesh(scene, "factory", signs);
+    if (sm) {
+      this.signs = sm.mesh;
+      this.textures.push(sm.texture);
+    }
     for (const m of meshes)
       m.metadata = { ...(m.metadata ?? {}), probe: true, factory: true };
     this.meshes = meshes;
@@ -275,6 +290,9 @@ export class FactoryHall {
     this.textures = [];
     this.stencil?.dispose(false, false);
     this.stencil = null;
+    this.signs?.material?.dispose(false, false);
+    this.signs?.dispose(false, false);
+    this.signs = null;
     this.fixtureList = [];
     this.key = "";
   }
