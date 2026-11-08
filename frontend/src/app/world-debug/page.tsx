@@ -6,6 +6,7 @@
  *
  * Query params:
  *   n=6                      number of demo sessions
+ *   tierStep=low@60,high@120  live quality change after N frames (repro)
  *   quality=auto|high|low
  *   cam=x,y,z,yawDeg,pitchDeg  fixed eye pose for screenshots (freezes the player)
  *   gfx=low|medium|high|ultra|auto  force a graphics preset
@@ -134,6 +135,14 @@ function parseParams() {
     frames: Number(q.get("frames") ?? 40) || 40,
     t: q.get("t") ? Number(q.get("t")) : undefined,
     ops: q.get("ops") === "1",
+    tierSteps: (q.get("tierStep") ?? "")
+      .split(",")
+      .map((x) => x.split("@"))
+      .filter((x) => x.length === 2 && Number(x[1]) >= 0)
+      .map(([quality, f]) => ({
+        quality: quality as QualitySetting,
+        frame: Number(f),
+      })),
   };
 }
 
@@ -188,6 +197,21 @@ export default function WorldDebugPage() {
           if (p.inspect) {
             const w = world as unknown as { debugInspect?: () => void };
             w.debugInspect?.();
+          }
+          if (p.tierSteps.length) {
+            // Deterministic live tier change (e.g. tierStep=low@60,high@120).
+            let n = 0;
+            const steps = [...p.tierSteps];
+            const tick = () => {
+              if (cancelled) return;
+              n += 1;
+              while (steps.length && n >= steps[0].frame) {
+                const st = steps.shift();
+                if (st) world?.setQuality(st.quality);
+              }
+              if (steps.length) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
           }
           if (p.shot) {
             let left = p.frames;

@@ -380,6 +380,27 @@ export class Lighting {
   }
 
   private applyShadows(): void {
+    const csm0 = this.csm;
+    const sun0 = this.sunShadow;
+    this.rebuildShadows();
+    if (this.csm !== csm0 || this.sunShadow !== sun0) this.refreezeMaterials();
+  }
+
+  /**
+   * Frozen materials keep the effect compiled against the old shadow
+   * generators (cascade count, sampler set). After a live generator change
+   * (quality step) that effect is stale and the opaque shell stops drawing,
+   * so thaw and re-freeze: the next isReady() recompiles with current lights.
+   */
+  private refreezeMaterials(): void {
+    for (const m of this.scene.materials) {
+      if (!m.isFrozen) continue;
+      m.unfreeze();
+      m.freeze();
+    }
+  }
+
+  private rebuildShadows(): void {
     const q = this.shadowQuality;
     if (q === "off") {
       this.csm?.dispose();
