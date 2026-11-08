@@ -156,6 +156,7 @@ Or edit the config file and restart Claude Code.
 | `PreToolUse` (Task) | `subagent_start` | Spawn employee agent |
 | `PostToolUse` | `post_tool_use` | Clear working state |
 | `PostToolUse` (Task) | `subagent_stop` | Employee completes work |
+| `PostToolUseFailure` | `post_tool_use` (`success=false`, `error_message`) | Tool failed |
 | `UserPromptSubmit` | `user_prompt_submit` | Phone rings, boss receives |
 | `UserPromptSubmit` (task-notification) | `background_task_notification` | Background task completed |
 | `PermissionRequest` | `permission_request` | Show waiting state |

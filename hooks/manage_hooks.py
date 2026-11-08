@@ -14,6 +14,7 @@ HOOK_TYPES = [
     "SessionEnd",
     "PreToolUse",
     "PostToolUse",
+    "PostToolUseFailure",
     "UserPromptSubmit",
     "PermissionRequest",
     "Notification",
@@ -105,6 +106,7 @@ def create_hook_config(hook_cmd: str, hook_type: str) -> dict[str, Any]:
     if hook_type in [
         "PreToolUse",
         "PostToolUse",
+        "PostToolUseFailure",
         "PermissionRequest",
         "Notification",
         "SubagentStart",

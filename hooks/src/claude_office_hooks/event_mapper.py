@@ -7,6 +7,7 @@ IMPORTANT: This module must not produce any stdout/stderr output.
 Output suppression is handled in main.py before this module is imported.
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -16,6 +17,37 @@ import defusedxml.ElementTree as ET  # noqa: N817
 
 from claude_office_hooks.config import STRIP_PREFIXES
 from claude_office_hooks.debug_logger import get_iso_timestamp
+from claude_office_hooks.tool_output import build_tool_output, extract_interrupted
+
+PROMPT_CAP = 16 * 1024
+BODY_CAP = 24 * 1024
+
+
+def _shrink(value: Any, limit: int) -> Any:
+    """Recursively cap every string in *value* at *limit* chars."""
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[:limit] + "...[truncated]"
+    if isinstance(value, list):
+        return [_shrink(v, limit) for v in cast(list[Any], value)]
+    if isinstance(value, dict):
+        return {k: _shrink(v, limit) for k, v in cast(dict[str, Any], value).items()}
+    return value
+
+
+def _enforce_body_cap(data: dict[str, Any]) -> None:
+    """Keep the POST body under BODY_CAP by shrinking bulky tool_input / result."""
+    try:
+        if len(json.dumps(data, default=str)) <= BODY_CAP:
+            return
+        for key in ("tool_input", "result"):
+            if key in data:
+                data[key] = _shrink(data[key], 2048)
+        if len(json.dumps(data, default=str)) > BODY_CAP:
+            for key in ("tool_input", "result"):
+                if key in data:
+                    data[key] = _shrink(data[key], 256)
+    except (TypeError, ValueError):
+        pass
 
 
 def get_project_name(raw_data: dict[str, Any], strip_prefixes: list[str] | None = None) -> str:
@@ -102,6 +134,20 @@ def _handle_pre_compact(payload: dict[str, Any], data: dict[str, Any]) -> None:
     data["summary"] = "Context window compacting"
 
 
+def _add_caller(raw_data: dict[str, Any], data: dict[str, Any]) -> None:
+    """Copy the raw agent_id / agent_type (set when the hook fires in a subagent).
+
+    Deliberately NOT stored as native_agent_id, which on Task/Agent post means
+    the spawned child.
+    """
+    caller_id = raw_data.get("agent_id")
+    if caller_id:
+        data["caller_native_agent_id"] = caller_id
+    caller_type = raw_data.get("agent_type")
+    if caller_type:
+        data["caller_agent_type"] = caller_type
+
+
 def _handle_pre_tool_use(
     raw_data: dict[str, Any],
     payload: dict[str, Any],
@@ -111,6 +157,7 @@ def _handle_pre_tool_use(
     """Populate *data* for a pre_tool_use event (may remap to subagent_start)."""
     data["tool_name"] = raw_data.get("tool_name")
     data["tool_input"] = raw_data.get("tool_input")
+    _add_caller(raw_data, data)
 
     if data["tool_name"] in ("Task", "Agent"):
         payload["event_type"] = "subagent_start"
@@ -140,11 +187,25 @@ def _handle_post_tool_use(
     payload: dict[str, Any],
     data: dict[str, Any],
     transcript_path: str | None,
+    failed: bool = False,
 ) -> None:
     """Populate *data* for a post_tool_use event (may remap to subagent_stop)."""
     data["tool_name"] = raw_data.get("tool_name")
     data["tool_input"] = raw_data.get("tool_input")  # Needed for heat map tracking
-    data["success"] = True  # PostToolUse only fires on success
+    _add_caller(raw_data, data)
+    if failed:
+        data["success"] = False
+        error = raw_data.get("error")
+        data["error_message"] = error if isinstance(error, str) else str(error or "")
+        if raw_data.get("is_interrupt"):
+            data["interrupted"] = True
+    else:
+        data["success"] = True  # PostToolUse only fires on success
+        response = raw_data.get("tool_response")
+        data.update(build_tool_output(data["tool_name"], response))
+        interrupted = extract_interrupted(response)
+        if interrupted is not None:
+            data["interrupted"] = interrupted
 
     if data["tool_name"] in ("Task", "Agent"):
         tool_input_raw = raw_data.get("tool_input", {})
@@ -184,6 +245,7 @@ def _handle_post_tool_use(
             if isinstance(tool_response_raw, dict):
                 tool_response = cast(dict[str, Any], tool_response_raw)
                 data["result"] = tool_response.get("content", [])
+                data.update(build_tool_output(data["tool_name"], tool_response))
                 native_agent_id: str | None = tool_response.get("agentId")
                 data["native_agent_id"] = native_agent_id
 
@@ -283,10 +345,12 @@ def _handle_user_prompt_submit(
             pass  # Fall through to regular prompt handling
 
     # Regular user prompt
+    full_prompt = prompt
     if len(prompt) > 50:
         prompt = prompt[:47] + "..."
-    data["prompt"] = prompt
     data["summary"] = f"User: {prompt}" if prompt else "User submitted prompt"
+    data["prompt"] = full_prompt[:PROMPT_CAP]
+    data["prompt_truncated"] = len(full_prompt) > PROMPT_CAP
 
 
 def _handle_permission_request(raw_data: dict[str, Any], data: dict[str, Any]) -> None:
@@ -294,6 +358,7 @@ def _handle_permission_request(raw_data: dict[str, Any], data: dict[str, Any]) -
     data["tool_name"] = raw_data.get("tool_name")
     data["tool_input"] = raw_data.get("tool_input")
     data["agent_id"] = "main"
+    _add_caller(raw_data, data)
 
 
 def _handle_notification(raw_data: dict[str, Any], data: dict[str, Any]) -> None:
@@ -381,6 +446,10 @@ def map_event(
     elif event_type == "post_tool_use":
         _handle_post_tool_use(raw_data, payload, data, transcript_path)
 
+    elif event_type == "post_tool_use_failure":
+        payload["event_type"] = "post_tool_use"
+        _handle_post_tool_use(raw_data, payload, data, transcript_path, failed=True)
+
     elif event_type == "subagent_start":
         result = _handle_native_subagent_start(raw_data, payload, data, transcript_path)
         if result is None:
@@ -408,5 +477,8 @@ def map_event(
 
     else:
         return None
+
+    if event_type in ("post_tool_use", "post_tool_use_failure"):
+        _enforce_body_cap(data)
 
     return payload
