@@ -158,6 +158,7 @@ describe("consoleStore", () => {
     const call = makeToolCall(2, { rev: 3 });
     st.putDetail("s1", {
       call,
+      input: null,
       outputSource: "hook",
       outputTruncated: false,
       output: "x",

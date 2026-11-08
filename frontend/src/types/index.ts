@@ -122,8 +122,14 @@ export interface WebSocketMessage {
     | "reload"
     | "git_status"
     | "session_deleted"
-    | "error";
+    | "error"
+    | "tool_call"
+    | "agent_node";
   timestamp: string;
+  /** Console frames (spec 3.5): present on `tool_call` / `agent_node`. */
+  sessionId?: string;
+  toolCall?: import("./generated").ToolCall;
+  agent?: import("./generated").AgentNode;
   state?: import("./generated").GameState;
   event?: {
     id: string;

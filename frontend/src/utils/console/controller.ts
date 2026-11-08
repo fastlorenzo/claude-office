@@ -43,7 +43,10 @@ export function needsOwnSocket(
   return sessionId !== selectedSessionId;
 }
 
-/** Route one parsed `/ws/{id}` message into the store. */
+/**
+ * Route one parsed `/ws/{id}` message into the store. Ignores sessions the
+ * console has not started loading, so it is safe to call for every message.
+ */
 export function routeConsoleMessage(sessionId: string, msg: unknown): void {
   if (!msg || typeof msg !== "object") return;
   const m = msg as {
@@ -52,6 +55,9 @@ export function routeConsoleMessage(sessionId: string, msg: unknown): void {
     state?: { conversation?: ConversationEntry[]; todos?: TodoItem[] };
   };
   const store = useConsoleStore.getState();
+  // Sessions the console never began loading would only buffer forever; a
+  // later beginLoad fetches a fresher snapshot, so dropping is lossless.
+  if (!store.sessions[sessionId]) return;
   switch (m.type) {
     case "tool_call":
     case "agent_node":

@@ -24,6 +24,7 @@ import { resetSpawnIndex } from "@/systems/queuePositions";
 import { TypingTracker } from "@/systems/typingTracker";
 import { reconcileState } from "@/systems/stateReconciler";
 import { shouldShowToast } from "@/systems/toastFilter";
+import { routeConsoleMessage } from "@/utils/console/controller";
 import { WebSocketController } from "@/systems/webSocketController";
 import type { EventType, WebSocketMessage } from "@/types";
 
@@ -100,7 +101,24 @@ export function useWebSocketEvents({
         }
 
         switch (message.type) {
+          case "tool_call":
+          case "agent_node":
+            // Console frames (spec 3.5). Absent on older backends. Sessions
+            // not held by consoleStore buffer a bounded queue until loaded.
+            if (
+              currentSessionIdRef.current &&
+              (!message.sessionId ||
+                message.sessionId === currentSessionIdRef.current)
+            ) {
+              routeConsoleMessage(currentSessionIdRef.current, message);
+            }
+            break;
+
           case "state_update":
+            if (currentSessionIdRef.current) {
+              // Conversation/todos for the console (no-op until it loads).
+              routeConsoleMessage(currentSessionIdRef.current, message);
+            }
             if (message.state) {
               reconcileState(message.state, {
                 currentSessionId: currentSessionIdRef.current,
@@ -174,6 +192,9 @@ export function useWebSocketEvents({
             break;
 
           case "git_status":
+            if (currentSessionIdRef.current) {
+              routeConsoleMessage(currentSessionIdRef.current, message);
+            }
             if (message.gitStatus) {
               setGitStatus(message.gitStatus);
             }

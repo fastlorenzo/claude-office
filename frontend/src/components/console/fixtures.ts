@@ -41,11 +41,18 @@ export function makeToolCall(
     kind: "reading",
     target: `src/file${seq}.ts`,
     inputPreview: { file_path: `src/file${seq}.ts` },
+    inputTruncated: false,
     outputPreview: `contents of file ${seq}`,
+    outputBytes: null,
+    outputTruncated: false,
+    error: null,
     status: "ok",
     startedAt: iso(seq * 1000),
     endedAt: iso(seq * 1000 + 400),
     durationMs: 400,
+    permissionRequestedAt: null,
+    permissionWaitMs: null,
+    spawnedAgentId: null,
     ...overrides,
   };
 }
@@ -59,33 +66,40 @@ export function makeAgent(
     id,
     kind: "subagent",
     name: id,
+    nativeId: null,
     parentId: "main",
     agentType: "Explore",
+    color: null,
+    taskPreview: null,
     state: "done",
+    startedAt: null,
+    endedAt: null,
+    spawnToolUseId: null,
+    resultPreview: null,
     toolCalls: 0,
     errors: 0,
+    currentActivity: null,
     rev: 1,
     ...overrides,
   };
 }
 
 /** The main agent node. */
-export const MAIN_AGENT: AgentNode = {
-  id: "main",
+export const MAIN_AGENT: AgentNode = makeAgent("main", {
   kind: "main",
   name: "Main agent",
   parentId: null,
+  agentType: null,
   state: "working",
-  toolCalls: 0,
-  errors: 0,
-  rev: 1,
-};
+});
 
 function header(overrides: Partial<ConsoleHeader> = {}): ConsoleHeader {
   return {
     sessionId: FIXTURE_SESSION_ID,
     project: "claude-office",
     branch: "feat/3d-office",
+    phase: null,
+    telemetry: null,
     ended: false,
     alive: true,
     startedAt: iso(0),

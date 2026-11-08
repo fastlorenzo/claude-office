@@ -119,3 +119,14 @@ describe("console controller", () => {
     routeConsoleMessage("g", null);
   });
 });
+
+describe("routeConsoleMessage without a loaded session", () => {
+  it("ignores frames for sessions the console never began loading", () => {
+    routeConsoleMessage("nope", {
+      type: "tool_call",
+      toolCall: makeToolCall(1),
+    });
+    expect(scheduled).toHaveLength(0);
+    expect(useConsoleStore.getState().sessions.nope).toBeUndefined();
+  });
+});
