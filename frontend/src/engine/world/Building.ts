@@ -44,6 +44,7 @@ import type { Colliders } from "@/engine/physics/Colliders";
 import { ArtBatcher } from "@/engine/art/geometry";
 import { v3 } from "@/engine/util/MeshBatcher";
 import { Exterior } from "@/engine/world/Exterior";
+import { EntranceHall } from "@/engine/world/EntranceHall";
 import { BrandSign } from "@/engine/world/BrandSign";
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
@@ -58,12 +59,8 @@ import {
   railOpening,
   rectMinusHoles,
   type PlanRect,
-  downlight,
-  FONT_STACK,
   glassPartition,
-  makeTexture,
   recessedSlot,
-  texturedPlane,
   wallWithOpenings,
   windowUnit,
   type Opening,
@@ -88,9 +85,6 @@ const emptyPart = (): Part => ({ meshes: [], textures: [], fixtures: [] });
 
 /** Lobby clear height (double height; the hall and rooms are LAYOUT.WALL_H). */
 const LOBBY_H = 6.0;
-
-/** Elevator doors along the sky-lobby west wall (z centres). */
-const ELEVATOR_Z = [-9.55, -7.25, -4.95, -2.65];
 
 /** Structural glass strip down the spine (over the factory main line). */
 export const SPINE_GLASS_W = 1.6;
@@ -124,9 +118,6 @@ function roomRuns(
 const CONTROL_LED_Y = 2.82;
 const CONTROL_LED_W = 3.0;
 
-/** Our floor number (sky lobby signage / indicators). */
-const FLOOR_NO = 47;
-
 /** Static architecture: probes + daylight occluders. */
 function tagStatic(meshes: AbstractMesh[]): void {
   for (const m of meshes) m.metadata = { ...(m.metadata ?? {}), probe: true };
@@ -143,6 +134,7 @@ export class Building {
   /** Control-room floor / ceiling / walls (ControlRoom adds the interior). */
   private controlShell: Mesh[] = [];
   private brand: BrandSign | null = null;
+  private entranceHall: EntranceHall | null = null;
   private brandOpts: BrandingOptions = DEFAULT_BRANDING;
   private campusCounts = { working: 0, needs: 0, idle: 0, projects: 0 };
 
@@ -185,6 +177,12 @@ export class Building {
   setBranding(opts: BrandingOptions): void {
     this.brandOpts = opts;
     this.brand?.set(opts);
+    this.entranceHall?.setBranding(opts);
+  }
+
+  /** The entrance building's ground floor, stairs and lift (built with the lobby). */
+  get entrance(): EntranceHall | null {
+    return this.entranceHall;
   }
 
   /** Per-frame: LED ticker. */
@@ -201,6 +199,7 @@ export class Building {
   get fixtures(): Vector3[] {
     return [
       ...(this.lobby?.fixtures ?? []),
+      ...(this.entranceHall?.fixtures ?? []),
       ...(this.shell?.fixtures ?? []),
       ...(this.outer?.fixtures ?? []),
     ];
@@ -208,13 +207,9 @@ export class Building {
 
   /** All static meshes (feed render lists for hall views, debugging). */
   get meshes(): Mesh[] {
-    return [
-      this.lobby,
-      this.shell,
-      this.empty,
-      this.outer,
-      this.exterior,
-    ].flatMap((p) => p?.meshes ?? []);
+    return [this.lobby, this.shell, this.empty, this.outer, this.exterior]
+      .flatMap((p) => p?.meshes ?? [])
+      .concat(this.entranceHall?.meshes ?? []);
   }
 
   private finish(part: Part, meshes: Mesh[]): void {
@@ -284,18 +279,37 @@ export class Building {
     const T = 0.2;
 
     // ---- Floor / ceiling
-    // Floor with the stair well down to the factory (rails until it lands).
-    const lobbyHole = buildFactoryLayout(layout).lobbyStair.rect;
+    // The reception floor: cut at the two entrance stairs and the glass lift
+    // (EntranceHall draws their balustrades), with the spine's glass strip
+    // continued across the gallery (the part inside the factory volume).
+    const entrance = buildFactoryLayout(layout).entrance;
+    const strip: PlanRect = {
+      x0: -SPINE_GLASS_W / 2,
+      x1: SPINE_GLASS_W / 2,
+      z0: entrance.gallery.z0,
+      z1: 0,
+    };
     floorPieces(
       b,
       colliders,
       g,
       "floorLobby",
       rectMinusHoles({ x0: -halfW - 0.5, x1: halfW + 0.5, z0, z1: 0 }, [
-        lobbyHole,
+        ...entrance.stairs.map((st) => st.rect),
+        entrance.lift.rect,
+        strip,
       ]),
     );
-    railOpening(b, colliders, g, lobbyHole);
+    floorPieces(b, colliders, g, "glass", [strip], {
+      thickness: 0.04,
+      seeThrough: true,
+    });
+    for (const sx of [-1, 1])
+      b.box(
+        "blackMetal",
+        v3(sx * (SPINE_GLASS_W / 2 + 0.02), -0.01, (strip.z0 + strip.z1) / 2),
+        v3(0.04, 0.022, strip.z1 - strip.z0),
+      );
     b.box(
       "ceiling",
       v3(0, H + 0.05, z0 / 2),
@@ -482,80 +496,24 @@ export class Building {
       part.fixtures.push(p);
     }
 
-    // ---- West: elevator bank (sky lobby). East: floor-to-ceiling glazing.
+    // ---- West: solid wall along the stair, glazed where the reception
+    // reaches into the factory (gallery). East: floor-to-ceiling glazing.
     {
       const wx = -(halfW + T / 2);
-      wallWithOpenings(b, colliders, g, "wall", "z", wx, T, z0, -T, H);
-      const fx = -halfW; // wall face
-      const bz0 = -10.9;
-      const bz1 = -1.5;
-      // Graphite core cladding up to the band, plaster above.
-      b.box(
-        "shadowGap",
-        v3(fx + 0.004, 1.9, (bz0 + bz1) / 2),
-        v3(0.008, 3.8, bz1 - bz0),
-      );
-      b.slats(
-        "wallFeature",
-        bz0,
-        bz1,
-        1.16,
-        0.012,
-        (a) => ({ c: v3(fx + 0.02, 1.9, a), s: v3(0.03, 3.79, 1.16) }),
-        0.004,
-      );
-      // Black glass indicator band running along the bank.
-      b.rbox(
-        "nocGloss",
-        v3(fx + 0.045, 2.78, (bz0 + bz1) / 2),
-        v3(0.02, 0.24, bz1 - bz0),
-        {
-          r: 0.004,
-        },
-      );
-      for (const z of ELEVATOR_Z) {
-        // Portal frame + brushed doors (two leaves, centre split).
-        // (Leaves sit 2.5 cm proud of the portal face: no coplanar z-fight.)
-        b.rbox("blackMetal", v3(fx + 0.05, 1.25, z), v3(0.08, 2.5, 1.36), {
-          r: 0.006,
-        });
-        for (const s2 of [-1, 1])
-          b.rbox(
-            "aluminium",
-            v3(fx + 0.1, 1.2, z + s2 * 0.2775),
-            v3(0.03, 2.38, 0.55),
-            {
-              r: 0.004,
-            },
-          );
-        // Call button between doors
-        b.rbox(
-          "blackMetal",
-          v3(fx + 0.05, 1.15, z + 0.98),
-          v3(0.02, 0.2, 0.09),
-          { r: 0.006 },
+      const gal: Opening[] = [
+        { a0: entrance.gallery.z0 + 0.2, a1: -T - 0.2, y0: 0.04, y1: H - 0.06 },
+      ];
+      wallWithOpenings(b, colliders, g, "wall", "z", wx, T, z0, -T, H, gal);
+      for (const o of gal) {
+        part.fixtures.push(
+          ...windowUnit(b, "z", wx, o, { pitch: 1.5, inward: 1, wallT: T }),
         );
-        b.cylinder(
-          "ledWarm",
-          v3(fx + 0.062, 1.18, z + 0.98),
-          0.008,
-          0.03,
-          0.03,
-          16,
-          {
-            roll: Math.PI / 2,
-            keepUVs: true,
-          },
+        b.box(
+          "blackMetal",
+          v3(wx, WH, (o.a0 + o.a1) / 2),
+          v3(0.07, 0.05, o.a1 - o.a0),
         );
       }
-      colliders.addBox(
-        g,
-        new Vector3(fx + 0.1, 1.5, (bz0 + bz1) / 2),
-        new Vector3(0.2, 3, bz1 - bz0),
-      );
-      // Downlights over the bank
-      for (const z of ELEVATOR_Z)
-        part.fixtures.push(downlight(b, fx + 1.0, z, H, 0.9));
     }
     {
       const sx = 1;
@@ -683,23 +641,6 @@ export class Building {
     part.textures.push(this.brand.texture);
     this.brand.set(this.brandOpts);
 
-    // Elevator floor indicators on the black glass band (one plane, 1 draw).
-    {
-      const bz0 = -10.9;
-      const bz1 = -1.5;
-      const len = bz1 - bz0;
-      const tex = makeTexture(scene, "liftBand", 2048, 52, (c, w, h) =>
-        drawLiftBand(c, w, h, (z) => (z - bz0) / len),
-      );
-      const band = texturedPlane(scene, "liftBand", tex, len - 0.04, 0.22, {
-        emissive: 1.1,
-      });
-      band.rotation.y = -Math.PI / 2;
-      band.position.set(-halfW + 0.056, 2.78, (bz0 + bz1) / 2);
-      part.meshes.push(band);
-      part.textures.push(tex);
-    }
-
     // ---- Props
     const place = (
       role: Parameters<AssetLibrary["instantiate"]>[0],
@@ -736,18 +677,19 @@ export class Building {
         1.0,
         PLANTER_SOIL_Y.planterTall,
       );
-      place("planterTall", sx * (halfW - 0.75), z0 + 0.85, 0, 1.15);
+      // Façade corners: inboard of the stair wells.
+      place("planterTall", sx * 9.35, z0 + 0.85, 0, 1.15);
       place(
         "plantTall",
-        sx * (halfW - 0.75),
+        sx * 9.35,
         z0 + 0.85,
         sx * 2.1,
         1.15,
         PLANTER_SOIL_Y.planterTall * 1.15,
       );
       if (sx > 0) {
-        place("planter", halfW - 0.55, -6.0, 0);
-        place("plant", halfW - 0.55, -6.0, 0.7, 1.0, PLANTER_SOIL_Y.planter);
+        place("planter", halfW - 0.55, -3.9, 0);
+        place("plant", halfW - 0.55, -3.9, 0.7, 1.0, PLANTER_SOIL_Y.planter);
       }
     }
     place("taskChair", rx, rc - 1.25, Math.PI);
@@ -759,6 +701,21 @@ export class Building {
       m.computeWorldMatrix(true);
       m.freezeWorldMatrix();
     }
+
+    // ---- Entrance building below (ground lobby, stairs, lift, gallery).
+    this.entranceHall = new EntranceHall(
+      { scene, materials, assets, colliders },
+      entrance,
+      this.brandOpts,
+    );
+    this.ctx.lighting.addStaticCasters(
+      this.entranceHall.meshes.filter(
+        (m) =>
+          (m.metadata as { probe?: boolean } | null)?.probe === true &&
+          !m.material?.needAlphaBlending() &&
+          !isEmissive(m),
+      ),
+    );
     return part;
   }
 
@@ -1205,6 +1162,7 @@ export class Building {
     const min = layout.bounds.min;
     const max = layout.bounds.max;
     const center = new Vector3((min.x + max.x) / 2, 0, (min.z + max.z) / 2);
+    const fb = buildFactoryLayout(layout).bounds;
     if (!this.skyline)
       this.skyline = new Exterior(
         this.ctx.scene,
@@ -1230,6 +1188,8 @@ export class Building {
 
   dispose(): void {
     this.disposePart(this.lobby, "lobby");
+    this.entranceHall?.dispose();
+    this.entranceHall = null;
     this.disposePart(this.shell, "shell");
     this.disposePart(this.empty, "empty");
     this.disposePart(this.outer, "outer");
@@ -1293,30 +1253,4 @@ function controlLedContent(c: {
     ],
     ticker: null,
   };
-}
-
-/** Indicator band: per door "47 ▲", plus the floor name at the end. */
-function drawLiftBand(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  u: (z: number) => number,
-): void {
-  ctx.fillStyle = "#0B0C0E";
-  ctx.fillRect(0, 0, w, h);
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "center";
-  ELEVATOR_Z.forEach((z, i) => {
-    const x = u(z) * w;
-    ctx.fillStyle = "#F4E9DA";
-    ctx.font = `500 ${Math.round(h * 0.62)}px ${FONT_STACK}`;
-    ctx.fillText(String(FLOOR_NO - [0, 12, 3, 31][i]), x - h * 0.35, h * 0.54);
-    ctx.fillStyle = i % 2 ? "#E8875F" : "#9FD8A6";
-    ctx.font = `600 ${Math.round(h * 0.5)}px ${FONT_STACK}`;
-    ctx.fillText(i % 2 ? "▼" : "▲", x + h * 0.55, h * 0.52);
-  });
-  ctx.textAlign = "left";
-  ctx.fillStyle = "#8E8A84";
-  ctx.font = `500 ${Math.round(h * 0.42)}px ${FONT_STACK}`;
-  ctx.fillText(`${FLOOR_NO} · SKY LOBBY`, h * 0.4, h * 0.54);
 }

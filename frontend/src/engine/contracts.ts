@@ -668,7 +668,9 @@ export type InteractionKind =
   | "lineBoard"
   | "dock"
   | "trunk"
-  | "mainLine";
+  | "mainLine"
+  /** Entrance glass lift door (call + ride); `stop` = the floor it is on. */
+  | "lift";
 
 export interface InteractionTarget {
   kind: InteractionKind;
@@ -684,10 +686,18 @@ export interface InteractionTarget {
   lane?: number;
   /** GitHub URL (PR / run / release) for "Open on GitHub". */
   url?: string;
+  /** Lift: the stop this door is on (0 = ground, 1 = reception). */
+  stop?: number;
 }
 
 /** Read-only today; write actions (answer_permission, send_message) are added here later. */
-export type InteractionActionId = "inspect" | "enter" | "popup" | "github";
+export type InteractionActionId =
+  | "inspect"
+  | "enter"
+  | "popup"
+  | "github"
+  /** Ride the entrance lift to the other floor. */
+  | "ride";
 
 export interface InteractionAction {
   id: InteractionActionId;

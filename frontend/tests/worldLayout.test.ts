@@ -413,11 +413,16 @@ describe("P1.1 openings (elevated spine, stair wells, balconies)", () => {
         expect(hit(s.rect, doorZone)).toBe(false);
       }
     }
-    // The lobby well is inside the lobby, clear of the hall portal.
-    const lh = f.lobbyStair.rect;
-    expect(lh.z1).toBeLessThan(0);
-    expect(lh.z0).toBeGreaterThan(-LAYOUT.LOBBY_D);
-    expect(Math.abs(lh.x1)).toBeGreaterThan(LAYOUT.HALL_W / 2);
+    // The entrance stair wells are inside the reception, clear of the hall
+    // portal and the reception desk side of the room.
+    for (const st of f.entrance.stairs) {
+      const lh = st.rect;
+      expect(lh.z1).toBeLessThan(0);
+      expect(lh.z0).toBeGreaterThan(-LAYOUT.LOBBY_D);
+      expect(Math.min(Math.abs(lh.x0), Math.abs(lh.x1))).toBeGreaterThan(
+        LAYOUT.HALL_W / 2,
+      );
+    }
   });
 
   it("every room has a walk-through balcony door at its entry bay", () => {

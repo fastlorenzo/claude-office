@@ -320,6 +320,8 @@ const ptBR: Record<TranslationKey, string> = {
   "world.action.inspect": "Inspecionar",
   "world.action.enter": "Entrar na sessão",
   "world.action.popup": "Detalhes",
+  "world.action.liftUp": "Subir para a recepção",
+  "world.action.liftDown": "Descer para o saguão",
   "world.zone.lobby": "Saguão",
   "world.zone.hall": "Corredor",
   "world.zone.control": "Sala de controle",

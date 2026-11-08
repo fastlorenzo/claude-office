@@ -25,6 +25,17 @@ const ENTER: InteractionAction = {
   labelKey: "world.action.enter",
 };
 
+const RIDE_UP: InteractionAction = {
+  id: "ride",
+  key: "F",
+  labelKey: "world.action.liftUp",
+};
+const RIDE_DOWN: InteractionAction = {
+  id: "ride",
+  key: "F",
+  labelKey: "world.action.liftDown",
+};
+
 function factoryInspect(labelKey: string): InteractionAction {
   return { id: "inspect", key: "F", labelKey };
 }
@@ -59,6 +70,8 @@ export function actionsFor(target: InteractionTarget): InteractionAction[] {
     case "screen":
     case "door":
       return [INSPECT, ENTER];
+    case "lift":
+      return [target.stop === 1 ? RIDE_DOWN : RIDE_UP];
     case "lanePlate":
     case "workpiece":
     case "station":

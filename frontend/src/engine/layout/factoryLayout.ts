@@ -37,6 +37,40 @@ export const FACTORY = {
   GATE_X: 11,
   TRUNK_X: 8.5,
   SPINE_STAIR_EVERY: 4,
+  /** The envelope's south wall: one bay south of the hall start. */
+  SOUTH_Z: -4.8,
+} as const;
+
+/**
+ * Entrance building (pure numbers, |x| mirrored for the two stairs). The
+ * ground lobby (y = FLOOR_Y) projects south of the factory envelope under the
+ * reception; the reception (y = 0) reaches into the factory up to the hall
+ * start (the "gallery"). Two U-shaped feature stairs against the side walls
+ * (lower flight along the wall, landing at the façade, upper flight inboard
+ * arriving north at y = 0) and a glass lift beside the west stair.
+ */
+export const ENTRANCE = {
+  /** Lower flight |x| range (along the side wall). */
+  LOWER_X: [11.65, 13.05] as const,
+  /** Upper flight |x| range (inboard). */
+  UPPER_X: [10.15, 11.55] as const,
+  /** Landing (y = FLOOR_Y / 2) z range, against the south façade. */
+  LANDING_Z: [-11.85, -10.6] as const,
+  /** Both flights run between the landing and this z (stair foot / head). */
+  FLIGHT_Z1: -6.6,
+  /** Opening / footprint |x| range and z range. */
+  RECT_X: [10.1, 13.1] as const,
+  RECT_Z0: -11.9,
+  /** Glass lift shaft (west, beside the stair, against the back wall). */
+  LIFT: { x0: -9.7, x1: -7.9, z0: -6.9, z1: -5.1 },
+  /** Lift door clear width (centred on the shaft's south face). */
+  LIFT_DOOR_W: 1.0,
+  /** Factory door in the shared north wall (centre x, clear w × h). */
+  FACTORY_DOOR: { x: 0, width: 2.4, height: 3.0 },
+  /** Glazed entrance doors in the south façade (centre x, clear width). */
+  DOORS: { x: 0, width: 3.2 },
+  /** Shared wall thickness (the factory's south wall). */
+  WALL_T: 0.3,
 } as const;
 
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
@@ -101,6 +135,51 @@ export interface EmptyCellLayout {
   rect: Rect;
 }
 
+export interface EntranceStair extends StairLayout {
+  side: RoomSide;
+  /** Lower flight: floor (foot at FLIGHT_Z1) up to the landing. */
+  lower: Rect;
+  /** Upper flight: landing up to y = 0 (head at FLIGHT_Z1). */
+  upper: Rect;
+  landing: Rect;
+  landingY: number;
+}
+
+export interface LiftStop {
+  /** 0 = ground (G), 1 = reception (1). */
+  level: 0 | 1;
+  y: number;
+  /** Where a rider stands on arrival (in front of the door). */
+  front: Vec3;
+  /** Facing away from the door. */
+  yaw: number;
+}
+
+export interface LiftLayout {
+  id: string;
+  rect: Rect;
+  /** Door centre on the shaft's south face. */
+  door: { x: number; z: number; width: number };
+  stops: [LiftStop, LiftStop];
+}
+
+export interface EntranceLayout {
+  /** Ground lobby footprint (outside the factory envelope). */
+  rect: Rect;
+  floorY: number;
+  /** Reception extension at y = 0 inside the factory volume. */
+  gallery: Rect;
+  /** Glazed entrance doors on the south façade (centre + clear width). */
+  doors: { x: number; z: number; width: number };
+  /** Door into the factory in the shared north wall. */
+  factoryDoor: { x: number; z: number; width: number; height: number };
+  stairs: EntranceStair[];
+  lift: LiftLayout;
+  /** New-visitor spawn just inside the entrance doors, facing in. */
+  spawn: Vec3;
+  spawnYaw: number;
+}
+
 export interface FactoryLayout {
   floorY: number;
   bounds: { min: Vec3; max: Vec3 };
@@ -109,8 +188,11 @@ export interface FactoryLayout {
   mainLine: { x: number; z0: number; z1: number; qc: number };
   dock: Rect;
   spineStairs: StairLayout[];
+  /** The west entrance stair (alias of `entrance.stairs[0]`). */
   lobbyStair: StairLayout;
+  /** The entrance lift (G ↔ 1); interaction-driven, see EntranceHall. */
   liftSpots: { id: string; rect: Rect; top: Vec3; bottom: Vec3 }[];
+  entrance: EntranceLayout;
 }
 
 export interface FactoryLayoutOptions {
@@ -123,7 +205,9 @@ export type FactoryZone =
   | { kind: "cell"; projectId: string }
   | { kind: "dock" }
   | { kind: "stair"; id: string; projectId?: string }
-  | { kind: "balcony"; projectId: string };
+  | { kind: "balcony"; projectId: string }
+  /** Ground-floor entrance lobby (outside the envelope, under the reception). */
+  | { kind: "entrance" };
 
 export type Zone3 = Zone | FactoryZone;
 
@@ -142,7 +226,7 @@ export function buildFactoryLayout(
   const hallLen = building.hall.length;
   const controlEnd =
     building.controlRoom.origin.z + building.controlRoom.size.z / 2;
-  const zMin = building.bounds.min.z;
+  const zMin = Math.max(building.bounds.min.z, FACTORY.SOUTH_Z);
 
   const cells: CellLayout[] = building.projects.map((room) => {
     const s = sgn(room.slot.side);
@@ -223,12 +307,8 @@ export function buildFactoryLayout(
     });
   }
 
-  const lobbyStair: StairLayout = {
-    id: "lobby",
-    rect: rectOf(-8, -6.8, -9, -3),
-    top: v3(-7.4, 0, -9.6),
-    bottom: v3(-7.4, FLOOR_Y, -2),
-  };
+  const entrance = buildEntrance(building);
+  const lift = entrance.lift;
 
   return {
     floorY: FLOOR_Y,
@@ -241,22 +321,76 @@ export function buildFactoryLayout(
     mainLine: { x: 0, z0: 0, z1: dock.z0, qc: dock.z0 - 3 },
     dock,
     spineStairs,
-    lobbyStair,
+    lobbyStair: entrance.stairs[0],
     liftSpots: [
       {
-        id: "lift:0",
-        rect: rectOf(7, 9, -8, -6),
-        top: v3(8, 0, -9),
-        bottom: v3(8, FLOOR_Y, -5),
+        id: lift.id,
+        rect: lift.rect,
+        top: lift.stops[1].front,
+        bottom: lift.stops[0].front,
       },
     ],
+    entrance,
+  };
+}
+
+/** Entrance building data (ground lobby, stairs, lift, doors) for a layout. */
+export function buildEntrance(building: BuildingLayout): EntranceLayout {
+  const E = ENTRANCE;
+  const halfW = building.lobby.size.x / 2;
+  const zFront = building.bounds.min.z;
+  const zWall = FACTORY.SOUTH_Z;
+  const ly = FLOOR_Y / 2;
+  const stairs: EntranceStair[] = (["west", "east"] as RoomSide[]).map(
+    (side) => {
+      const s = sgn(side);
+      const xr = (r: readonly [number, number], z0: number, z1: number) =>
+        rectOf(s * r[0], s * r[1], z0, z1);
+      const [lz0, lz1] = E.LANDING_Z;
+      const lowerMid = s * ((E.LOWER_X[0] + E.LOWER_X[1]) / 2);
+      const upperMid = s * ((E.UPPER_X[0] + E.UPPER_X[1]) / 2);
+      return {
+        id: `entrance:${side}`,
+        side,
+        rect: xr(E.RECT_X, E.RECT_Z0, E.FLIGHT_Z1),
+        top: v3(upperMid, 0, E.FLIGHT_Z1 + 0.7),
+        bottom: v3(lowerMid, FLOOR_Y, E.FLIGHT_Z1 + 0.7),
+        lower: xr(E.LOWER_X, lz1, E.FLIGHT_Z1),
+        upper: xr(E.UPPER_X, lz1, E.FLIGHT_Z1),
+        landing: rectOf(s * E.UPPER_X[0], s * E.LOWER_X[1], lz0, lz1),
+        landingY: ly,
+      };
+    },
+  );
+  const L = E.LIFT;
+  const doorX = (L.x0 + L.x1) / 2;
+  const front = (y: number) => v3(doorX, y, L.z0 - 0.9);
+  const lift: LiftLayout = {
+    id: "lift:entrance",
+    rect: { ...L },
+    door: { x: doorX, z: L.z0, width: E.LIFT_DOOR_W },
+    stops: [
+      { level: 0, y: FLOOR_Y, front: front(FLOOR_Y), yaw: Math.PI },
+      { level: 1, y: 0, front: front(0), yaw: Math.PI },
+    ],
+  };
+  return {
+    rect: rectOf(-halfW, halfW, zFront, zWall),
+    floorY: FLOOR_Y,
+    gallery: rectOf(-halfW, halfW, zWall, 0),
+    doors: { x: E.DOORS.x, z: zFront, width: E.DOORS.width },
+    factoryDoor: { ...E.FACTORY_DOOR, z: zWall },
+    stairs,
+    lift,
+    spawn: v3(E.DOORS.x, FLOOR_Y, zFront + 1.3),
+    spawnYaw: 0,
   };
 }
 
 const inRect = (r: Rect, p: { x: number; z: number }) =>
   p.x >= r.x0 && p.x <= r.x1 && p.z >= r.z0 && p.z <= r.z1;
 
-/** Walkable floor-level stairs of a layout (cell, spine, lobby, lift). */
+/** Walkable floor-level stairs of a layout (cell, spine, entrance, lift). */
 export function allStairs(
   f: FactoryLayout,
 ): { id: string; rect: Rect; projectId?: string }[] {
@@ -267,7 +401,7 @@ export function allStairs(
       projectId: c.projectId,
     })),
     ...f.spineStairs.map((s) => ({ id: s.id, rect: s.rect })),
-    { id: f.lobbyStair.id, rect: f.lobbyStair.rect },
+    ...f.entrance.stairs.map((s) => ({ id: s.id, rect: s.rect })),
     ...f.liftSpots.map((l) => ({ id: l.id, rect: l.rect })),
   ];
 }
@@ -279,6 +413,7 @@ export function zoneAt3(
   p: { x: number; y: number; z: number },
 ): Zone3 {
   if (p.y < FACTORY_Y) {
+    if (inRect(layout.entrance.rect, p)) return { kind: "entrance" };
     const b = layout.bounds;
     if (p.x < b.min.x || p.x > b.max.x || p.z < b.min.z || p.z > b.max.z)
       return { kind: "outside" };

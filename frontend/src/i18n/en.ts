@@ -316,6 +316,8 @@ const en = {
   "world.action.inspect": "Inspect",
   "world.action.enter": "Enter session",
   "world.action.popup": "Details",
+  "world.action.liftUp": "Ride up to Reception",
+  "world.action.liftDown": "Ride down to the lobby",
   "world.zone.lobby": "Lobby",
   "world.zone.hall": "Hall",
   "world.zone.control": "Control room",

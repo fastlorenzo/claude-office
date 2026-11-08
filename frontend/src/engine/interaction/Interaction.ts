@@ -61,6 +61,7 @@ function sameTarget(
     a.kind === b.kind &&
     a.sessionId === b.sessionId &&
     (a.agentId ?? "") === (b.agentId ?? "") &&
+    (a.stop ?? -1) === (b.stop ?? -1) &&
     sameFactoryIds(a, b)
   );
 }

@@ -124,7 +124,6 @@ describe.each(cases)("factoryLayout: %s", (_name, building) => {
         s,
         cell: undefined as CellLayout | undefined,
       })),
-      { s: f.lobbyStair, cell: undefined },
     ];
     const all = allStairs(f).map((s) => s.rect);
     for (const { s, cell } of stairs) {
@@ -165,6 +164,7 @@ describe.each(cases)("factoryLayout: %s", (_name, building) => {
       "dock",
       "stair",
       "balcony",
+      "entrance",
       "lobby",
       "hall",
       "control",
@@ -180,15 +180,22 @@ describe.each(cases)("factoryLayout: %s", (_name, building) => {
           const again = zoneAt3(f, building, { x, y, z });
           expect(again).toEqual(zone);
           if (y < -1.5) {
-            expect(["factory", "cell", "dock", "stair", "outside"]).toContain(
-              zone.kind,
-            );
+            expect([
+              "factory",
+              "cell",
+              "dock",
+              "stair",
+              "entrance",
+              "outside",
+            ]).toContain(zone.kind);
             // at most one cell rect contains the point
             const hits = f.cells.filter((c) => inRect(c.rect, { x, z })).length;
             expect(hits).toBeLessThanOrEqual(1);
             if (zone.kind === "cell") expect(hits).toBe(1);
           } else {
-            expect(["factory", "cell", "dock"]).not.toContain(zone.kind);
+            expect(["factory", "cell", "dock", "entrance"]).not.toContain(
+              zone.kind,
+            );
           }
           n++;
         }
@@ -229,6 +236,91 @@ describe.each(cases)("factoryLayout: %s", (_name, building) => {
     });
     expect(zoneAt3(f, building, { x: 0, y: 0, z: -3 })).toEqual({
       kind: "lobby",
+    });
+  });
+
+  it("entrance: stairs, lift and doors sit in the ground lobby", () => {
+    const e = f.entrance;
+    // Outside the factory envelope, directly under the reception.
+    expect(e.rect.z1).toBe(f.bounds.min.z);
+    expect(e.rect.z0).toBe(building.bounds.min.z);
+    expect(e.rect.x1 - e.rect.x0).toBeCloseTo(building.lobby.size.x, 6);
+    expect(e.gallery.z0).toBe(e.rect.z1);
+    expect(e.gallery.z1).toBe(0);
+    // Two mirrored U-stairs inside the footprint, clear of each other / the lift.
+    expect(e.stairs.map((s) => s.side)).toEqual(["west", "east"]);
+    for (const s of e.stairs) {
+      for (const r of [s.rect, s.lower, s.upper, s.landing]) {
+        expect(inRect(e.rect, { x: r.x0, z: r.z0 })).toBe(true);
+        expect(inRect(e.rect, { x: r.x1, z: r.z1 })).toBe(true);
+      }
+      expect(overlap(s.rect, e.lift.rect)).toBe(false);
+      expect(s.top.y).toBe(0);
+      expect(s.bottom.y).toBe(-6);
+      expect(s.landingY).toBe(-3);
+      // Foot and head clear of the stair itself, inside the lobby, before the wall.
+      expect(inRect(s.rect, s.bottom)).toBe(false);
+      expect(inRect(e.rect, s.bottom)).toBe(true);
+      expect(s.bottom.z).toBeLessThan(e.factoryDoor.z - 0.6);
+      // Flights: walkable slope, the upper one arrives inside the opening edge.
+      const run = s.lower.z1 - s.lower.z0;
+      expect((Math.atan2(3, run) * 180) / Math.PI).toBeLessThan(45);
+      expect(s.upper.z1).toBe(s.rect.z1);
+      expect(s.landing.z1).toBe(s.lower.z0);
+    }
+    expect(e.stairs[0].rect.x0).toBeCloseTo(-e.stairs[1].rect.x1, 9);
+    expect(overlap(e.stairs[0].rect, e.stairs[1].rect)).toBe(false);
+    // Factory door on the shared north wall, centred between the stairs.
+    expect(e.factoryDoor.z).toBe(e.rect.z1);
+    expect(e.factoryDoor.x - e.factoryDoor.width / 2).toBeGreaterThan(
+      e.stairs[0].rect.x1,
+    );
+    expect(e.factoryDoor.x + e.factoryDoor.width / 2).toBeLessThan(
+      e.stairs[1].rect.x0,
+    );
+    // Entrance doors on the south façade; spawn just inside, facing in.
+    expect(e.doors.z).toBe(e.rect.z0);
+    expect(inRect(e.rect, e.spawn)).toBe(true);
+    expect(e.spawn.y).toBe(-6);
+    expect(e.spawnYaw).toBe(0);
+    // Lift: two stops (G, 1), arrival spots in front of the door, on floor.
+    const L = e.lift;
+    expect(L.stops.map((s) => [s.level, s.y])).toEqual([
+      [0, -6],
+      [1, 0],
+    ]);
+    expect(inRect(e.rect, { x: L.rect.x0, z: L.rect.z0 })).toBe(true);
+    expect(inRect(e.rect, { x: L.rect.x1, z: L.rect.z1 })).toBe(true);
+    for (const st of L.stops) {
+      expect(inRect(L.rect, st.front)).toBe(false);
+      expect(inRect(e.rect, st.front)).toBe(true);
+      for (const s of e.stairs) expect(inRect(s.rect, st.front)).toBe(false);
+    }
+    expect(L.door.z).toBe(L.rect.z0);
+    expect(f.liftSpots[0].rect).toEqual(L.rect);
+    expect(f.lobbyStair).toBe(e.stairs[0]);
+  });
+
+  it("zoneAt3: the ground lobby is the entrance, the reception the lobby", () => {
+    const e = f.entrance;
+    for (const p of [
+      e.spawn,
+      { ...e.stairs[0].bottom },
+      { x: 0, y: -6, z: (e.rect.z0 + e.rect.z1) / 2 },
+    ])
+      expect(zoneAt3(f, building, { ...p, y: -6 + 1.65 })).toEqual({
+        kind: "entrance",
+      });
+    expect(zoneAt3(f, building, { x: 0, y: 1.65, z: -9 })).toEqual({
+      kind: "lobby",
+    });
+    // Under the gallery: factory floor.
+    expect(zoneAt3(f, building, { x: 5, y: -4.35, z: -2 })).toEqual({
+      kind: "factory",
+    });
+    // South of the entrance façade: outside.
+    expect(zoneAt3(f, building, { x: 0, y: -4.35, z: e.rect.z0 - 2 })).toEqual({
+      kind: "outside",
     });
   });
 

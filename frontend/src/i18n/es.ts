@@ -320,6 +320,8 @@ const es: Record<TranslationKey, string> = {
   "world.action.inspect": "Inspeccionar",
   "world.action.enter": "Entrar en la sesión",
   "world.action.popup": "Detalles",
+  "world.action.liftUp": "Subir a la recepción",
+  "world.action.liftDown": "Bajar al vestíbulo",
   "world.zone.lobby": "Vestíbulo",
   "world.zone.hall": "Pasillo",
   "world.zone.control": "Sala de control",

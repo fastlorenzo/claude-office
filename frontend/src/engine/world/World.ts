@@ -400,9 +400,11 @@ class World implements IWorld {
             : this.player!.position.add(new Vector3(0, PLAYER.eyeHeight, 0)),
       );
       // Depth of field follows the inspect action; ends when input returns.
-      this.events.on("action", ({ action }) => {
+      this.events.on("action", ({ action, target }) => {
         if (action === "inspect")
           this.gfx.beginInspect(this.interaction?.target?.distance ?? 2);
+        if (action === "ride" && target.kind === "lift")
+          this.building?.entrance?.callLift(target.stop === 1 ? 1 : 0);
       });
 
       await Promise.all([
@@ -424,6 +426,15 @@ class World implements IWorld {
       });
       this.building.build(this.layout);
       if (this.branding) this.building.setBranding(this.branding);
+      // New visitors start at the ground-floor entrance doors once its floor
+      // exists (returning players keep their remembered pose).
+      if (this.building.entrance) {
+        const es = this.factoryLayout.entrance;
+        this.player.setSpawn({
+          feet: new Vector3(es.spawn.x, es.spawn.y + 0.05, es.spawn.z),
+          yaw: es.spawnYaw,
+        });
+      }
       this.factory = new Factory({
         scene: this.scene,
         materials: this.materials,
@@ -769,6 +780,9 @@ class World implements IWorld {
     for (const r of this.rooms.values()) r.update(dt, eye);
     for (const r of this.projectRooms.values()) r.update(dt, eye);
     this.building?.update(dt); // LED panel tickers (art)
+    // Entrance: sliding doors + the lift (moves the rider between floors).
+    const ride = this.building?.entrance?.update(dt, this.player.position);
+    if (ride) this.player.teleport(ride.position, ride.yaw);
     const flying = this.player.flying;
     // Fly camera: the view, not the frozen body, drives zone / lights / pose.
     const focus = flying ? this.player.flyPosition : this.player.position;

@@ -11,7 +11,9 @@
  *   floor zones    : (factory / cell / dock / stair) cone + distance; the cell
  *                    under the eye is always `full`
  *   tower (control): cone, IMPOSTOR_M 35, MAX_M 70
- *   lobby / outside: cone + distance (outside) or hidden (lobby)
+ *   lobby (reception): cells `impostor` in the cone, main line by cone
+ *   entrance (ground lobby): cone + distance (through the factory door)
+ *   outside        : cone + distance
  */
 
 import { LAYOUT, type BuildingLayout } from "../contracts";
@@ -154,8 +156,21 @@ export function computeCellVisibility(
       return out("full", dockD <= FACTORY_MAX_M ? "impostor" : "hidden");
     }
     case "lobby":
-      for (const c of layout.cells) set(c, "hidden");
-      return out("hidden", "hidden");
+      // The reception reaches into the factory (glazed gallery sides + the
+      // glass strip over the main line): cells in view as impostors.
+      for (const c of layout.cells)
+        set(
+          c,
+          inCone(e, yaw, halfFov, c.rect, FACTORY_IMPOSTOR_M)
+            ? "impostor"
+            : "hidden",
+        );
+      return out(cone(mainRect), "hidden");
+    case "entrance": {
+      // Ground lobby: the factory shows through the open door (cone).
+      for (const c of layout.cells) set(c, cone(c.rect));
+      return out(cone(mainRect), cone(layout.dock));
+    }
     case "control": {
       // The tower: cone, IMPOSTOR 35 m.
       for (const c of layout.cells) set(c, cone(c.rect));
