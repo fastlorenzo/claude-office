@@ -741,8 +741,10 @@ export class Lighting {
       key = Math.max(key, 0.8);
     }
     if (noFixtures) {
-      fill = Math.max(fill, 0.75);
-      key = Math.max(key, 0.9);
+      // 0.75 / 0.9 left the low tier 17 % brighter than high at the spawn
+      // (perf-gate shots, WS5); the WS5 target is within 15 %.
+      fill = Math.max(fill, 0.62);
+      key = Math.max(key, 0.82);
     }
     this.fill.intensity = fill;
     this.key.intensity = key;
