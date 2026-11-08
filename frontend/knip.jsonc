@@ -1,0 +1,26 @@
+{
+  // Dead-code gate (WS8 / review-plan C2). Scope: unused exports and types
+  // under src/engine and src/components/world. Tests count as consumers.
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["tests/**/*.{ts,tsx}", "scripts/*.ts"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": ["src/engine/babylon.ts"],
+  "ignoreExportsUsedInFile": true,
+  "include": ["exports", "types"],
+  "ignoreIssues": {
+    // Outside the gate's scope (legacy PixiJS office, stores, generated types).
+    "src/components/{command,debug,game,overlay,settings}/**": [
+      "exports",
+      "types",
+    ],
+    "src/{hooks,machines,stores,systems,types,utils,constants,app}/**": [
+      "exports",
+      "types",
+    ],
+    // Backend schema mirror: kept whole on purpose.
+    "src/engine/contracts.ts": ["types"],
+    // In flight in another workstream (WS4 owns Workpieces); remove this line
+    // once its zero-importer exports are gone.
+    "src/engine/world/factory/Workpieces.ts": ["exports", "types"],
+  },
+}
