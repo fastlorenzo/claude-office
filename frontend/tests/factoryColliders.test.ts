@@ -29,6 +29,7 @@ import {
   DOCK,
   DOCK_STAIR,
 } from "@/engine/world/factory/Dock";
+import { dressingBoxes } from "@/engine/world/dressing";
 import { FactoryHall } from "@/engine/world/factory/FactoryHall";
 import {
   FACTORY_EQUIPMENT_GROUP,
@@ -105,6 +106,14 @@ function floorColliders(b: BuildingLayout) {
     fl,
     stations,
   );
+  // WS6 set dressing: its solid props must not strand anything either.
+  for (const d of dressingBoxes(fl, b))
+    rec.sink.addBox(
+      "dressing",
+      new Vector3(d.x, d.y, d.z),
+      new Vector3(d.sx, d.sy, d.sz),
+      d.yaw,
+    );
   hall.dispose();
   return { fl, boxes: rec.boxes, equipment: rec.boxes.slice(shell), stations };
 }

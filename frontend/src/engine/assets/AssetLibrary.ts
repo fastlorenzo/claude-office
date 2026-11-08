@@ -117,6 +117,19 @@ const PROCEDURAL_COLLIDERS: Record<
   floorLamp: "none",
   coatHooks: "none",
   sideTable: "cylinder",
+  // WS6 dressing: colliders come from the dressing plan (layout aware).
+  fireExtinguisher: "none",
+  exitSign: "none",
+  cableTray: "none",
+  pallet: "none",
+  palletJack: "none",
+  toolTrolley: "none",
+  bollard: "none",
+  stripCurtain: "none",
+  binIndustrial: "none",
+  visitorChair: "none",
+  entranceMat: "none",
+  dockLeveller: "none",
 };
 
 /**
@@ -137,6 +150,9 @@ const INSTANCE_JITTER: Partial<Record<PropRole, number>> = {
   planter: 0.06,
   planterTall: 0.06,
   coffeeCart: 0.04,
+  pallet: 0.08,
+  visitorChair: 0.04,
+  binIndustrial: 0.06,
 };
 
 function jitterColor(id: number, amp: number, out: Float32Array, o: number) {
@@ -204,6 +220,13 @@ const BLOB_ROLES: ReadonlySet<PropRole> = new Set<PropRole>([
   "planterTall",
   "floorLamp",
   "sideTable",
+  "fireExtinguisher",
+  "pallet",
+  "palletJack",
+  "toolTrolley",
+  "bollard",
+  "binIndustrial",
+  "visitorChair",
 ]);
 
 export class AssetLibrary {

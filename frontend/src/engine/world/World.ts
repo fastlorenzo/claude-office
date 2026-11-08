@@ -92,6 +92,7 @@ import { StaticOccluders } from "@/engine/screens/labelOcclusion";
 import { ScreenHub } from "@/engine/screens/ScreenHub";
 import { Emitter } from "@/engine/util/Emitter";
 import { Building } from "@/engine/world/Building";
+import { Dressing } from "@/engine/world/dressing";
 import { Factory } from "@/engine/world/factory/Factory";
 import { FactoryLines } from "@/engine/world/factory/FactoryLines";
 import { cellStairFoot } from "@/engine/world/factory/FactoryHall";
@@ -498,6 +499,9 @@ class World implements IWorld {
         fx: this.fx,
       });
       this.building.build(this.layout);
+      new Dressing({ assets: this.assets, colliders: this.colliders }, (cb) =>
+        this.events.on("layout", cb),
+      );
       if (this.branding) this.building.setBranding(this.branding);
       // New visitors start at the ground-floor entrance doors once its floor
       // exists (returning players keep their remembered pose).

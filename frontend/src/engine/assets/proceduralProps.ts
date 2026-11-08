@@ -43,7 +43,19 @@ export type ProceduralRole =
   | "planterTall"
   | "floorLamp"
   | "coatHooks"
-  | "sideTable";
+  | "sideTable"
+  | "fireExtinguisher"
+  | "exitSign"
+  | "cableTray"
+  | "pallet"
+  | "palletJack"
+  | "toolTrolley"
+  | "bollard"
+  | "stripCurtain"
+  | "binIndustrial"
+  | "visitorChair"
+  | "entranceMat"
+  | "dockLeveller";
 export type PropRole = ModelRole | ProceduralRole;
 export const PROCEDURAL_ROLES: readonly ProceduralRole[] = [
   "workDesk",
@@ -61,6 +73,18 @@ export const PROCEDURAL_ROLES: readonly ProceduralRole[] = [
   "floorLamp",
   "coatHooks",
   "sideTable",
+  "fireExtinguisher",
+  "exitSign",
+  "cableTray",
+  "pallet",
+  "palletJack",
+  "toolTrolley",
+  "bollard",
+  "stripCurtain",
+  "binIndustrial",
+  "visitorChair",
+  "entranceMat",
+  "dockLeveller",
 ];
 
 const BOOK_COLORS = [
@@ -733,6 +757,320 @@ const wetFloorSign: Builder = (b) => {
   b.paint = null;
 };
 
+// ---------------------------------------------------------------------------
+// WS6 set dressing: the props real offices, lobbies, plants and loading docks
+// have. All vertex-painted on the white `paint` base (one draw per role, plus
+// `paintGloss` for lacquered parts), model frame as above. Footprints in
+// DRESSING_DIMS (bounding box, centred on x/z, base on y = 0): the layout
+// modules place and collide with them.
+// ---------------------------------------------------------------------------
+
+/** Bounding boxes (m) of the dressing props: w along x, d along z, h up. */
+export const DRESSING_DIMS = {
+  fireExtinguisher: { w: 0.34, d: 0.3, h: 1.62 },
+  exitSign: { w: 0.42, d: 0.06, h: 0.55 },
+  cableTray: { w: 2.4, d: 0.72, h: 0.09 },
+  pallet: { w: 1.2, d: 0.8, h: 1.23 },
+  palletJack: { w: 0.56, d: 1.6, h: 1.12 },
+  toolTrolley: { w: 0.9, d: 0.51, h: 0.95 },
+  bollard: { w: 0.26, d: 0.26, h: 0.9 },
+  stripCurtain: { w: 3.4, d: 0.1, h: 3.35 },
+  binIndustrial: { w: 0.62, d: 0.74, h: 1.07 },
+  visitorChair: { w: 0.5, d: 0.56, h: 0.9 },
+  entranceMat: { w: 1, d: 1, h: 0.012 },
+  dockLeveller: { w: 2, d: 2, h: 0.022 },
+} as const;
+
+/**
+ * Free-standing fire point: black base plate, white backboard carrying a red
+ * "fire" sign, one lacquered extinguisher strapped to it. Board at -Z, the
+ * extinguisher on the +Z side (like a chair's backrest).
+ */
+const fireExtinguisher: Builder = (b) => {
+  b.paint = paintOf("#2B2D31");
+  b.rbox("paint", v3(0, 0.01, 0), v3(0.34, 0.02, 0.3), { r: 0.004 });
+  b.paint = paintOf("#E9E6E1");
+  b.rbox("paint", v3(0, 0.82, -0.14), v3(0.3, 1.6, 0.02), { r: 0.004 });
+  b.paint = paintOf("#C0392B");
+  b.box("paint", v3(0, 1.47, -0.128), v3(0.3, 0.3, 0.006));
+  b.paint = paintOf("#F4F1EA");
+  b.box("paint", v3(0, 1.47, -0.124), v3(0.07, 0.17, 0.004));
+  b.box("paint", v3(0.0, 1.43, -0.124), v3(0.17, 0.05, 0.004));
+  b.paint = paintOf("#2B2D31");
+  b.cylinder("paint", v3(0, 0.32, -0.04), 0.03, 0.15, 0.15, 18);
+  b.box("paint", v3(0, 0.32, -0.095), v3(0.05, 0.03, 0.05));
+  b.rbox("paint", v3(0, 0.505, -0.04), v3(0.07, 0.05, 0.1), { r: 0.01 });
+  b.rbox("paint", v3(0, 0.545, -0.0), v3(0.05, 0.012, 0.13), { r: 0.004 });
+  b.cylinder("paint", v3(0.05, 0.4, 0.03), 0.28, 0.012, 0.012, 8, {
+    roll: 0.5,
+  });
+  b.paint = paintOf("#C8261B");
+  b.cylinder("paintGloss", v3(0, 0.25, -0.04), 0.46, 0.14, 0.14, 24);
+  b.cylinder("paintGloss", v3(0, 0.49, -0.04), 0.06, 0.07, 0.12, 18);
+  b.paint = null;
+};
+
+/** Hung running-man exit sign (green panel, both faces, two hanger rods). */
+const exitSign: Builder = (b) => {
+  b.paint = paintOf("#1F8F4E");
+  b.rbox("paint", v3(0, 0.3, 0), v3(0.42, 0.2, 0.05), { r: 0.006 });
+  b.paint = paintOf("#2B2D31");
+  b.rbox("paint", v3(0, 0.745, 0), v3(0.3, 0.012, 0.05), { r: 0.003 });
+  for (const sx of [-1, 1])
+    b.cylinder("paint", v3(sx * 0.13, 0.575, 0), 0.35, 0.012, 0.012, 8);
+  b.paint = paintOf("#F4F6F2");
+  for (const sz of [-1, 1]) {
+    const z = sz * 0.0265;
+    // Running figure (left) and arrow (right), kept as simple blocks.
+    b.cylinder("paint", v3(-0.12, 0.35, z), 0.004, 0.03, 0.03, 12, {
+      pitch: Math.PI / 2,
+    });
+    b.box("paint", v3(-0.115, 0.3, z), v3(0.03, 0.07, 0.004), { roll: 0.25 });
+    b.box("paint", v3(-0.095, 0.25, z), v3(0.02, 0.05, 0.004), { roll: -0.5 });
+    b.box("paint", v3(-0.135, 0.25, z), v3(0.02, 0.05, 0.004), { roll: 0.5 });
+    b.box("paint", v3(-0.07, 0.31, z), v3(0.06, 0.016, 0.004), { roll: 0.4 });
+    b.box("paint", v3(0.1, 0.3, z), v3(0.17, 0.035, 0.004));
+    b.box("paint", v3(0.165, 0.318, z), v3(0.05, 0.016, 0.004), { roll: -0.6 });
+    b.box("paint", v3(0.165, 0.282, z), v3(0.05, 0.016, 0.004), { roll: 0.6 });
+  }
+  b.paint = null;
+};
+
+/**
+ * 300 mm galvanised ladder cable tray, 2.4 m long along x, with the cable
+ * bundle in it. Wall-mounted: the three arms reach the wall at +Z (z = 0.36).
+ */
+const cableTray: Builder = (b) => {
+  b.paint = paintOf("#A6ABB1");
+  for (const z of [-0.355, -0.065])
+    b.box("paint", v3(0, 0.055, z), v3(2.4, 0.06, 0.012));
+  for (let i = 0; i < 8; i++)
+    b.box("paint", v3(-1.05 + i * 0.3, 0.027, -0.21), v3(0.025, 0.012, 0.3));
+  for (const x of [-0.85, 0, 0.85]) {
+    b.box("paint", v3(x, 0.0125, 0.15), v3(0.04, 0.025, 0.42));
+    b.box("paint", v3(x, 0.03, 0.345), v3(0.04, 0.06, 0.02));
+  }
+  const cables: [number, string][] = [
+    [-0.29, "#1E1F22"],
+    [-0.23, "#1E1F22"],
+    [-0.17, "#2A5D9F"],
+    [-0.11, "#C8741F"],
+  ];
+  for (const [z, c] of cables) {
+    b.paint = paintOf(c);
+    b.cylinder("paint", v3(0, 0.07, z), 2.4, 0.04, 0.04, 8, {
+      roll: Math.PI / 2,
+    });
+  }
+  b.paint = null;
+};
+
+/** Euro pallet (wood) carrying three layers of kraft cartons. */
+const pallet: Builder = (b) => {
+  const wood = ["#B9925E", "#AD8651", "#C29C68"];
+  const deckY = 0.122;
+  for (let i = 0; i < 5; i++) {
+    b.paint = paintOf(wood[i % 3]);
+    b.box(
+      "paint",
+      v3(0, deckY + 0.011, -0.34 + i * 0.17),
+      v3(1.2, 0.022, 0.12),
+    );
+  }
+  for (const [k, z] of [-0.34, 0, 0.34].entries()) {
+    b.paint = paintOf(wood[k]);
+    b.box("paint", v3(0, 0.011, z), v3(1.2, 0.022, 0.1));
+    for (const x of [-0.55, 0, 0.55])
+      b.box("paint", v3(x, 0.066, z), v3(0.1, 0.088, 0.1));
+  }
+  const kraft = ["#C9A66B", "#BF9C60", "#D2B27A", "#C4A064"];
+  for (let layer = 0; layer < 3; layer++)
+    for (let ix = 0; ix < 2; ix++)
+      for (let iz = 0; iz < 2; iz++) {
+        b.paint = paintOf(kraft[(layer * 3 + ix * 2 + iz) % 4]);
+        b.rbox(
+          "paint",
+          v3(
+            -0.295 + ix * 0.59,
+            0.144 + 0.18 + layer * 0.36,
+            -0.195 + iz * 0.39,
+          ),
+          v3(0.58, 0.355, 0.38),
+          { r: 0.008 },
+        );
+      }
+  b.paint = paintOf("#E9E6E1");
+  b.box("paint", v3(-0.3, 1.2275, -0.2), v3(0.22, 0.003, 0.14));
+  b.paint = paintOf("#1B1C1E");
+  for (const y of [0.4, 0.84]) b.box("paint", v3(0, y, 0), v3(1.2, 0.014, 0.8));
+  b.paint = null;
+};
+
+/** Hand pallet truck: forks along +z, pump head, tilted tiller with grip. */
+const palletJack: Builder = (b) => {
+  b.paint = paintOf("#B6402A");
+  for (const sx of [-1, 1]) {
+    b.rbox("paint", v3(sx * 0.2, 0.045, 0.225), v3(0.16, 0.07, 1.15), {
+      r: 0.012,
+    });
+    b.rbox("paint", v3(sx * 0.2, 0.04, 0.79), v3(0.12, 0.05, 0.04), {
+      r: 0.015,
+    });
+  }
+  b.rbox("paint", v3(0, 0.17, -0.34), v3(0.5, 0.22, 0.24), {
+    r: 0.025,
+    seg: 2,
+  });
+  b.rbox("paint", v3(0, 0.07, -0.3), v3(0.46, 0.06, 0.42), { r: 0.01 });
+  b.paint = paintOf("#1B1C1E");
+  b.cylinder("paint", v3(0, 0.62, -0.58), 0.9, 0.032, 0.032, 10, {
+    pitch: -0.49,
+  });
+  b.cylinder("paint", v3(0, 1.075, -0.79), 0.26, 0.034, 0.034, 10, {
+    roll: Math.PI / 2,
+  });
+  for (const sx of [-1, 1]) {
+    b.cylinder("paint", v3(sx * 0.2, 0.04, 0.745), 0.05, 0.08, 0.08, 14, {
+      roll: Math.PI / 2,
+    });
+    b.cylinder("paint", v3(sx * 0.23, 0.1, -0.34), 0.05, 0.2, 0.2, 16, {
+      roll: Math.PI / 2,
+    });
+  }
+  b.paint = paintOf("#E8B80C");
+  b.box("paint", v3(0, 0.292, -0.34), v3(0.18, 0.012, 0.12));
+  b.paint = null;
+};
+
+/** Workshop tool trolley: four drawers, lipped steel top, push handle. */
+const toolTrolley: Builder = (b) => {
+  b.paint = paintOf("#B83A2E");
+  b.rbox("paint", v3(0, 0.48, 0), v3(0.82, 0.72, 0.46), { r: 0.012 });
+  b.paint = paintOf("#8A9097");
+  b.rbox("paint", v3(0, 0.855, 0), v3(0.9, 0.03, 0.5), { r: 0.006 });
+  b.paint = paintOf("#2B2D31");
+  for (const y of [0.25, 0.4, 0.55, 0.7])
+    b.box("paint", v3(0, y, 0.2315), v3(0.78, 0.006, 0.004));
+  b.paint = paintOf("#C9CDD2");
+  for (const y of [0.18, 0.33, 0.48, 0.63])
+    b.rbox("paint", v3(0, y + 0.065, 0.245), v3(0.4, 0.016, 0.022), {
+      r: 0.005,
+    });
+  b.paint = paintOf("#1B1C1E");
+  for (const sx of [-1, 1]) {
+    b.cylinder("paint", v3(sx * 0.38, 0.86, -0.25), 0.18, 0.022, 0.022, 8);
+    for (const sz of [-1, 1])
+      b.cylinder(
+        "paint",
+        v3(sx * 0.36, 0.06, sz * 0.18),
+        0.04,
+        0.12,
+        0.12,
+        14,
+        {
+          roll: Math.PI / 2,
+        },
+      );
+  }
+  b.cylinder("paint", v3(0, 0.95, -0.25), 0.76, 0.022, 0.022, 8, {
+    roll: Math.PI / 2,
+  });
+  b.paint = null;
+};
+
+/** 160 mm steel bollard, yellow lacquer with a black reflective band. */
+const bollard: Builder = (b) => {
+  b.paint = paintOf("#2B2D31");
+  b.cylinder("paint", v3(0, 0.006, 0), 0.012, 0.26, 0.26, 24);
+  b.paint = paintOf("#E8B80C");
+  b.cylinder("paintGloss", v3(0, 0.456, 0), 0.888, 0.16, 0.16, 24);
+  b.paint = paintOf("#1B1C1E");
+  b.cylinder("paint", v3(0, 0.66, 0), 0.1, 0.164, 0.164, 24);
+  b.cylinder("paint", v3(0, 0.895, 0), 0.01, 0.168, 0.168, 24);
+  b.paint = null;
+};
+
+/**
+ * Dock door strip curtain: 16 translucent PVC strips hung from a black rail,
+ * 3.4 m wide (the dock door's clear width), to 5 cm above the floor.
+ */
+const stripCurtain: Builder = (b) => {
+  b.box("blackMetal", v3(0, 3.36, 0), v3(3.4, 0.08, 0.08));
+  for (let i = 0; i < 16; i++)
+    b.box(
+      "glassFrosted",
+      v3(-1.6 + i * 0.2133, 1.7, i % 2 ? 0.006 : -0.006),
+      v3(0.2, 3.3, 0.004),
+    );
+};
+
+/** 240 l wheelie bin: dark green body, black lid, rear wheels and handle. */
+const binIndustrial: Builder = (b) => {
+  b.paint = paintOf("#2F6B4A");
+  b.rbox("paint", v3(0, 0.56, 0.02), v3(0.58, 0.92, 0.64), {
+    r: 0.04,
+    seg: 2,
+  });
+  b.paint = paintOf("#1B1C1E");
+  b.rbox("paint", v3(0, 1.035, 0.0), v3(0.62, 0.07, 0.74), {
+    r: 0.025,
+    seg: 2,
+  });
+  b.rbox("paint", v3(0, 0.98, -0.37), v3(0.5, 0.04, 0.03), { r: 0.012 });
+  for (const sx of [-1, 1])
+    b.cylinder("paint", v3(sx * 0.27, 0.1, -0.3), 0.045, 0.2, 0.2, 16, {
+      roll: Math.PI / 2,
+    });
+  b.paint = null;
+};
+
+/** Visitor chair: graphite upholstered shell on four steel legs. */
+const visitorChair: Builder = (b) => {
+  b.paint = paintOf("#1B1C1E");
+  for (const sx of [-1, 1])
+    for (const sz of [-1, 1])
+      b.cylinder(
+        "paint",
+        v3(sx * 0.21, 0.225, sz * 0.21),
+        0.45,
+        0.022,
+        0.022,
+        8,
+      );
+  b.paint = paintOf("#41454B");
+  b.rbox("paint", v3(0, 0.48, 0), v3(0.5, 0.07, 0.5), { r: 0.03, seg: 2 });
+  b.rbox("paint", v3(0, 0.72, -0.265), v3(0.48, 0.38, 0.05), {
+    r: 0.025,
+    seg: 2,
+    pitch: -0.1,
+  });
+  b.paint = null;
+};
+
+/** Entrance mat well: ribbed charcoal rubber mat (scaled to size). */
+const entranceMat: Builder = (b) => {
+  b.paint = paintOf("#2E3033");
+  b.box("paint", v3(0, 0.006, 0), v3(1, 0.012, 1));
+  b.paint = paintOf("#4A4D52");
+  for (let i = 0; i < 10; i++)
+    b.box("paint", v3(0, 0.0125, -0.45 + i * 0.1), v3(0.96, 0.002, 0.03));
+  b.paint = null;
+};
+
+/** Dock leveller plate: chequer steel, yellow side bands and a yellow lip. */
+const dockLeveller: Builder = (b) => {
+  b.paint = paintOf("#6B7077");
+  b.box("paint", v3(0, 0.0105, 0), v3(2, 0.021, 2));
+  b.paint = paintOf("#8B9097");
+  for (let i = 0; i < 12; i++)
+    b.box("paint", v3(0, 0.0215, -0.9 + i * 0.165), v3(1.8, 0.002, 0.02));
+  b.paint = paintOf("#E8B80C");
+  for (const sx of [-1, 1])
+    b.box("paint", v3(sx * 0.95, 0.0215, 0), v3(0.07, 0.002, 2));
+  b.box("paint", v3(0, 0.0215, 0.96), v3(2, 0.002, 0.08));
+  b.paint = null;
+};
+
 const BUILDERS: Record<PropRole, Builder> = {
   workDesk,
   taskChair,
@@ -758,6 +1096,18 @@ const BUILDERS: Record<PropRole, Builder> = {
   floorLamp,
   coatHooks,
   sideTable,
+  fireExtinguisher,
+  exitSign,
+  cableTray,
+  pallet,
+  palletJack,
+  toolTrolley,
+  bollard,
+  stripCurtain,
+  binIndustrial,
+  visitorChair,
+  entranceMat,
+  dockLeveller,
 };
 
 /** Build the procedural parts for a role (merged per material, model space). */
