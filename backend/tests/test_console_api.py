@@ -162,6 +162,32 @@ def test_detail_subagent_transcript(home: Path) -> None:
     assert body["output"] == "FROM SUBAGENT" and body["outputSource"] == "transcript"
 
 
+def test_detail_subagent_path_derived_from_native_id(home: Path) -> None:
+    d = home / ".claude" / "projects" / "p" / "s" / "subagents"
+    d.mkdir(parents=True)
+    main = home / ".claude" / "projects" / "p" / "s.jsonl"
+    main.write_text(_tr("other", "nope") + "\n")
+    (d / "agent-abc123.jsonl").write_text(_tr("toolu_d", "DERIVED OUTPUT") + "\n")
+    sid = _seed()
+    _tool_event(sid, "toolu_mainref", main)  # carries the main transcript_path
+    _post(sid, "subagent_start", {"agent_id": "subagent_toolu_p", "agent_type": "general-purpose"})
+    event_processor.sessions[sid].link_native_agent("subagent_toolu_p", "abc123")
+    # Hooks fired inside a subagent carry no transcript path at all.
+    _post(
+        sid,
+        "pre_tool_use",
+        {
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_d",
+            "agent_id": "subagent_toolu_p",
+            "tool_input": {"command": "ls"},
+        },
+    )
+    body = client.get(f"/api/v1/sessions/{sid}/tool-calls/toolu_d").json()
+    assert body["call"]["agentId"] == "subagent_toolu_p"
+    assert body["output"] == "DERIVED OUTPUT" and body["outputSource"] == "transcript"
+
+
 def test_detail_cap_and_truncated_flag(home: Path) -> None:
     tp = home / ".claude" / "projects" / "p" / "big.jsonl"
     tp.write_text(_tr("toolu_b", "z" * (300 * 1024)) + "\n")

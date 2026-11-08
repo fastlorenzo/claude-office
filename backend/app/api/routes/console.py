@@ -118,6 +118,34 @@ async def _tool_event_rows(db: AsyncSession, session_id: str, tool_use_id: str) 
     return list(rows.scalars())
 
 
+async def _subagent_transcript_path(
+    db: AsyncSession, session_id: str, sm: StateMachine, agent_id: str, main_path: str | None
+) -> str | None:
+    """Locate a subagent's transcript when its tool hooks carried no path.
+
+    Hook events fired inside a subagent have no ``transcript_path``; the file is
+    ``<main transcript minus .jsonl>/subagents/agent-<native id>.jsonl``.
+    """
+    agent = sm.agents.get(agent_id)
+    native = getattr(agent, "native_id", None)
+    if not native or not str(native).isalnum():
+        return None
+    if main_path is None:
+        row = await db.execute(
+            select(func.json_extract(EventRecord.data, "$.transcript_path"))
+            .where(
+                EventRecord.session_id == session_id,
+                func.json_extract(EventRecord.data, "$.transcript_path").is_not(None),
+            )
+            .order_by(EventRecord.id.desc())
+            .limit(1)
+        )
+        main_path = row.scalar_one_or_none()
+    if not main_path or not str(main_path).endswith(".jsonl"):
+        return None
+    return f"{str(main_path)[:-6]}/subagents/agent-{native}.jsonl"
+
+
 @router.get(
     "/{session_id}/tool-calls/{tool_use_id}",
     response_model=ToolCallDetail,
@@ -148,6 +176,9 @@ async def get_tool_call_detail(
         agent_path = data.get("agent_transcript_path") or agent_path
         if isinstance(data.get("tool_output"), str):
             hook_output = data["tool_output"]
+
+    if agent_path is None and call.agent_id != "main":
+        agent_path = await _subagent_transcript_path(db, session_id, sm, call.agent_id, main_path)
 
     output: str | None = None
     source: str = "none"
