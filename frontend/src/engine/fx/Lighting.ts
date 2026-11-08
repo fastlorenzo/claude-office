@@ -210,7 +210,10 @@ export class Lighting {
     this.sun.intensity = 3.4;
     this.sun.diffuse = lin("#FFE2C2");
     this.sun.specular = lin("#FFE2C2");
-    this.sun.autoUpdateExtends = true;
+    // Extents follow the casters only on the frame the static map renders
+    // (maybeRenderStatic): between renders the lookup projection must stay
+    // the one the map was drawn with, even while the caster list grows.
+    this.sun.autoUpdateExtends = false;
     this.sun.autoCalcShadowZBounds = true;
     this.sun.shadowEnabled = true;
 
@@ -504,6 +507,7 @@ export class Lighting {
       const map = sg.getShadowMap();
       if (map) map.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
       this.sunShadow = sg;
+      this.syncStaticList();
       this.markStaticDirty();
       // A fresh generator renders as soon as its casters are ready.
       this.staticRenderedAt = -Infinity;
@@ -536,6 +540,11 @@ export class Lighting {
     this.staticDirty = false;
     this.staticRenderedAt = now;
     map.renderList = list;
+    // Fit the ortho extents to the casters for this render only.
+    this.sun.autoUpdateExtends = true;
+    map.onAfterRenderObservable.addOnce(() => {
+      this.sun.autoUpdateExtends = false;
+    });
     map.resetRefreshCounter();
     // Hidden zones (visibility culling) are not drawn into the map: render
     // again once one of them is shown.
@@ -550,6 +559,27 @@ export class Lighting {
     this.skippedAt = now;
     if (this.skippedStatic.some((m) => !m.isDisposed() && m.isEnabled()))
       this.markStaticDirty();
+  }
+
+  /**
+   * Keep the static map's render list populated from the first caster on.
+   * Babylon only compiles a receiver's sun-shadow lookup (SHADOW<n>) while
+   * the generator's render list is non-empty, and the static materials are
+   * frozen (P6): a list left empty until the readiness-gated first render
+   * left every surface compiled without the sun shadow - the lobby lit
+   * through its ceiling (WS5b). When the list first fills, receivers that
+   * already compiled are marked light-dirty and re-frozen.
+   */
+  private syncStaticList(): void {
+    const map = this.sunShadow?.getShadowMap();
+    if (!map) return;
+    const was = map.renderList?.length ?? 0;
+    map.renderList = this.staticCasterList();
+    if (was === 0 && map.renderList.length > 0) {
+      (this.sun as unknown as { _markMeshesAsLightDirty(): void })
+        ._markMeshesAsLightDirty();
+      this.refreezeMaterials();
+    }
   }
 
   private staticCasterList(): AbstractMesh[] {
@@ -571,8 +601,16 @@ export class Lighting {
   }
 
   /** Static-map state for tests / diagnostics. */
-  get staticShadowState(): { dirty: boolean; casters: number } {
-    return { dirty: this.staticDirty, casters: this.staticCasters.size };
+  get staticShadowState(): {
+    dirty: boolean;
+    casters: number;
+    listed: number;
+  } {
+    return {
+      dirty: this.staticDirty,
+      casters: this.staticCasters.size,
+      listed: this.sunShadow?.getShadowMap()?.renderList?.length ?? 0,
+    };
   }
 
   /** Dynamic caster (characters, furniture): cascaded overhead shadows. */
@@ -604,6 +642,7 @@ export class Lighting {
         this.markStaticDirty();
       });
     }
+    this.syncStaticList();
     this.markStaticDirty();
   }
 

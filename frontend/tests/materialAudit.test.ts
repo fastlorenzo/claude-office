@@ -245,4 +245,24 @@ describe("lighting state is a pure function of the plan (WS5 L1, P4)", () => {
     scene.dispose();
     engine.dispose();
   });
+
+  it("lists static casters at once, so receivers compile the sun-shadow lookup (WS5b)", async () => {
+    const { Lighting } = await import("@/engine/fx/Lighting");
+    const { CreateBox } = await import("@/engine/babylon");
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const lighting = new Lighting(scene);
+    lighting.setShadowQuality("high");
+    const roof = CreateBox("roof", { width: 10, height: 0.1, depth: 10 }, scene);
+    roof.position.y = 6;
+    lighting.addStaticCasters([roof]);
+    // Not deferred to the readiness-gated first render: Babylon skips the
+    // SHADOW<n> define while a generator's render list is empty, and frozen
+    // materials never revisit it.
+    expect(lighting.staticShadowState.listed).toBe(1);
+    expect(lighting.sun.autoUpdateExtends).toBe(false);
+    lighting.dispose();
+    scene.dispose();
+    engine.dispose();
+  });
 });
