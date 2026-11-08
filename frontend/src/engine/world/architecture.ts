@@ -38,9 +38,6 @@ export interface Opening {
 export const DOOR_H = 2.4;
 /** Header band over glazed doors (holds the recessed LED panel), metres. */
 export const DOOR_BAND = 0.24;
-/** Front face offset of the header band from the partition plane. */
-export const DOOR_BAND_FACE = 0.03;
-
 /** Frosted manifestation band on glazed partitions (height range, metres). */
 export const MANIFEST_Y0 = 1.0;
 export const MANIFEST_H = 0.3;
@@ -506,44 +503,6 @@ export function downlight(
   return fixture(x, y - 0.05, z, { kind: "down", intensity });
 }
 
-/**
- * Grid of recessed light panels (legacy). Kept for callers that still want
- * panels; new rooms use pendants + downlights.
- */
-export function ceilingPanels(
-  b: MeshBatcher,
-  x0: number,
-  x1: number,
-  z0: number,
-  z1: number,
-  y: number,
-  panel: { w: number; d: number },
-  count: { x: number; z: number },
-  mat: SurfaceKey = "lightPanel",
-): Vector3[] {
-  const pts: Vector3[] = [];
-  for (let i = 0; i < count.x; i++)
-    for (let j = 0; j < count.z; j++) {
-      const x = x0 + ((i + 0.5) * (x1 - x0)) / count.x;
-      const z = z0 + ((j + 0.5) * (z1 - z0)) / count.z;
-      b.box(
-        "shadowGap",
-        v3(x, y - 0.004, z),
-        v3(panel.w + 0.03, 0.008, panel.d + 0.03),
-      );
-      b.box(mat, v3(x, y - 0.01, z), v3(panel.w, 0.006, panel.d), {
-        keepUVs: true,
-      });
-      pts.push(
-        fixture(x, y - 0.1, z, {
-          kind: "down",
-          size: { w: panel.w, d: panel.d },
-        }),
-      );
-    }
-  return pts;
-}
-
 // ---------------------------------------------------------------------------
 // Textures: signage
 // ---------------------------------------------------------------------------
@@ -695,46 +654,6 @@ export function drawWayfinding(
     ctx.fillText(arrow, w - h * 0.25, h * 0.5);
     ctx.textAlign = "left";
   }
-}
-
-/** Room nameplate: label + "ROOM 0N" caption, status accent bar. */
-export function drawNameplate(
-  ctx: Ctx2D,
-  w: number,
-  h: number,
-  label: string,
-  index: number,
-  accent: string,
-  selected: boolean,
-): void {
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#151618";
-  roundRect(ctx, 0, 0, w, h, h * 0.08);
-  ctx.fill();
-  ctx.fillStyle = accent;
-  ctx.fillRect(0, h - h * 0.06, w, h * 0.06);
-  if (selected) {
-    ctx.strokeStyle = "#D97757";
-    ctx.lineWidth = h * 0.04;
-    roundRect(ctx, h * 0.03, h * 0.03, w - h * 0.06, h - h * 0.06, h * 0.07);
-    ctx.stroke();
-  }
-  ctx.fillStyle = "#8E8A84";
-  ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(h * 0.15)}px ${FONT_STACK}`;
-  ctx.fillText(
-    `ROOM ${String(index + 1).padStart(2, "0")}`,
-    h * 0.16,
-    h * 0.28,
-  );
-  ctx.fillStyle = "#F4F1EC";
-  let size = Math.round(h * 0.34);
-  ctx.font = `500 ${size}px ${FONT_STACK}`;
-  while (ctx.measureText(label).width > w - h * 0.32 && size > 12) {
-    size -= 2;
-    ctx.font = `500 ${size}px ${FONT_STACK}`;
-  }
-  ctx.fillText(label, h * 0.16, h * 0.62);
 }
 
 // ---------------------------------------------------------------------------

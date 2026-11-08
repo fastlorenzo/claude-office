@@ -15,7 +15,6 @@
  */
 
 import {
-  STATUS_COLORS,
   type CampusProject,
   type CampusSession,
   type CheckState,
@@ -395,8 +394,6 @@ export function dotPosition(dot: MapDot, tSec: number): P {
   const e = u * u * (3 - 2 * u);
   return pointAt(dot.path, 0.06 + e * 0.88);
 }
-
-export const MAP_STATUS_COLORS = STATUS_COLORS;
 
 /** Stable key of what the static map shows (redraw only on change). */
 export function mapKey(m: ProjectMapLayout): string {

@@ -222,17 +222,3 @@ export const CHARACTER_SIT_PELVIS_HEIGHT: Record<"m" | "f", number> = {
 /** Radians to add to a character's yaw so that yaw 0 looks toward +Z. */
 export const CHARACTER_FACING_YAW_OFFSET = 0;
 
-/** FNV-1a hash -> stable, well-distributed avatar choice per agent id. */
-export function pickAvatar(
-  agentId: string,
-  avatars: CharacterAvatar[] = CHARACTER_AVATARS,
-): CharacterAvatar {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < agentId.length; i++) {
-    h ^= agentId.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  const avatar = avatars[(h >>> 0) % avatars.length];
-  if (!avatar) throw new Error("pickAvatar: empty avatar list");
-  return avatar;
-}

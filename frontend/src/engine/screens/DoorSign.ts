@@ -3,27 +3,12 @@
  * door showing project label, status chip, objective (2 lines), focus (1 line),
  * git branch and a thin todo progress bar.
  *
- * INTEGRATION NOTE (not wired yet; Room.ts / World.ts are owned elsewhere):
- *   - Position/orientation: `RoomLayout.nameplate` gives `{ position, yaw }`.
- *     Offset it sideways along the wall (about 0.9 m, away from the door) and
- *     pass it as `position` / `yaw`. Default size is 0.9 x 0.6 m.
- *   - Build one per room:
- *       const sign = new DoorSign(scene, { position, yaw, sessionId, roomLabel });
- *       glow.addIncludedOnlyMesh(...) for each of sign.getGlowMeshes();
- *       register sign.getMeshes() with the interaction layer (metadata
- *       `interact: { kind: "screen", sessionId, roomLabel }` is already set).
- *   - On every campus update, feed it from the CampusSession `cs`:
- *       sign.update({
- *         label: sessionLabel(session, cs),             // components/world/sessionMeta
- *         status: roomStatus(cs),                       // engine/logic/status
- *         objective: sessionHeadline(cs),              // objective, else focus (hud/sessionGlance)
- *         focus: sessionFocus(cs),                      // falls back to boss.currentTask
- *         todoDone, todoTotal: todoProgress(cs),
- *         gitBranch: sessionBranch(cs),
- *       });
- *     update() is cheap: it redraws only when the data actually changed.
- *   - Call sign.setLod(lod) from the same LOD pass as monitors/whiteboards
- *     ("far" frees the texture) and sign.dispose() when the room goes away.
+ * Wiring: one sign per room is built and fed in `Room.ts` (position from
+ * `RoomLayout.nameplate`, offset along the wall). `update()` takes the
+ * session's label, status, objective, focus, todo progress and git branch and
+ * is cheap: it redraws only when the data changed. `setLod()` follows the same
+ * LOD pass as monitors/whiteboards ("far" frees the texture); `dispose()` when
+ * the room goes away. Mesh metadata carries `interact: { kind: "screen", ... }`.
  */
 
 import {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import type { CampusProject } from "@/engine/contracts";
 import { useCampusStore } from "@/stores/campusStore";
 import { useWorldUiStore } from "@/stores/worldUiStore";
 import type { Session } from "@/hooks/useSessions";
@@ -16,10 +15,7 @@ export function OpsOverlay({ sessions }: { sessions: Session[] }): ReactNode {
   const focus = useWorldUiStore((s) => s.opsFocus);
   const campus = useCampusStore((s) => s.sessions);
   const stats = useCampusStore((s) => s.stats);
-  // CampusState.projects once the store carries it (grouped by name until then).
-  const projects = useCampusStore(
-    (s) => (s as { projects?: CampusProject[] | null }).projects ?? null,
-  );
+  const projects = useCampusStore((s) => s.projects);
   const nowMs = useNow();
   const labels = useMemo(() => labelMap(sessions, campus), [sessions, campus]);
   if (!open) return null;

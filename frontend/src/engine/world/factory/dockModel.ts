@@ -9,7 +9,6 @@ import type {
   ReleaseInfo,
 } from "@/engine/contracts";
 import {
-  fitText,
   layoutBrand,
   type BrandLayout,
   type Measure,
@@ -278,8 +277,6 @@ export function doorMarkLayout(
     measure,
   );
 }
-
-export { fitText };
 
 /** Mix "#rrggbb" toward white (t>0) or black (t<0). */
 export function shade(hex: string, t: number): string {

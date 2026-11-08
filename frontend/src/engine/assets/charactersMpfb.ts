@@ -206,78 +206,9 @@ export const MPFB_CHARACTER_AVATARS: MpfbCharacterAvatar[] = AVATAR_ROWS.map(
 /** Office boss: oldest man in a navy double-breasted suit. */
 export const MPFB_BOSS_AVATAR_ID = "office_m04";
 
-export interface MpfbCharacterAnimationSet {
-  /** clips live in each avatar GLB; empty file means "use the avatar file" */
-  file: "";
-  clips: Record<MpfbCharacterClip, string>;
-  extraClips: Record<MpfbCharacterExtraClip, string>;
-}
-
-const CLIP_NAMES: Record<MpfbCharacterClip, string> = {
-  idle: "idle",
-  walk: "walk",
-  sitIdle: "sitIdle",
-  type: "type",
-  thinking: "thinking",
-  talk: "talk",
-  wave: "wave",
-  cheer: "cheer",
-  raiseHand: "raiseHand",
-};
-
-const EXTRA_CLIP_NAMES: Record<MpfbCharacterExtraClip, string> = {
-  sitTalk: "sitTalk",
-  clap: "clap",
-  nod: "nod",
-  listen: "listen",
-  idleA: "idleA",
-  idleSubtle: "idleSubtle",
-  walkRelaxed: "walkRelaxed",
-  walkM2M: "walkM2M",
-};
-
-export const MPFB_CHARACTER_ANIMATIONS: Record<
-  "m" | "f",
-  MpfbCharacterAnimationSet
-> = {
-  m: { file: "", clips: CLIP_NAMES, extraClips: EXTRA_CLIP_NAMES },
-  f: { file: "", clips: CLIP_NAMES, extraClips: EXTRA_CLIP_NAMES },
-};
-
 /** Clips that should play once and hold the last pose (everything else loops). */
 export const MPFB_CHARACTER_ONE_SHOT_CLIPS: ReadonlySet<MpfbCharacterClip> =
   new Set<MpfbCharacterClip>(["wave", "raiseHand"]);
 
-/** Mean in-place walk speed (m/s at speedRatio 1); per-avatar values are in the avatar rows. */
-export const MPFB_CHARACTER_WALK_SPEED: Record<"m" | "f", number> = {
-  m: 0.9,
-  f: 0.81,
-};
-
-/**
- * Mean seated pelvis height above the origin (per-avatar values in the rows). The seated clips put
- * the pelvis about 0.25-0.3 m behind the origin (-Z) and the feet in front: place the origin at the
- * seat centre shifted forward by sitPelvisBackM, with origin.y = seatTopY + 0.09 - sitPelvisHeightM.
- */
-export const MPFB_CHARACTER_SIT_PELVIS_HEIGHT: Record<"m" | "f", number> = {
-  m: 0.566,
-  f: 0.51,
-};
-
 /** Radians to add to a character's yaw so that yaw 0 looks toward +Z. */
 export const MPFB_CHARACTER_FACING_YAW_OFFSET = 0;
-
-/** FNV-1a hash -> stable avatar choice per agent id (same algorithm as pickAvatar). */
-export function pickMpfbAvatar(
-  agentId: string,
-  avatars: MpfbCharacterAvatar[] = MPFB_CHARACTER_AVATARS,
-): MpfbCharacterAvatar {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < agentId.length; i++) {
-    h ^= agentId.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  const avatar = avatars[(h >>> 0) % avatars.length];
-  if (!avatar) throw new Error("pickMpfbAvatar: empty avatar list");
-  return avatar;
-}

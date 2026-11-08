@@ -30,6 +30,3 @@ export async function loadHavok(): Promise<HavokPlugin> {
   return new HavokPlugin(true, hk);
 }
 
-export function resetHavok(): void {
-  havokPromise = null;
-}

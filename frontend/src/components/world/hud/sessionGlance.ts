@@ -109,13 +109,9 @@ export function clip(text: string, max: number): string {
 // ---------------------------------------------------------------------------
 
 export {
-  extractRefs,
   formatElapsed,
-  humanizeBranch,
   isPhaseKind,
-  sanitizeFocus,
   sessionPhase,
   sessionRefs,
   sessionSummary,
-  stripRefs,
 } from "@/engine/logic/sessionInfo";

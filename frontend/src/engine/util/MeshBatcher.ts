@@ -11,7 +11,6 @@ import {
   Mesh,
   Scene,
   TransformNode,
-  Vector3,
   type Material,
 } from "@/engine/babylon";
 import {
@@ -166,6 +165,3 @@ export function v3(x: number, y: number, z: number): V3 {
   return { x, y, z };
 }
 
-export function toVector3(p: V3): Vector3 {
-  return new Vector3(p.x, p.y, p.z);
-}

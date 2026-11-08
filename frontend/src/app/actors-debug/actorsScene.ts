@@ -34,11 +34,8 @@ import { LabelLayer } from "@/engine/screens/LabelLayer";
 import type { Lod } from "@/engine/characters/types";
 import { AgentMonitor, BossMonitor } from "@/engine/screens/Monitor";
 import { WhiteboardScreen } from "@/engine/screens/Whiteboard";
-import { FeedScheduler } from "@/engine/screens/FeedScheduler";
-import { ControlRoomWall } from "@/engine/screens/ControlRoomWall";
 import { buildMonitorLines, agentScreenText } from "@/engine/logic/monitorText";
 import { createDemoCampus } from "@/engine/demo/demoCampus";
-import type { BuildingLayout } from "@/engine/contracts";
 import type { Agent, AgentState } from "@/types";
 
 const POSES: CharacterPose[] = [
@@ -132,7 +129,6 @@ export function startActorsScene(
     boss: { alpha: Math.PI, beta: 1.45, radius: 1.3, target: [0, 0, 0] },
     agent: { alpha: Math.PI, beta: 1.4, radius: 0.9, target: [0, 0, 0] },
     board: { alpha: -Math.PI / 2, beta: 1.5, radius: 2.6, target: [0, 0, 0] },
-    wall: { alpha: 0, beta: 1.5, radius: 3.4, target: [-8, 1.9, 2] },
     side: {
       alpha: Math.PI + 0.12,
       beta: 1.45,
@@ -189,7 +185,6 @@ export function startActorsScene(
     2.7,
     1.52,
   );
-  presets.wall = facing({ x: -8, y: 1.9, z: 2 }, Math.PI / 2, 3.6, 1.52);
   // Character close-ups: the room boss across the desk, a typing agent.
   const seatAt = (p: { x: number; z: number }, y: number) => ({
     x: p.x,
@@ -530,58 +525,6 @@ export function startActorsScene(
     m.receiveShadows = true;
   }
 
-  // --- Control room wall fed by RTTs of this scene -----------------------------
-  const feeds = new FeedScheduler(scene);
-  const wallMeshes = new Set<AbstractMesh>();
-  const renderList = () =>
-    scene.meshes.filter(
-      (m) => !wallMeshes.has(m) && m.isEnabled() && m.isVisible,
-    );
-  feeds.addFeed("demo-0", layout.projects[0].feedCamera, renderList);
-  feeds.addFeed(
-    "demo-1",
-    { position: { x: 2.5, y: 2.4, z: -1.2 }, target: { x: 0, y: 0.8, z: -4 } },
-    renderList,
-  );
-  feeds.addFeed(
-    "demo-2",
-    {
-      position: {
-        x: room.bossDesk.position.x + 0.3,
-        y: 2.6,
-        z: room.origin.z + 3.5,
-      },
-      target: { x: room.origin.x - 1, y: 0.6, z: room.origin.z },
-    },
-    renderList,
-  );
-  const control = {
-    origin: { x: -8, y: 0, z: 2 },
-    size: { x: 4, y: 3, z: 4 },
-    door: { x: -8, y: 0, z: 0 },
-    doorWidth: 1.8,
-    spawn: { x: -6, y: 0, z: 2 },
-    screenWall: {
-      origin: { x: -8, y: 1.9, z: 2 },
-      yaw: Math.PI / 2,
-      cols: 2,
-      rows: 2,
-      cellW: 1.6,
-      cellH: 0.92,
-    },
-  } satisfies BuildingLayout["controlRoom"];
-  const wall = new ControlRoomWall(scene, control.screenWall, feeds);
-  wall.setSessions([
-    { sessionId: "demo-0", label: "claude-office", status: "working" },
-    { sessionId: "demo-1", label: "payments-api", status: "needs_you" },
-    { sessionId: "demo-2", label: "docs-site", status: "done" },
-  ]);
-  for (const m of scene.meshes)
-    if (m.name.startsWith("wall") || m.name.startsWith("controlWall"))
-      wallMeshes.add(m);
-  feeds.setActive(true);
-  scene.onBeforeRenderObservable.add(() => feeds.update());
-
   // --- Loop ---------------------------------------------------------------------
   let frames = 0;
   let frozenApplied = false;
@@ -658,8 +601,6 @@ export function startActorsScene(
     showAgent.dispose();
     for (const m of agentMons) m.dispose();
     board.dispose();
-    wall.dispose();
-    feeds.dispose();
     labels.dispose();
     engine.dispose();
   };

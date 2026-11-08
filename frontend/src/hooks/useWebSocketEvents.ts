@@ -20,7 +20,6 @@ import { useGameStore } from "@/stores/gameStore";
 import { sessionToastLabel, useAttentionStore } from "@/stores/attentionStore";
 import { useCampusStore } from "@/stores/campusStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
-import { agentMachineService } from "@/machines/agentMachineService";
 import { resetSpawnIndex } from "@/systems/queuePositions";
 import { TypingTracker } from "@/systems/typingTracker";
 import { reconcileState } from "@/systems/stateReconciler";
@@ -267,18 +266,3 @@ export function useWebSocketEvents({
 // ============================================================================
 // FULL RESET HANDLER
 // ============================================================================
-
-/**
- * Perform a full reset of frontend state.
- * Called on reconnection or when switching sessions.
- */
-export function resetFrontendState(): void {
-  // Reset store (use resetForSessionSwitch to allow WebSocket reconnection).
-  useGameStore.getState().resetForSessionSwitch();
-
-  // Reset machine service.
-  agentMachineService.reset();
-
-  // Reset spawn positions.
-  resetSpawnIndex();
-}

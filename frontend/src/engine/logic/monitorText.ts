@@ -3,8 +3,6 @@ import { sessionPhase, sessionSummary } from "./sessionInfo";
 import type { Agent, TodoItem } from "@/types";
 
 export const MONITOR_COLS = 46;
-export const MONITOR_LINES = 13;
-
 function clip(s: string, max: number): string {
   const t = s.trim();
   return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)) + "…";

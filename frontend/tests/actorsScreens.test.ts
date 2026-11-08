@@ -5,7 +5,6 @@ import {
   parseMonitorLines,
   statusForBossState,
 } from "@/engine/screens/screenModels";
-import { wallCells } from "@/engine/screens/wallModel";
 import {
   bubbleLayout,
   labelFade,
@@ -89,36 +88,6 @@ describe("bucketTodos", () => {
       expect(Math.abs(noteTilt(i))).toBeLessThanOrEqual(0.035);
       expect(noteTilt(i)).toBe(noteTilt(i));
     }
-  });
-});
-
-describe("wallCells", () => {
-  const s = (n: number) =>
-    Array.from({ length: n }, (_, i) => ({
-      sessionId: `s${i}`,
-      label: `S${i}`,
-      status: "working",
-    }));
-  it("fills cells in order and pads with empty cells", () => {
-    const cells = wallCells(s(2), 4);
-    expect(cells.map((c) => c.kind)).toEqual([
-      "session",
-      "session",
-      "empty",
-      "empty",
-    ]);
-  });
-  it("turns the last cell into +N when sessions overflow", () => {
-    const cells = wallCells(s(6), 4);
-    expect(cells.map((c) => c.kind)).toEqual([
-      "session",
-      "session",
-      "session",
-      "more",
-    ]);
-    const last = cells[3];
-    expect(last.kind === "more" && last.count).toBe(3);
-    expect(wallCells(s(4), 4).every((c) => c.kind === "session")).toBe(true);
   });
 });
 

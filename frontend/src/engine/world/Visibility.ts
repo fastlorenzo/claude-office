@@ -25,7 +25,7 @@
  * with a short grace period before hiding, so quick turns never pop.
  */
 
-import type { TransformNode, Vector3 } from "@/engine/babylon";
+import type { TransformNode } from "@/engine/babylon";
 import type { Zone3 } from "@/engine/layout/factoryLayout";
 import type { ActorHub } from "@/engine/characters/ActorHub";
 import type { RoomDetail, ScreenHub } from "@/engine/screens/ScreenHub";
@@ -296,24 +296,6 @@ export class VisibilityController {
   private readonly memberDetail = new Map<string, RoomDetail>();
 }
 
-/** Plain-data view of room layouts for `computeVisibility`. */
-export function visRoomsOf(
-  layouts: readonly {
-    sessionId: string;
-    slot: { side: "east" | "west" };
-    bounds: { min: { x: number; z: number }; max: { x: number; z: number } };
-  }[],
-): VisRoom[] {
-  return layouts.map((l) => ({
-    id: l.sessionId,
-    minX: l.bounds.min.x,
-    maxX: l.bounds.max.x,
-    minZ: l.bounds.min.z,
-    maxZ: l.bounds.max.z,
-    side: l.slot.side,
-  }));
-}
-
 /** Plain-data view of project rooms (visibility is decided per project room). */
 export function visRoomsOfProjects(
   projects: readonly {
@@ -332,5 +314,3 @@ export function visRoomsOfProjects(
   }));
 }
 
-/** Eye position helper for the controller call-site. */
-export type EyeLike = Pick<Vector3, "x" | "y" | "z">;

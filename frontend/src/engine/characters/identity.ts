@@ -7,17 +7,6 @@ import type { HairStyle } from "./mannequinGeometry";
 
 export const CLAUDE_ORANGE = "#D97757";
 
-export const AGENT_PALETTE = [
-  "#3B82F6",
-  "#22C55E",
-  "#A855F7",
-  "#F97316",
-  "#EC4899",
-  "#14B8A6",
-  "#EAB308",
-  "#EF4444",
-] as const;
-
 const SKIN = ["#F2CBA8", "#E3B08B", "#C98E66", "#A86E4C", "#7D5137", "#5E3C29"];
 const HAIR = [
   "#2A1C13",

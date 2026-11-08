@@ -435,29 +435,5 @@ export const usePreferencesStore = create<PreferencesState>()((set, get) => ({
 // SELECTORS
 // ============================================================================
 
-export const selectClockType = (state: PreferencesState) => state.clockType;
-export const selectClockFormat = (state: PreferencesState) => state.clockFormat;
 export const selectAutoFollowNewSessions = (state: PreferencesState) =>
   state.autoFollowNewSessions;
-export const selectLanguage = (state: PreferencesState) => state.language;
-export const selectRenderer = (state: PreferencesState) => state.renderer;
-export const selectGraphicsQuality = (state: PreferencesState) =>
-  state.graphicsQuality;
-export const selectGraphics = (state: PreferencesState) => state.graphics;
-export const selectIsLoaded = (state: PreferencesState) => state.isLoaded;
-export const selectCommandBarEnabled = (state: PreferencesState) =>
-  state.commandBarEnabled;
-export const selectClickToFocusEnabled = (state: PreferencesState) =>
-  state.clickToFocusEnabled;
-export const selectToastFilterPermission = (state: PreferencesState) =>
-  state.toastFilterPermission;
-export const selectToastFilterError = (state: PreferencesState) =>
-  state.toastFilterError;
-export const selectToastFilterTaskComplete = (state: PreferencesState) =>
-  state.toastFilterTaskComplete;
-export const selectToastFilterArrival = (state: PreferencesState) =>
-  state.toastFilterArrival;
-export const selectToastAutoDismissLow = (state: PreferencesState) =>
-  state.toastAutoDismissLow;
-export const selectToastAutoDismissInfo = (state: PreferencesState) =>
-  state.toastAutoDismissInfo;

@@ -52,13 +52,6 @@ const FACTORY_INSPECT: Partial<
   dock: factoryInspect("factory.action.openDeploy"),
 };
 
-/** "Open on GitHub": no keyboard binding (panels carry the button); touch / panels call it. */
-export const OPEN_GITHUB: InteractionAction = {
-  id: "github",
-  key: "Enter",
-  labelKey: "factory.action.github",
-};
-
 export function actionsFor(target: InteractionTarget): InteractionAction[] {
   switch (target.kind) {
     case "character":

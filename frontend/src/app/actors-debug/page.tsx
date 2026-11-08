@@ -2,12 +2,12 @@
 
 /**
  * Actors debug page: characters cycling through every pose, a walking actor
- * in a real room layout, monitors, whiteboard, labels and a control-room wall.
+ * in a real room layout, monitors, whiteboard and labels.
  *
  * Query params:
  *   ?pose=typing   force every row character into one pose
  *   ?t=1.2         freeze animation time (deterministic screenshots)
- *   ?cam=row       camera preset (overview|row|face|room|boss|agent|board|wall|bossChar|agentChar)
+ *   ?cam=row       camera preset (overview|row|face|room|boss|agent|board|bossChar|agentChar)
  *   ?shot=1        render a fixed number of frames, then set title "READY"
  *   ?rig=gltf      realistic characters (pack registry + CastRig)
  *   ?cast=mpfb     character cast with rig=gltf (mixed|rocketbox|mpfb|custom)

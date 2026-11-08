@@ -8,33 +8,11 @@
  * renders without running the script.
  *
  * Path conventions (relative to ASSET_BASE = "/assets"):
- *   textures: textures/{id}/{id}_{map}_1k.jpg     map ∈ diff | nor_gl | rough | ao | arm
  *   models:   models/{id}/{id}_1k.gltf            (+ relative includes kept as Poly Haven ships them)
  *   hdri:     hdri/{id}_{res}.hdr          (interior 1k, exterior 2k)
- *   characters (optional, manual drop): characters/{file}.glb
  */
 
 export const ASSET_BASE = "/assets";
-
-export type TextureMap = "diff" | "nor_gl" | "rough" | "ao" | "arm";
-
-export type TextureRole =
-  | "floorRoom" // office carpet
-  | "floorHall" // polished concrete / tiles
-  | "floorLobby" // wood parquet
-  | "wall" // painted plaster
-  | "wallAccent" // concrete / brick feature wall
-  | "ceiling" // acoustic tiles / plaster
-  | "wood" // desk tops, reception
-  | "metal"; // brushed metal trims
-
-export interface TextureAsset {
-  role: TextureRole;
-  id: string; // Poly Haven asset id
-  maps: TextureMap[];
-  /** Real-world size of one texture repeat, metres. */
-  tileMeters: number;
-}
 
 export type ModelRole =
   | "desk"
@@ -72,7 +50,6 @@ export interface CharacterPackAsset {
 export type HdriRes = "1k" | "2k" | "4k";
 
 export interface AssetManifest {
-  textures: TextureAsset[];
   models: ModelAsset[];
   /** Interior HDRI: image-based lighting + generic interior reflections. */
   hdri: { id: string };
@@ -87,59 +64,6 @@ export interface AssetManifest {
 
 // Ids verified by scripts/fetch-assets.ts (it fails loudly on a bad id).
 export const ASSET_MANIFEST: AssetManifest = {
-  textures: [
-    {
-      role: "floorRoom",
-      id: "laminate_floor_02",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 1.7,
-    },
-    {
-      role: "floorHall",
-      id: "grey_tiles",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 2.2,
-    },
-    {
-      role: "floorLobby",
-      id: "herringbone_parquet",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 3.4,
-    },
-    {
-      role: "wall",
-      id: "painted_plaster_wall",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 2,
-    },
-    {
-      role: "wallAccent",
-      id: "concrete_wall_001",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 1.5,
-    },
-    {
-      role: "ceiling",
-      id: "white_stucco",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 2,
-    },
-    {
-      role: "wood",
-      id: "walnut_veneer_02",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 1,
-    },
-    {
-      role: "metal",
-      id: "painted_metal_shutter",
-      maps: ["diff", "nor_gl", "arm"],
-      tileMeters: 2,
-    },
-  ],
-  // Only models that fit the modern art direction are loaded. Sofa, lounge
-  // chair, shelves, coffee point, laptop and the wet-floor sign are built
-  // procedurally (proceduralProps.ts) so the furniture family stays coherent.
   models: [
     { role: "desk", id: "metal_office_desk", collider: "box", scale: 1 },
     { role: "plant", id: "potted_plant_01", collider: "cylinder", scale: 1 },
@@ -170,14 +94,6 @@ export const ASSET_MANIFEST: AssetManifest = {
   characters: null,
 };
 
-export function texturePath(
-  id: string,
-  map: TextureMap,
-  base = ASSET_BASE,
-): string {
-  return `${base}/textures/${id}/${id}_${map}_1k.jpg`;
-}
-
 export function modelPath(id: string, base = ASSET_BASE): string {
   return `${base}/models/${id}/${id}_1k.gltf`;
 }
@@ -188,8 +104,4 @@ export function hdriPath(
   res: HdriRes = "1k",
 ): string {
   return `${base}/hdri/${id}_${res}.hdr`;
-}
-
-export function characterPath(file: string, base = ASSET_BASE): string {
-  return `${base}/characters/${file}`;
 }

@@ -270,7 +270,7 @@ export class Building {
     const g = "lobby";
     const part = emptyPart();
     const b = new ArtBatcher(scene, materials, g, 3);
-    const halfW = layout.lobby.size.x / 2; // 10.5
+    const halfW = layout.lobby.size.x / 2;
     const D = layout.lobby.size.z; // 12
     const H = LOBBY_H;
     const z0 = -D;
