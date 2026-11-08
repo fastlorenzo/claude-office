@@ -364,7 +364,8 @@ export function planCell(
     yaw,
   });
   const cf = origin({ x: 0, y: floorY, z: 0 }, yawOf);
-  holdingRack(b, origin(cell.holding, yawOf));
+  // Long side along x (beside the entry-bay walkway, not across it).
+  holdingRack(b, origin(cell.holding, yawOf + Math.PI / 2));
   scrapBin(b, origin(cell.scrap, yawOf), scrapCount(model));
   bench(b, origin(cell.bench, yawOf), model);
   techSpot(b, origin(cell.technician, yawOf));

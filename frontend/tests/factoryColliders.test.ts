@@ -113,7 +113,7 @@ function floorColliders(b: BuildingLayout) {
 function reach(
   boxes: readonly RecBox[],
   fl: FactoryLayout,
-  start: { x: number; z: number },
+  start: { x: number; z: number } | { x: number; z: number }[],
   step = 0.1,
 ) {
   const y = fl.floorY;
@@ -150,18 +150,25 @@ function reach(
   ];
   // Start at the nearest free grid point within 0.6 m (a stair foot sits
   // against the ramp end, which the conservative AABB test blocks).
-  const [ci, ck] = idx(start);
   const q: number[] = [];
-  let best = Infinity;
-  for (let di = -6; di <= 6; di++)
-    for (let dk = -6; dk <= 6; dk++) {
-      const d = di * di + dk * dk;
-      if (d < best && free(ci + di, ck + dk)) {
-        best = d;
-        q[0] = (ck + dk) * nx + (ci + di);
+  const seed = (p: { x: number; z: number }) => {
+    const [ci, ck] = idx(p);
+    let best = Infinity;
+    let pick = -1;
+    for (let di = -6; di <= 6; di++)
+      for (let dk = -6; dk <= 6; dk++) {
+        const d = di * di + dk * dk;
+        if (d < best && free(ci + di, ck + dk)) {
+          best = d;
+          pick = (ck + dk) * nx + (ci + di);
+        }
       }
+    if (pick >= 0 && seen[pick] !== 1) {
+      seen[pick] = 1;
+      q.push(pick);
     }
-  if (q.length) seen[q[0]] = 1;
+  };
+  for (const p of Array.isArray(start) ? start : [start]) seed(p);
   while (q.length) {
     const c = q.pop()!;
     const i = c % nx;
@@ -226,6 +233,16 @@ function pointsOfInterest(fl: FactoryLayout) {
       x: c.technician.x,
       z: c.technician.z,
     });
+    pts.push({
+      name: `${c.projectId} layout stair foot`,
+      x: c.stair.bottom.x,
+      z: c.stair.bottom.z,
+    });
+    pts.push({
+      name: `${c.projectId} bench`,
+      x: c.bench.x - s * 0.9,
+      z: c.bench.z,
+    });
   }
   return pts;
 }
@@ -280,11 +297,40 @@ describe.each([6, 10, 4])("factory floor colliders (n=%i)", (n) => {
     }
   });
 
+  it("every cell, spine-stair foot and the dock are reachable from the factory door", () => {
+    // Belts split the floor into bays; the loading aisle along the outer
+    // wall joins every cell's entry bay, and one step-over crossover per
+    // feeder joins the central strips (spine-stair feet). Flood from the
+    // door, then across every crossover whose other foot is reached, until
+    // nothing new is added.
+    const pts = pointsOfInterest(fl);
+    const get = (name: string) => pts.find((p) => p.name === name)!;
+    const starts: { x: number; z: number }[] = [get("factory door")];
+    let r = reach(boxes, fl, starts);
+    for (let pass = 0; pass < fl.crossovers.length + 1; pass++) {
+      let grew = false;
+      for (const x of fl.crossovers) {
+        const [a, c] = x.feet;
+        const ra = r.reached(a);
+        const rc = r.reached(c);
+        if (ra !== rc) {
+          starts.push(ra ? c : a);
+          grew = true;
+        }
+      }
+      if (!grew) break;
+      r = reach(boxes, fl, starts);
+    }
+    const missing = pts.filter((p) => !r.reached(p)).map((p) => p.name);
+    expect(missing).toEqual([]);
+    for (const x of fl.crossovers)
+      for (const f of x.feet) expect(r.reached(f)).toBe(true);
+  });
+
   it("never strands the player: every floor region keeps a way out", () => {
-    // Continuous belts split the floor into bays (each cell is reached from
-    // its own balcony stair, as in a real plant). What must hold: each cell
-    // is usable from its stair, the door reaches the dock and the first cell
-    // on each side, and every spine-stair foot leads to another exit.
+    // Each cell is usable from its stair, the door reaches the dock and the
+    // first cell on each side, and every spine-stair foot leads to another
+    // exit without the crossovers too.
     const pts = pointsOfInterest(fl);
     const get = (name: string) => pts.find((p) => p.name === name)!;
     const door = get("factory door");

@@ -51,7 +51,11 @@ import { LedPanel, type LedContent } from "@/engine/world/LedPanel";
 import { controlPlan, drumPlan } from "@/engine/world/controlRoomPlan";
 import { floorOutline, prismData } from "@/engine/world/ControlRoomShell";
 import { roomStatus } from "@/engine/logic/status";
-import { buildFactoryLayout } from "@/engine/layout/factoryLayout";
+import {
+  buildFactoryLayout,
+  SPINE_GLASS_W,
+  TOWER_BAY_D,
+} from "@/engine/layout/factoryLayout";
 import { PLANTER_SOIL_Y } from "@/engine/assets/proceduralProps";
 import {
   DOOR_H,
@@ -84,16 +88,12 @@ interface Part {
 const emptyPart = (): Part => ({ meshes: [], textures: [], fixtures: [] });
 
 /** Lobby clear height (double height; the hall and rooms are LAYOUT.WALL_H). */
-const LOBBY_H = 6.0;
+const LOBBY_H = LAYOUT.LOBBY_H;
 
-/** Structural glass strip down the spine (over the factory main line). */
-export const SPINE_GLASS_W = 1.6;
-/** Glazed tower bay at the control-room end of the spine. */
-export const TOWER_BAY_D = 4;
 /** Balcony door clear width in the outer glazing. */
 export const BALCONY_DOOR_W = 1.4;
-/** Slab-edge fascia depth under the hall floor edge at empty bays. */
-const SLAB_EDGE_H = 0.4;
+/** Hall floor slab edge at empty bays (the factory edge beam carries on below). */
+const SLAB_EDGE_H = 0.1;
 
 /** Contiguous bay runs covered by project rooms, per side. */
 function roomRuns(
@@ -1111,17 +1111,14 @@ export class Building {
         0,
         { seeThrough: true },
       );
-      // Slab-edge fascia under the wall (finishes the hall floor edge seen
-      // from the factory) + a short soffit return under the floor edge.
+      // Slab-edge fascia under the wall: only the floor slab's own edge
+      // (the factory's spine edge beam, x hallHalf … +0.3, finishes the
+      // edge below SLAB_EDGE_H; nothing buried inside it), flush with the
+      // beam's faces.
       b.box(
         "wallFeature",
-        v3(sx * (hallHalf + T / 2), -SLAB_EDGE_H / 2, zc),
-        v3(T + 0.02, SLAB_EDGE_H, len),
-      );
-      b.box(
-        "ceiling",
-        v3(sx * (hallHalf - 0.4), -SLAB_EDGE_H + 0.02, zc),
-        v3(0.8, 0.04, len),
+        v3(sx * (hallHalf + 0.15), -SLAB_EDGE_H / 2, zc),
+        v3(0.3, SLAB_EDGE_H, len),
       );
       if (len >= 4) {
         const px = sx * (hallHalf - 0.6);

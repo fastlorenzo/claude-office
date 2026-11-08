@@ -46,8 +46,10 @@ import {
 } from "@/engine/layout/factoryLayout";
 import { createDemoCampus } from "@/engine/demo/demoCampus";
 import { groupSessions } from "@/engine/logic/projectGroups";
+import type { Lighting } from "@/engine/fx/Lighting";
 import { Materials } from "@/engine/materials/Materials";
 import { EntranceHall } from "@/engine/world/EntranceHall";
+import { FactoryHall } from "@/engine/world/factory/FactoryHall";
 import { controlPlan } from "@/engine/world/controlRoomPlan";
 import { addDeckColliders } from "@/engine/world/controlRoomColliders";
 import { factoryColliderBoxes } from "@/engine/world/factory/factoryColliders";
@@ -215,6 +217,10 @@ describe("acceptance walks (Havok, entrance and forecourt)", () => {
       e,
       { name: "X" } as never,
     );
+    // The reception slab (Building draws it, cut at the stair openings,
+    // which end at the flights' head z = ENTRANCE.FLIGHT_Z1).
+    for (const st of e.stairs)
+      floor(w, 0, st.rect.x0 - 0.5, st.rect.x1 + 0.5, st.rect.z1, 0);
   }, 60000);
   afterAll(() => w?.dispose());
 
@@ -256,5 +262,114 @@ describe("acceptance walks (Havok, entrance and forecourt)", () => {
     expect(r.feet.z).toBeLessThanOrEqual(-55);
     expect(r.feet.z).toBeGreaterThan(-58);
     expect(r.feet.y).toBeCloseTo(-6 + 0.1, 0);
+  });
+});
+
+describe("acceptance walks (Havok, factory crossovers and stairs)", () => {
+  const b = demo(6);
+  const fl = buildFactoryLayout(b);
+  let w: WalkWorld;
+  let hall: FactoryHall;
+
+  beforeAll(async () => {
+    w = await walkWorld();
+    // The real shell (floor, walls, columns, spine / cell stairs and the
+    // crossovers) + the equipment under them.
+    hall = new FactoryHall({
+      scene: w.scene,
+      materials: new Materials(w.scene, "/assets"),
+      colliders: w.colliders,
+      lighting: {
+        addStaticCasters: () => undefined,
+        registerProbe: () => undefined,
+      } as unknown as Lighting,
+    });
+    hall.build({ ...fl, emptyCells: [] }, b);
+    for (const e of factoryColliderBoxes(fl, []))
+      w.colliders.addBox(
+        "eq",
+        new Vector3(e.x, e.y, e.z),
+        new Vector3(e.sx, e.sy, e.sz),
+        e.yaw,
+      );
+  }, 60000);
+  afterAll(() => {
+    hall?.dispose();
+    w?.dispose();
+  });
+
+  it("over a feeder crossover: up, across the deck, down — no snag, no lip", () => {
+    for (const x of fl.crossovers) {
+      const [south, north] = x.feet;
+      const r = walk(
+        w,
+        { x: x.x, y: fl.floorY, z: south.z - 0.6, yaw: 0 },
+        [
+          { x: x.x, z: x.z },
+          { x: x.x, z: north.z },
+          { x: x.x, z: north.z + 0.8 },
+        ],
+        20,
+      );
+      expect(r.reached).toBe(3);
+      // Over the deck (2 m) mid-way — the controller carries a little
+      // ballistic lift off the top of a 33.7° ramp at walking speed, so up
+      // to ~0.3 above it — then back on the floor at the end.
+      const top = Math.max(...r.log.map((q) => q.y));
+      expect(top).toBeGreaterThan(x.deckY + 0.02);
+      expect(top).toBeLessThan(x.deckY + 0.35);
+      expect(r.feet.y).toBeGreaterThan(fl.floorY + 0.02);
+      expect(r.feet.y).toBeLessThan(fl.floorY + 0.15);
+      // ... and back again (north → south).
+      const back = walk(
+        w,
+        { x: x.x, y: fl.floorY, z: north.z + 0.6, yaw: Math.PI },
+        [
+          { x: x.x, z: x.z },
+          { x: x.x, z: south.z - 0.8 },
+        ],
+        20,
+      );
+      expect(back.reached).toBe(2);
+      expect(back.feet.y).toBeLessThan(fl.floorY + 0.15);
+    }
+  });
+
+  it("the crossover's side guards keep the walker on the flight", () => {
+    const x = fl.crossovers[0];
+    const s = Math.sign(x.x);
+    // Half-way up the south flight, push sideways (toward the main line).
+    const r = walk(
+      w,
+      { x: x.x, y: fl.floorY, z: x.feet[0].z - 0.6, yaw: 0 },
+      [
+        { x: x.x, z: x.z - 2.2 },
+        { x: x.x - s * 2, z: x.z - 2.2 },
+      ],
+      8,
+    );
+    expect(r.reached).toBe(1);
+    expect(Math.abs(r.feet.x - x.x)).toBeLessThan(0.5);
+  });
+
+  it("spine stair: hall well head down to the factory floor", () => {
+    const st = fl.spineStairs[0];
+    // The hall slab up to the well's top edge (Building draws it).
+    w.colliders.addBox(
+      "hallSlab",
+      new Vector3(0, -0.1, st.rect.z0 / 2),
+      new Vector3(7, 0.2, st.rect.z0),
+    );
+    const r = walk(
+      w,
+      { x: st.top.x, y: 0, z: st.rect.z0 - 0.4, yaw: 0 },
+      [
+        { x: st.top.x, z: st.rect.z0 + 4 },
+        { x: st.top.x, z: st.bottom.z },
+      ],
+      20,
+    );
+    expect(r.reached).toBe(2);
+    expect(r.feet.y).toBeLessThan(fl.floorY + 0.15);
   });
 });

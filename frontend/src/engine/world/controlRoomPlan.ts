@@ -26,7 +26,7 @@
 import { LAYOUT, type BuildingLayout } from "../contracts";
 
 /** Clear height of the ops room (double height, like the lobby). */
-export const CONTROL_CEIL_H = 5.2;
+export const CONTROL_CEIL_H = LAYOUT.CONTROL_H;
 
 /** Fixed vertical stack of the video wall (metres above the floor). */
 export const WALL_Y = {

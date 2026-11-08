@@ -23,7 +23,7 @@ mkdir -p "$OUT"
 # (it waits for __worldShotReady, which the walk sets when finished).
 COMMON="n=6&demoFactory=1&gfx=low&quality=low"
 
-# name | walk | python predicate over (x,y,z,reached,miny) -> bool
+# name | walk | python predicate over (x,y,z,reached,miny,maxy) -> bool
 WALKS=(
   "end_wall_west|8,0,1.5,180;8,-2|abs(z-0.1)<0.5 and abs(y)<0.15 and reached==0"
   "end_wall_far|8,0,22.5,0;8,27|miny>-0.3 and abs(y)<0.15 and reached==0"
@@ -37,6 +37,9 @@ WALKS=(
   # Along the wall to the east stair foot, up both flights to the reception.
   "entrance_stair|9.4,-6,-5.5,90;12.35,-5.5;12.35,-10.3;12.35,-11.25;10.85,-11.25;10.85,-6.2;10.85,-5.5|reached==6 and abs(y)<0.25 and z>-6.0"
   "forecourt|0,-6,-20,180;0,-56|z<=-55"
+  # WS3: over the west feeder crossover (deck 2 m above the floor, 33.7°
+  # flights) and back down into the central strip beyond it.
+  "crossover|-4.8,-6,-2.6,0;-4.8,2.4;-4.8,7.4;-4.8,8.5|reached==3 and maxy>-4.6 and abs(y+6)<0.2 and z>8"
 )
 
 check() { # json predicate -> prints "x y z reached done RESULT"
@@ -54,6 +57,7 @@ pts = [tuple(map(float, s.split(","))) for s in ([l for l in log if "," in l and
 feet = w["feet"][0] if w.get("feet") else None
 x, y, z = (float(v) for v in (feet or "0,0,0").split(","))
 miny = min([p[1] for p in pts] + [y])
+maxy = max([p[1] for p in pts] + [y])
 reached = w.get("reached", -1)
 # A walk blocked by a wall never finishes within the sampling window on
 # SwiftShader (40 s of sim time); treat an unchanged position over the last
@@ -62,7 +66,7 @@ start = tuple(float(v) for v in sys.argv[3].split(",")[:3])
 moved = max(abs(a - b) for a, b in zip((x, y, z), start)) > 0.05
 stuck = len(log) >= 4 and len(set(log[-4:])) == 1 and moved
 settled = bool(w.get("done")) or stuck
-ok = settled and bool(eval(pred, {"abs": abs}, dict(x=x, y=y, z=z, reached=reached, miny=miny)))
+ok = settled and bool(eval(pred, {"abs": abs}, dict(x=x, y=y, z=z, reached=reached, miny=miny, maxy=maxy)))
 print(f"{x:.2f} {y:.2f} {z:.2f} {reached}/{w.get('of')} {'yes' if w.get('done') else ('stuck' if stuck else 'unsettled')} {'ok' if ok else 'FAIL'}")
 PY
 }

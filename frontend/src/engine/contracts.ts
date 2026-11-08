@@ -378,10 +378,13 @@ export const LAYOUT = {
   WALL_H: 3.2,
   HALL_W: 7,
   LOBBY_D: 12,
+  /** Lobby / reception clear height (double height). */
+  LOBBY_H: 6,
   /** Control-room footprint at the hall's far end (round ops room inside). */
   CONTROL_D: 18,
   CONTROL_MIN_W: 20,
-  CONTROL_H: 4.5,
+  /** Clear height of the ops room (double height, like the lobby). */
+  CONTROL_H: 5.2,
   /** Inter-room walls live inside the room footprints (bay grid is gapless). */
   ROOM_GAP: 0,
   DOOR_W: 1.4,

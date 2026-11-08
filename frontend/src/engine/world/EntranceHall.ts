@@ -42,10 +42,11 @@ import {
   type Colliders,
 } from "@/engine/physics/Colliders";
 import { v3 } from "@/engine/util/MeshBatcher";
-import type {
-  EntranceLayout,
-  EntranceStair,
-  Rect,
+import {
+  ENTRANCE,
+  type EntranceLayout,
+  type EntranceStair,
+  type Rect,
 } from "@/engine/layout/factoryLayout";
 import { BrandSign } from "@/engine/world/BrandSign";
 import {
@@ -63,6 +64,12 @@ import {
 } from "@/engine/world/architecture";
 import { LiftController, type LiftLevel } from "@/engine/world/entranceLift";
 import { forecourtBoxes } from "@/engine/world/forecourtColliders";
+import {
+  flight,
+  rampBox,
+  STAIR_RAIL_TOP,
+  type Flight,
+} from "@/engine/world/stairs";
 
 export interface EntranceHallContext {
   scene: Scene;
@@ -88,22 +95,7 @@ const RISE = 0.18;
 const STAIR_D = 0.42;
 const STRINGER_T = 0.02;
 /** Handrail height above the nosing line / landing. */
-const RAIL_TOP = 0.95;
-
-interface Flight {
-  xa: number;
-  xb: number;
-  zTop: number;
-  zBot: number;
-  yTop: number;
-  yBot: number;
-  dir: number;
-  th: number;
-  pitch: number;
-  len: number;
-  zm: number;
-  ym: number;
-}
+const RAIL_TOP = STAIR_RAIL_TOP;
 
 /** Sliding pair: two leaves that part along x. */
 interface Slider {
@@ -560,36 +552,8 @@ export class EntranceHall {
    * soffit plate closing the underside, and a hidden ramp collider on the
    * nosing line. The last riser lands on the floor / landing flush.
    */
-  private flight(
-    b: ArtBatcher,
-    xa: number,
-    xb: number,
-    zTop: number,
-    zBot: number,
-    yTop: number,
-    yBot: number,
-  ): Flight {
-    const run = Math.abs(zBot - zTop);
-    const drop = yTop - yBot;
-    const dir = Math.sign(zBot - zTop) || 1;
-    const th = Math.atan2(drop, run);
-    const f: Flight = {
-      xa,
-      xb,
-      zTop,
-      zBot,
-      yTop,
-      yBot,
-      dir,
-      th,
-      pitch: dir * th,
-      len: Math.hypot(run, drop),
-      zm: (zTop + zBot) / 2,
-      ym: (yTop + yBot) / 2,
-    };
-    const n = Math.max(2, Math.round(drop / RISE));
-    const rise = drop / n;
-    const going = run / n;
+  private flight(b: ArtBatcher, f: Flight): Flight {
+    const { n, rise, going, dir, xa, xb, zTop, yTop, yBot } = f;
     const xm = (xa + xb) / 2;
     const inner = xb - xa - 2 * STRINGER_T;
     for (let k = 1; k <= n; k++) {
@@ -614,14 +578,10 @@ export class EntranceHall {
       this.pitched(b, "blackMetal", f, x, 0.04, -STAIR_D, STRINGER_T);
     // Soffit plate closing the underside between the stringers.
     this.pitched(b, "blackMetal", f, xm, -STAIR_D + 0.03, -STAIR_D, inner);
-    // Walkable ramp along the nosing line.
-    const ny = Math.cos(th);
-    const nz = dir * Math.sin(th);
-    this.col(
-      new Vector3(xm, f.ym - 0.1 * ny, f.zm - 0.1 * nz),
-      new Vector3(xb - xa, 0.2, f.len + 0.12),
-      { pitch: f.pitch },
-    );
+    // Walkable ramp: top face through both nosings (flush, no lip at the
+    // head), sinking under the lower floor past the foot.
+    const ramp = rampBox(f);
+    this.col(ramp.c, ramp.s, { pitch: ramp.pitch });
     return f;
   }
 
@@ -746,8 +706,9 @@ export class EntranceHall {
     const zLand = st.landing.z1; // flights' south ends (at the landing)
     // Lower flight: floor (north) up to the landing (south); upper flight:
     // landing up to the reception (north).
-    const fl = this.flight(b, lo.x0, lo.x1, zLand, zHead, ly, 0);
-    const fu = this.flight(b, up.x0, up.x1, zHead, zLand, UP, ly);
+    const [fl, fu] = entranceFlights(st, this.floorY).map((f) =>
+      this.flight(b, f),
+    );
     // Landing: the same folded-steel body (STAIR_D deep) with an oak deck,
     // spanning both flights; the stringers die into its north face.
     const L = st.landing;
@@ -1232,8 +1193,25 @@ export class EntranceHall {
   }
 }
 
-/** Shared wall thickness (= factoryLayout ENTRANCE.WALL_T). */
-const ENTR_WALL_T = 0.3;
+/**
+ * An entrance stair's flights in the entrance frame (local y 0 = the lobby
+ * floor): lower (floor → landing, foot at the north end) and upper
+ * (landing → reception, head at the north end). Pure.
+ */
+export function entranceFlights(st: EntranceStair, floorY: number): Flight[] {
+  const ly = st.landingY - floorY;
+  const zHead = st.rect.z1;
+  const zLand = st.landing.z1;
+  const lo = st.lower;
+  const up = st.upper;
+  return [
+    flight(lo.x0, lo.x1, zLand, zHead, ly, 0, RISE),
+    flight(up.x0, up.x1, zHead, zLand, UP, ly, RISE),
+  ];
+}
+
+/** Shared wall thickness (the factory's south wall). */
+const ENTR_WALL_T = ENTRANCE.WALL_T;
 /** Feature-wall slat depth on the lobby face of the shared wall. */
 const FEATURE_D = 0.03;
 /** Factory-door lining thickness (jambs + head). */

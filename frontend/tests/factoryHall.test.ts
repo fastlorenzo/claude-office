@@ -14,10 +14,10 @@ import {
   CELL_STAIR,
   cellStairGap,
   FactoryHall,
-  planMinus,
   SPINE_RUN,
-  STAIR_MAX_DEG,
 } from "@/engine/world/factory/FactoryHall";
+import { rectMinusHoles } from "@/engine/world/architecture";
+import { STAIR_MAX_DEG } from "@/engine/world/stairs";
 import type { Lighting } from "@/engine/fx/Lighting";
 
 const deg = (rad: number) => (rad * 180) / Math.PI;
@@ -36,10 +36,10 @@ function demoLayout(n = 6) {
   return generateLayout(slots, groups, allocatePods(new Map(), groups));
 }
 
-describe("planMinus", () => {
+describe("rectMinusHoles (shared by the shells)", () => {
   it("returns the rect when there are no holes", () => {
     const r = { x0: 0, x1: 4, z0: 0, z1: 2 };
-    expect(planMinus(r, [])).toEqual([r]);
+    expect(rectMinusHoles(r, [])).toEqual([r]);
   });
 
   it("covers exactly the area outside the holes", () => {
@@ -49,7 +49,7 @@ describe("planMinus", () => {
       { x0: 2.3, x1: 3.5, z0: 6.4, z1: 12.8 },
       { x0: -9, x1: 9, z0: 16, z1: 20 },
     ];
-    const out = planMinus(r, holes);
+    const out = rectMinusHoles(r, holes);
     const area = out.reduce((a, p) => a + (p.x1 - p.x0) * (p.z1 - p.z0), 0);
     expect(area).toBeCloseTo(7 * 20 - 1.6 * 16 - 1.2 * 6.4 - 7 * 4, 6);
     for (const p of out)

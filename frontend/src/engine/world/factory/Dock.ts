@@ -31,6 +31,14 @@ import type {
 } from "@/engine/contracts";
 import { DEFAULT_BRANDING } from "@/engine/world/brandLayout";
 import {
+  flight,
+  guardBox,
+  rampBox,
+  STAIR_RAIL_TOP,
+  treads,
+  type Flight,
+} from "@/engine/world/stairs";
+import {
   BOARD_TEX_H,
   BOARD_TEX_W,
   DOOR_TEX_H,
@@ -86,7 +94,7 @@ export const DOCK_STAIR = {
   width: 1.5,
   run: 2.4,
   steps: 7,
-  railTop: 0.95,
+  railTop: STAIR_RAIL_TOP,
 } as const;
 
 /** Teleport landing on the platform in front of the truck's door (dock-local). */
@@ -115,28 +123,28 @@ export function addDockColliders(sink: ColliderSink, group: string): void {
       v(0.3, DOCK.wallH - pH, D),
     );
   const st = DOCK_STAIR;
-  const len = Math.hypot(st.run, pH);
-  const th = Math.atan2(pH, st.run);
-  // Bottom is toward -z, so +z end is the top: pitch negative (see addBox).
-  const pitch = -th;
-  const ny = Math.cos(th);
-  const nz = -Math.sin(th);
-  const T = 0.2;
-  const ext = 0.15;
-  const zm = -D - st.run / 2;
-  const ym = pH / 2;
-  // Top face centre shifted down-slope by ext / 2 (bottom end sinks into floor).
-  const cz = zm - ((st.run / len) * ext) / 2 - nz * (T / 2);
-  const cy = ym - ((pH / len) * ext) / 2 - ny * (T / 2);
-  sink.addBox(group, v(st.x, cy, cz), v(st.width, T, len + ext), 0, { pitch });
+  const f = dockStairFlight();
+  const ramp = rampBox(f);
+  sink.addBox(group, ramp.c, ramp.s, 0, { pitch: ramp.pitch });
   for (const sx of [-1, 1]) {
-    const top = pH + 1.1;
-    sink.addBox(
-      group,
-      v(st.x + (sx * (st.width - 0.05)) / 2, top / 2, -D - st.run / 2),
-      v(0.05, top, st.run),
-    );
+    const g = guardBox(f, st.x + (sx * (st.width - 0.05)) / 2, 0);
+    sink.addBox(group, g.c, g.s);
   }
+}
+
+/** The loading stair as a `stairs.ts` flight (dock-local, top at the platform edge). */
+export function dockStairFlight(): Flight {
+  const st = DOCK_STAIR;
+  const D = DOCK.depth;
+  return flight(
+    st.x - st.width / 2,
+    st.x + st.width / 2,
+    -D,
+    -D - st.run,
+    DOCK.platformH,
+    0,
+    DOCK.platformH / st.steps,
+  );
 }
 
 /** Shelf bay centre z, rack face x (dock-local). */
@@ -468,26 +476,30 @@ export class Dock {
     // black handrails + balusters on both sides (open middle = walking path).
     {
       const st = DOCK_STAIR;
-      const x0 = st.x - st.width / 2;
-      const x1 = st.x + st.width / 2;
-      const rise = pH / st.steps;
-      const going = st.run / st.steps;
-      for (let i = 1; i <= st.steps; i++) {
-        const yt = pH - (i - 1) * rise;
-        const zFar = -D - (i - 1) * going;
-        const zNear = -D - i * going;
-        if (i > 1) {
-          metal.span(x0 + 0.05, yt - 0.04, zNear, x1 - 0.05, yt, zFar, satin);
-          matte.span(
-            x0 + 0.06,
-            yt,
-            zFar - 0.05,
-            x1 - 0.06,
-            yt + 0.006,
-            zFar,
-            yellow,
-          );
-        }
+      const f = dockStairFlight();
+      const x0 = f.xa;
+      const x1 = f.xb;
+      // Treads from stairs.ts: each nosing (the -z edge) on the ramp line.
+      for (const t of treads(f)) {
+        const zFar = t.zNose + f.going; // uphill edge (toward the platform)
+        metal.span(
+          x0 + 0.05,
+          t.yt - 0.04,
+          t.zNose,
+          x1 - 0.05,
+          t.yt,
+          zFar,
+          satin,
+        );
+        matte.span(
+          x0 + 0.06,
+          t.yt,
+          t.zNose,
+          x1 - 0.06,
+          t.yt + 0.006,
+          t.zNose + 0.05,
+          yellow,
+        );
       }
       const slab = (
         zA: number,

@@ -645,7 +645,7 @@ export function generateLayout(
   return {
     lobby: {
       origin: v3(0, 0, -LOBBY_D / 2),
-      size: v3(fullW, WALL_H + 1.3, LOBBY_D),
+      size: v3(fullW, LAYOUT.LOBBY_H, LOBBY_D),
       spawn: v3(0, 0, -LOBBY_D + 2),
       spawnYaw: 0,
     },

@@ -19,10 +19,11 @@
  * at QA under `qaX`, at the gate under `gateX`.
  */
 import type { CheckState } from "@/engine/contracts";
-import type {
-  CellLayout,
-  FactoryLayout,
-  LaneLayout,
+import {
+  FACTORY,
+  type CellLayout,
+  type FactoryLayout,
+  type LaneLayout,
 } from "@/engine/layout/factoryLayout";
 import type { PieceMotion } from "@/engine/logic/factoryMotion";
 import {
@@ -53,6 +54,7 @@ export const LINE = {
   RACK_DX: 1.1,
   SHELF_TOPS: [0.3175, 0.9675, 1.6175] as const,
   RACK_Z: [-0.33, 0.33] as const,
+  /** Holding-rack slots along the rack's long side (world x, see holdingSlot). */
   HOLD_Z: [-0.85, 0, 0.85] as const,
   /** Dock (matches Dock.ts DOCK.platformH / gantry at ~6 m inside the doors). */
   DOCK_PLATFORM_H: 1.2,
@@ -302,7 +304,7 @@ export function intakeSlot(ctx: LineCtx, i: number): Placed {
   const k = r % per;
   const lane = lanes ? lanes[Math.floor(k / LINE.RACK_Z.length)] : null;
   const z = (lane?.z ?? c.bench.z) + LINE.RACK_Z[k % LINE.RACK_Z.length];
-  const ax = Math.abs(lane?.intakeX ?? c.bench.x) + LINE.RACK_DX;
+  const ax = Math.abs(lane?.intakeX ?? FACTORY.INTAKE_X) + LINE.RACK_DX;
   return {
     x: s * ax,
     y: ctx.floorY + LINE.SHELF_TOPS[level] + lap * 1.95 - BELT_HEIGHT,
@@ -319,15 +321,16 @@ export function holdingSlot(ctx: LineCtx, i: number): Placed {
   const idx = Math.max(0, Math.floor(i));
   const lap = Math.floor(idx / (per * levels));
   const r = idx % (per * levels);
+  // The rack's long side runs along x (cellPlan): slots step along x.
   return {
-    x: h.x,
+    x: h.x + sgn(ctx.cell) * LINE.HOLD_Z[r % per],
     y:
       ctx.floorY +
       LINE.SHELF_TOPS[Math.floor(r / per)] +
       lap * 1.95 -
       BELT_HEIGHT,
-    z: h.z + LINE.HOLD_Z[r % per],
-    yaw: inwardYaw(sgn(ctx.cell)),
+    z: h.z,
+    yaw: Math.PI / 2,
   };
 }
 

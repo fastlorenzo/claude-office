@@ -298,7 +298,6 @@ describe.each(cases)("factoryLayout: %s", (_name, building) => {
     }
     expect(L.door.z).toBe(L.rect.z0);
     expect(f.liftSpots[0].rect).toEqual(L.rect);
-    expect(f.lobbyStair).toBe(e.stairs[0]);
   });
 
   it("zoneAt3: the ground lobby is the entrance, the reception the lobby", () => {

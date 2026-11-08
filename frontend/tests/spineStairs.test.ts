@@ -16,11 +16,12 @@ import {
   FLOOR_Y,
   SPINE_STAIR,
   spineFootprintZ,
+  TOWER_BAY_D,
 } from "@/engine/layout/factoryLayout";
 import { createDemoCampus } from "@/engine/demo/demoCampus";
 import { groupSessions } from "@/engine/logic/projectGroups";
-import { TOWER_BAY_D } from "@/engine/world/Building";
-import { SPINE_RUN, STAIR_MAX_DEG } from "@/engine/world/factory/FactoryHall";
+import { SPINE_RUN } from "@/engine/world/factory/FactoryHall";
+import { STAIR_MAX_DEG } from "@/engine/world/stairs";
 
 function demo(n: number): BuildingLayout {
   const d = createDemoCampus(n, 20000);

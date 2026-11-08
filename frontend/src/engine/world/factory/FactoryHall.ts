@@ -52,10 +52,30 @@ import type { Materials, SurfaceKey } from "@/engine/materials/Materials";
 import type { Colliders } from "@/engine/physics/Colliders";
 import { v3 } from "@/engine/util/MeshBatcher";
 import {
+  CELL_STAIR,
+  cellStairFoot,
+  cellStairGap,
+  CROSSOVER,
   FACTORY,
+  SPINE_GLASS_W,
+  SPINE_STAIR,
+  TOWER_BAY_D,
+  type CellLayout,
+  type CrossoverLayout,
   type FactoryLayout,
   type Rect,
+  type StairLayout,
 } from "@/engine/layout/factoryLayout";
+import { rectMinusHoles } from "@/engine/world/architecture";
+import {
+  flight,
+  type Flight,
+  NOSING_YELLOW,
+  steelFlight,
+  steelLanding,
+  steelPost,
+  steelRail,
+} from "@/engine/world/stairs";
 
 export interface FactoryHallContext {
   scene: Scene;
@@ -74,10 +94,6 @@ export const HALL = {
   WALL_T: 0.3,
   PLINTH_H: 1.2,
   TRUSS_D: 1.6,
-  /** Mirrors Building's spine glass strip / tower bay (P1.1). */
-  SPINE_GLASS_W: 1.6,
-  TOWER_BAY_D: 4,
-  LOBBY_H: 6,
   /** South-wall opening the entrance building fills (|x| ≤ halfW, floor → h). */
   ENTRANCE_OPENING: { halfW: 13.35, h: 6.25 },
   /** Opening in the north wall the dock fills (half width, height). */
@@ -90,71 +106,24 @@ export const HALL = {
   /** High-bay pendants (|x|) over the cells, one pair per bay. */
   HIGHBAY_X: [18, 27] as const,
   HIGHBAY_Y: 0.5,
-  STEP_RISE: 0.2,
 } as const;
 
-/** Stair pitch target: every flight is ≤ 35° (rise / going ≈ 0.7). */
-export const STAIR_MAX_DEG = 35;
 /** Spine flight run for the 6 m drop (continues under the slab past the well). */
-export const SPINE_RUN = 8.6;
+export const SPINE_RUN = SPINE_STAIR.RUN;
 
-/**
- * Per-cell switchback stair: three 2 m flights side by side in the entry bay
- * (|x| / z offsets from the cell's z0, mirrored toward the balcony door).
- */
-export const CELL_STAIR = {
-  /** Top landing, joined to the balcony edge (balustrade gap there). */
-  top: { x0: 14.3, x1: 15.4, z0: 0.15, z1: 1.15 },
-  /** Flight x bands (flight 1 starts at the top landing). */
-  flights: [
-    { x0: 14.4, x1: 15.4 },
-    { x0: 15.4, x1: 16.4 },
-    { x0: 16.4, x1: 17.4 },
-  ],
-  /** Flights run between these z offsets. */
-  zNear: 1.15,
-  zFar: 4.02,
-  /** Far-end landing (flights 1 → 2, y = −2) and near-end (2 → 3, y = −4). */
-  far: { x0: 14.4, x1: 16.4, z0: 4.02, z1: 4.72 },
-  near: { x0: 15.4, x1: 17.4, z0: 0.15, z1: 1.15 },
-} as const;
-
-/**
- * World z range of a cell stair's top landing on the balcony edge (the
- * balcony balustrade leaves this gap open). The landing sits at the balcony
- * door's end of the entry bay. Pure.
- */
-export function cellStairGap(
-  z0: number,
-  doorZ: number,
-): { z0: number; z1: number } {
-  const W = LAYOUT.ROOM_W;
-  const m = doorZ - z0 > W / 2;
-  const a = m ? z0 + W - CELL_STAIR.top.z1 : z0 + CELL_STAIR.top.z0;
-  const b = m ? z0 + W - CELL_STAIR.top.z0 : z0 + CELL_STAIR.top.z1;
-  return { z0: a, z1: b };
-}
-
-/** Floor point just off a cell stair's last flight (teleports land here). */
-export function cellStairFoot(
-  side: "east" | "west",
-  z0: number,
-  doorZ: number,
-): { x: number; z: number } {
-  const s = side === "east" ? 1 : -1;
-  const W = LAYOUT.ROOM_W;
-  const m = doorZ - z0 > W / 2;
-  const o = (CELL_STAIR.far.z0 + CELL_STAIR.far.z1) / 2;
-  return { x: s * 18.4, z: m ? z0 + W - o : z0 + o };
-}
+// The cell stair's numbers live with the layout (one source for the built
+// stair, its plan rect and its foot); re-exported for the shells.
+export { CELL_STAIR, cellStairFoot, cellStairGap };
 
 const G = "factoryHall";
-/** Handrail height above the nosing line / deck, baluster spacing. */
-const RAIL_TOP = 0.95;
-const BALUSTER_PITCH = 0.24;
+/** Entry-bay walkway |x| runs: trunk → stair, stair foot → loading aisle. */
+const WALKWAY_X = [
+  [9.2, 14.0],
+  [17.8, FACTORY.AISLE_X[1]],
+] as const;
 
 const PAINT = {
-  yellow: "#E3B417",
+  yellow: NOSING_YELLOW,
   white: "#E4E5E1",
   green: "#3F7D5A",
   cladding: "#CED2D4",
@@ -165,35 +134,48 @@ const PAINT = {
 
 type Hex = (typeof PAINT)[keyof typeof PAINT];
 
-/** A plan rectangle minus holes, as disjoint rectangles (pure). */
-export function planMinus(r: Rect, holes: readonly Rect[]): Rect[] {
-  const hs = holes
-    .map((h) => ({
-      x0: Math.max(r.x0, h.x0),
-      x1: Math.min(r.x1, h.x1),
-      z0: Math.max(r.z0, h.z0),
-      z1: Math.min(r.z1, h.z1),
-    }))
-    .filter((h) => h.x1 - h.x0 > 1e-6 && h.z1 - h.z0 > 1e-6);
-  const zs = [...new Set([r.z0, r.z1, ...hs.flatMap((h) => [h.z0, h.z1])])]
-    .filter((z) => z >= r.z0 && z <= r.z1)
-    .sort((a, b) => a - b);
-  const out: Rect[] = [];
-  for (let i = 0; i + 1 < zs.length; i++) {
-    const za = zs[i];
-    const zb = zs[i + 1];
-    if (zb - za < 1e-6) continue;
-    const cuts = hs
-      .filter((h) => h.z0 < zb - 1e-6 && h.z1 > za + 1e-6)
-      .sort((a, b) => a.x0 - b.x0);
-    let x = r.x0;
-    for (const c of cuts) {
-      if (c.x0 > x + 1e-6) out.push({ x0: x, x1: c.x0, z0: za, z1: zb });
-      x = Math.max(x, c.x1);
-    }
-    if (r.x1 > x + 1e-6) out.push({ x0: x, x1: r.x1, z0: za, z1: zb });
-  }
-  return out;
+/** The spine-stair flight of a well: 35° from its top edge, under the slab (pure). */
+export function spineFlight(st: StairLayout, fy: number): Flight {
+  const r = st.rect;
+  return flight(r.x0, r.x1, r.z0, r.z0 + SPINE_RUN, 0, fy);
+}
+
+/**
+ * A cell's switchback (balcony → entry bay), top flight first: three 2 m
+ * flights side by side, the top landing at the balcony door's end (offsets
+ * mirror in z). Pure.
+ */
+export function cellStairFlights(c: CellLayout, fy: number): Flight[] {
+  const S = CELL_STAIR;
+  const s = c.side === "east" ? 1 : -1;
+  const W = LAYOUT.ROOM_W;
+  const m = c.stair.top.z - c.z0 > W / 2;
+  const Z = (o: number) => (m ? c.z0 + W - o : c.z0 + o);
+  const levels = [0, -2, -4, fy];
+  return S.flights.map((f, k) => {
+    const down = k % 2 === 0; // flights 1, 3 run near → far
+    return flight(
+      Math.min(s * f.x0, s * f.x1),
+      Math.max(s * f.x0, s * f.x1),
+      Z(down ? S.zNear : S.zFar),
+      Z(down ? S.zFar : S.zNear),
+      levels[k],
+      levels[k + 1],
+    );
+  });
+}
+
+/** A crossover's two flights (south, north), each from the deck edge down (pure). */
+export function crossoverFlights(x: CrossoverLayout, fy: number): Flight[] {
+  const C = CROSSOVER;
+  const xa = x.x - C.W / 2;
+  const xb = x.x + C.W / 2;
+  const d0 = x.z - C.DECK_HALF;
+  const d1 = x.z + C.DECK_HALF;
+  return [
+    flight(xa, xb, d0, d0 - C.RUN, x.deckY, fy),
+    flight(xa, xb, d1, d1 + C.RUN, x.deckY, fy),
+  ];
 }
 
 /** Signed x range → ordered rect. */
@@ -245,6 +227,7 @@ export class FactoryHall {
     this.buildSoffits(b, fl, building);
     this.buildColumns(b, fl, building);
     this.buildStairs(b, fl);
+    this.buildCrossovers(b, fl);
     this.buildHighBays(b, fl);
     const meshes = b.build({ receiveShadows: true });
     for (const m of meshes)
@@ -412,13 +395,13 @@ export class FactoryHall {
         this.lineX(b, fy, c.z1 - 0.12, xIn, xOut, 0.08);
         this.lineZ(b, fy, xOut, c.z0 + 0.12, c.z1 - 0.12, 0.08);
         const wz = c.z0 + LAYOUT.ROOM_W / 2;
-        for (const [a, bb] of [
-          [4.0, 14.0],
-          [17.8, OX - 0.8],
-        ]) {
+        for (const [a, bb] of WALKWAY_X) {
           this.lineX(b, fy, wz - 0.7, s * a, s * bb, 0.08);
           this.lineX(b, fy, wz + 0.7, s * a, s * bb, 0.08);
         }
+        // Loading aisle edges along the outer wall.
+        for (const ax of FACTORY.AISLE_X)
+          this.lineZ(b, fy, s * ax, c.z0 + 0.2, c.z1 - 0.2, 0.08);
         // Station pads (QA desk and merge gate included).
         for (const lane of c.lanes) {
           for (const x of [...lane.stationX, lane.qaX, lane.gateX]) {
@@ -445,6 +428,13 @@ export class FactoryHall {
           z0: st.rect.z0 + SPINE_RUN + 0.05,
           z1: st.rect.z0 + SPINE_RUN + 1.25,
         });
+      // Crossover feet.
+      for (const x of fl.crossovers)
+        for (const [z0, z1] of [
+          [x.rect.z0 - 1.2, x.rect.z0 - 0.05],
+          [x.rect.z1 + 0.05, x.rect.z1 + 1.2],
+        ])
+          this.hatch(b, fy, { x0: x.rect.x0, x1: x.rect.x1, z0, z1 });
       // Empty cells: double border with diagonal ticks.
       for (const e of fl.emptyCells) {
         const s = e.side === "east" ? 1 : -1;
@@ -481,30 +471,19 @@ export class FactoryHall {
           for (const dz of [-1.0, 1.0])
             this.lineX(b, fy, lane.z + dz, a, e, 0.05);
         }
-      // Pedestrian crossings over the main-line aisle at each cell entry.
-      for (const c of fl.cells) {
-        const zc = c.z0 + LAYOUT.ROOM_W / 2;
-        for (let x = -3.0; x <= 3.0 + 1e-6; x += 0.6)
-          if (Math.abs(x) > 1.2)
-            this.mark(b, fy, {
-              x0: x - 0.2,
-              x1: x + 0.2,
-              z0: zc - 0.7,
-              z1: zc + 0.7,
-            });
-      }
     });
 
     this.paint(b, PAINT.green, () => {
-      // Safety walkway across each cell's entry bay (no lanes there).
+      // Safety walkway across each cell's entry bay (no lanes there; the
+      // feeder runs inboard of the trunk, the crossover steps over it) and
+      // the loading aisle along the outer wall joining every bay.
       for (const c of fl.cells) {
         const s = c.side === "east" ? 1 : -1;
         const wz = c.z0 + LAYOUT.ROOM_W / 2;
-        for (const [a, bb] of [
-          [4.0, 14.0],
-          [17.8, OX - 0.8],
-        ])
+        for (const [a, bb] of WALKWAY_X)
           this.mark(b, fy - 0.001, xr(s, a, bb, wz - 0.66, wz + 0.66));
+        const [a0, a1] = FACTORY.AISLE_X;
+        this.mark(b, fy - 0.001, xr(s, a0 + 0.04, a1 - 0.04, c.z0, c.z1));
       }
       // Walkway in from the entrance building's factory door (x = 0).
       this.mark(b, fy - 0.001, {
@@ -724,7 +703,7 @@ export class FactoryHall {
       );
     }
     // Profiled deck (galvanised underside) with the rooflight holes.
-    const roof = planMinus(
+    const roof = rectMinusHoles(
       { x0: -OX - T, x1: OX + T, z0: zA - T, z1: zB + T },
       sky,
     );
@@ -980,14 +959,17 @@ export class FactoryHall {
 
     // ---- Spine (hall) soffit around the glass strip, tower bay, stair wells.
     const L = building.hall.length;
-    const gw = HALL.SPINE_GLASS_W / 2;
-    const bayZ = Math.max(0, L - HALL.TOWER_BAY_D);
+    const gw = SPINE_GLASS_W / 2;
+    const bayZ = Math.max(0, L - TOWER_BAY_D);
     const holes: Rect[] = [
       { x0: -gw, x1: gw, z0: 0, z1: bayZ },
       { x0: -front, x1: front, z0: bayZ, z1: L },
       ...fl.spineStairs.map((st) => st.rect),
     ];
-    for (const r of planMinus({ x0: -front, x1: front, z0: 0, z1: L }, holes))
+    for (const r of rectMinusHoles(
+      { x0: -front, x1: front, z0: 0, z1: L },
+      holes,
+    ))
       this.soffit(b, r);
     // Spine edge beams (finished fascia on both hall edges, over the front
     // column line): closes the slab edge at empty bays, sits under the room
@@ -1102,205 +1084,14 @@ export class FactoryHall {
   // Stairs (visual steel + hidden ramp colliders)
   // -------------------------------------------------------------------------
 
-  /**
-   * One straight flight along z between x ∈ [xa, xb]: steel treads with
-   * yellow nosings, two painted stringers, slim handrails (visual only) and
-   * colliders: a ramp whose TOP face runs exactly through the top and bottom
-   * nosing points (flush with the landing and the floor, no lip) and
-   * vertical side guards spanning only the flight's own z range (nothing
-   * pokes into a landing).
-   */
-  private flight(
-    b: ArtBatcher,
-    xa: number,
-    xb: number,
-    zTop: number,
-    zBot: number,
-    yTop: number,
-    yBot: number,
-    rails: { a: boolean; b: boolean },
-    guardFloor: number,
-    /**
-     * Side guards to shorten (world x of the side, which end, length): where
-     * two flights meet a shared landing at the same level the divider stops
-     * short so the landing is turnable.
-     */
-    trims: { x: number; end: "top" | "bottom"; len: number }[] = [],
-  ): void {
-    const run = Math.abs(zBot - zTop);
-    const drop = yTop - yBot;
-    const dir = Math.sign(zBot - zTop) || 1;
-    const len = Math.hypot(run, drop);
-    const th = Math.atan2(drop, run);
-    const pitch = dir * th;
-    const n = Math.max(2, Math.round(drop / HALL.STEP_RISE));
-    const rise = drop / n;
-    const going = run / n;
-    const w = xb - xa;
-    const xm = (xa + xb) / 2;
-    const zm = (zTop + zBot) / 2;
-    const ym = (yTop + yBot) / 2;
-    // Up-normal of the slope (y, z components).
-    const ny = Math.cos(th);
-    const nz = dir * Math.sin(th);
-    for (let i = 2; i <= n; i++) {
-      const zc = zTop + dir * (i - 0.5) * going;
-      const yt = yTop - (i - 1) * rise;
-      b.box(
-        "galvanised",
-        v3(xm, yt - 0.02, zc),
-        v3(w - 0.08, 0.04, going + 0.03),
-      );
-      this.paint(b, PAINT.yellow, () =>
-        b.box(
-          "paint",
-          v3(xm, yt + 0.001, zc - dir * (going / 2 - 0.03)),
-          v3(w - 0.1, 0.006, 0.05),
-        ),
-      );
-    }
-    for (const x of [xa + 0.04, xb - 0.04])
-      b.box(
-        "steelPainted",
-        v3(x, ym - 0.08 * ny, zm - 0.08 * nz),
-        v3(0.06, 0.26, len),
-        { pitch },
-      );
-    // Handrails: slim black flat steel at 0.95 m above the nosing line,
-    // balusters below the rail only. Visual only (guards are vertical boxes).
-    const sides: { x: number; on: boolean }[] = [
-      { x: xa + 0.025, on: rails.a },
-      { x: xb - 0.025, on: rails.b },
-    ];
-    for (const { x, on } of sides) {
-      if (on) {
-        b.box("blackMetal", v3(x, ym + RAIL_TOP, zm), v3(0.04, 0.04, len), {
-          pitch,
-        });
-        const nb = Math.max(2, Math.round(run / BALUSTER_PITCH));
-        for (let i = 0; i <= nb; i++) {
-          const t = 0.04 + (0.92 * i) / nb;
-          const z = zTop + dir * t * run;
-          const y = yTop - t * drop;
-          b.box(
-            "blackMetal",
-            v3(x, y + 0.04 + (RAIL_TOP - 0.06) / 2, z),
-            v3(0.018, RAIL_TOP - 0.06, 0.018),
-          );
-        }
-      }
-      // Side guard: vertical, within the flight's z range (never pokes into
-      // a landing), optionally trimmed at a shared-landing end.
-      const top = yTop + 1.1;
-      const trim = trims.find((t) => Math.abs(t.x - x) < 0.1);
-      let za = zTop;
-      let zb = zBot;
-      if (trim?.end === "top") za = zTop + dir * trim.len;
-      if (trim?.end === "bottom") zb = zBot - dir * trim.len;
-      this.col(
-        new Vector3(x, (guardFloor + top) / 2, (za + zb) / 2),
-        new Vector3(0.05, top - guardFloor, Math.abs(zb - za)),
-      );
-    }
-    // Walkable ramp: top face through (zTop, yTop) → (zBot, yBot); extended
-    // 0.15 m past the bottom only (it sinks under the floor there).
-    const T = 0.2;
-    const ext = 0.15;
-    const L = len + ext;
-    // Centre of the top face, shifted down-slope by ext / 2.
-    const dz = (dir * run) / len;
-    const dy = -drop / len;
-    const cz = zm + (dz * ext) / 2 - nz * (T / 2);
-    const cy = ym + (dy * ext) / 2 - ny * (T / 2);
-    this.col(new Vector3(xm, cy, cz), new Vector3(w, T, L), { pitch });
-  }
-
-  /** Grating landing plate with a collider (top at y). */
-  private landing(b: ArtBatcher, r: Rect, y: number): void {
-    const cx = (r.x0 + r.x1) / 2;
-    const cz = (r.z0 + r.z1) / 2;
-    b.box(
-      "galvanised",
-      v3(cx, y - 0.025, cz),
-      v3(r.x1 - r.x0, 0.05, r.z1 - r.z0),
-    );
-    b.box("steelPainted", v3(cx, y - 0.12, cz), v3(r.x1 - r.x0, 0.14, 0.08));
-    this.col(
-      new Vector3(cx, y - 0.1, cz),
-      new Vector3(r.x1 - r.x0, 0.2, r.z1 - r.z0),
-    );
-  }
-
-  /** Straight guard rail (visual + collider) along an axis at height y0. */
-  private rail(
-    b: ArtBatcher,
-    axis: "x" | "z",
-    fixed: number,
-    a0: number,
-    a1: number,
-    y0: number,
-    colliderY0 = y0,
-  ): void {
-    const len = Math.abs(a1 - a0);
-    if (len < 0.05) return;
-    const c = (a0 + a1) / 2;
-    const at = (y: number) =>
-      axis === "z" ? v3(fixed, y, c) : v3(c, y, fixed);
-    const sz = (t: number, h: number) =>
-      axis === "z" ? v3(t, h, len) : v3(len, h, t);
-    b.box("blackMetal", at(y0 + RAIL_TOP), sz(0.04, 0.04));
-    const nb = Math.max(2, Math.round(len / BALUSTER_PITCH));
-    for (let i = 0; i <= nb; i++) {
-      const a = Math.min(a0, a1) + 0.03 + ((len - 0.06) * i) / nb;
-      b.box(
-        "blackMetal",
-        axis === "z"
-          ? v3(fixed, y0 + RAIL_TOP / 2, a)
-          : v3(a, y0 + RAIL_TOP / 2, fixed),
-        v3(0.018, RAIL_TOP, 0.018),
-      );
-    }
-    const top = y0 + 1.1;
-    const h = top - colliderY0;
-    this.col(
-      axis === "z"
-        ? new Vector3(fixed, colliderY0 + h / 2, c)
-        : new Vector3(c, colliderY0 + h / 2, fixed),
-      axis === "z" ? new Vector3(0.08, h, len) : new Vector3(len, h, 0.08),
-    );
-  }
-
-  private post(
-    b: ArtBatcher,
-    x: number,
-    z: number,
-    y0: number,
-    y1: number,
-  ): void {
-    b.box("steelPainted", v3(x, (y0 + y1) / 2, z), v3(0.12, y1 - y0, 0.12));
-    this.col(
-      new Vector3(x, (y0 + y1) / 2, z),
-      new Vector3(0.14, y1 - y0, 0.14),
-    );
-  }
-
   private buildStairs(b: ArtBatcher, fl: FactoryLayout): void {
     const fy = fl.floorY;
     // Spine-node stairs: one 35° flight from the well's top edge, carrying on
     // under the hall slab past the well (≥ 4 m headroom there).
     for (const st of fl.spineStairs) {
-      const r = st.rect;
-      this.flight(
-        b,
-        r.x0,
-        r.x1,
-        r.z0,
-        r.z0 + SPINE_RUN,
-        0,
-        fy,
-        { a: true, b: true },
-        fy,
-      );
+      steelFlight(b, this.ctx.colliders, G, spineFlight(st, fy), {
+        guardFloor: fy,
+      });
     }
     // Per-cell switchback stairs (balcony → entry bay): three 2 m flights.
     // The top landing sits at the balcony door's end (offsets mirror in z).
@@ -1317,15 +1108,20 @@ export class FactoryHall {
         z0: Math.min(Z(o0), Z(o1)),
         z1: Math.max(Z(o0), Z(o1)),
       });
-      const levels = [0, -2, -4, fy];
-      this.landing(b, R(S.top.x0, S.top.x1, S.top.z0, S.top.z1), 0);
+      const flights = cellStairFlights(c, fy);
+      steelLanding(
+        b,
+        this.ctx.colliders,
+        G,
+        R(S.top.x0, S.top.x1, S.top.z0, S.top.z1),
+        0,
+      );
       // Dividers: f1|f2 share the far landing (y −2), f2|f3 the near one
       // (y −4); their guards stop 0.7 m short of that end.
       const div = [S.flights[0].x1, S.flights[1].x1];
       const TRIM = 0.7;
-      S.flights.forEach((f, k) => {
-        const band = R(f.x0, f.x1, 0, 0);
-        const down = k % 2 === 0; // flights 1, 3 run near → far
+      flights.forEach((f, k) => {
+        const band = { x0: f.xa, x1: f.xb };
         const trims: { x: number; end: "top" | "bottom"; len: number }[] = [];
         if (k === 0) trims.push({ x: X(div[0]), end: "bottom", len: TRIM });
         if (k === 1) {
@@ -1335,31 +1131,104 @@ export class FactoryHall {
         if (k === 2) trims.push({ x: X(div[1]), end: "top", len: TRIM });
         // Guards sit 0.025 inside the band edge.
         for (const t of trims) t.x += band.x0 < t.x - 0.5 ? -0.025 : 0.025;
-        this.flight(
-          b,
-          band.x0,
-          band.x1,
-          Z(down ? S.zNear : S.zFar),
-          Z(down ? S.zFar : S.zNear),
-          levels[k],
-          levels[k + 1],
-          { a: true, b: true },
-          fy,
-          trims,
-        );
+        steelFlight(b, this.ctx.colliders, G, f, { guardFloor: fy, trims });
       });
-      this.landing(b, R(S.far.x0, S.far.x1, S.far.z0, S.far.z1), -2);
-      this.landing(b, R(S.near.x0, S.near.x1, S.near.z0, S.near.z1), -4);
+      steelLanding(
+        b,
+        this.ctx.colliders,
+        G,
+        R(S.far.x0, S.far.x1, S.far.z0, S.far.z1),
+        -2,
+      );
+      steelLanding(
+        b,
+        this.ctx.colliders,
+        G,
+        R(S.near.x0, S.near.x1, S.near.z0, S.near.z1),
+        -4,
+      );
       // Landing guards on the open edges (never across a flight entry).
       const g = 0.03;
-      this.rail(b, "x", Z(S.far.z1 - g), X(S.far.x0), X(S.far.x1), -2);
-      this.rail(b, "z", X(S.far.x0 + g), Z(S.far.z0), Z(S.far.z1), -2);
-      this.rail(b, "z", X(S.far.x1 - g), Z(S.far.z0), Z(S.far.z1), -2);
-      this.rail(b, "x", Z(S.near.z0 + g), X(S.near.x0), X(S.near.x1), -4);
-      this.rail(b, "z", X(S.near.x0 + g), Z(S.near.z0), Z(S.near.z1), -4);
-      this.rail(b, "z", X(S.near.x1 - g), Z(S.near.z0), Z(S.near.z1), -4);
-      this.rail(b, "x", Z(S.top.z0 + g), X(S.top.x0), X(S.top.x1), 0);
-      this.rail(b, "z", X(S.top.x1 - g), Z(S.top.z0), Z(S.top.z1), 0);
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "x",
+        Z(S.far.z1 - g),
+        X(S.far.x0),
+        X(S.far.x1),
+        -2,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "z",
+        X(S.far.x0 + g),
+        Z(S.far.z0),
+        Z(S.far.z1),
+        -2,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "z",
+        X(S.far.x1 - g),
+        Z(S.far.z0),
+        Z(S.far.z1),
+        -2,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "x",
+        Z(S.near.z0 + g),
+        X(S.near.x0),
+        X(S.near.x1),
+        -4,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "z",
+        X(S.near.x0 + g),
+        Z(S.near.z0),
+        Z(S.near.z1),
+        -4,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "z",
+        X(S.near.x1 - g),
+        Z(S.near.z0),
+        Z(S.near.z1),
+        -4,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "x",
+        Z(S.top.z0 + g),
+        X(S.top.x0),
+        X(S.top.x1),
+        0,
+      );
+      steelRail(
+        b,
+        this.ctx.colliders,
+        G,
+        "z",
+        X(S.top.x1 - g),
+        Z(S.top.z0),
+        Z(S.top.z1),
+        0,
+      );
       // Supports under the landings.
       for (const [x, o, y] of [
         [S.far.x0 + 0.06, S.far.z1 - 0.06, -2],
@@ -1368,7 +1237,41 @@ export class FactoryHall {
         [S.near.x0 + 0.06, S.near.z0 + 0.06, -4],
         [S.top.x1 - 0.06, S.top.z0 + 0.06, 0],
       ])
-        this.post(b, X(x), Z(o), fy, y - 0.19);
+        steelPost(b, this.ctx.colliders, G, X(x), Z(o), fy, y - 0.19);
+    }
+  }
+
+  /**
+   * Step-over crossovers on the feeders (`fl.crossovers`): a 33.7° steel
+   * flight up each side onto a grating deck 2 m above the floor (over the
+   * tallest workpiece), handrails continuous along the flights and the deck,
+   * legs outside the belt. Colliders: both ramps (flush with the floor and
+   * the deck), the deck plate, side guards over the flights, deck rails.
+   */
+  private buildCrossovers(b: ArtBatcher, fl: FactoryLayout): void {
+    const fy = fl.floorY;
+    const C = CROSSOVER;
+    const cols = this.ctx.colliders;
+    for (const x of fl.crossovers) {
+      const xa = x.x - C.W / 2;
+      const xb = x.x + C.W / 2;
+      const d0 = x.z - C.DECK_HALF;
+      const d1 = x.z + C.DECK_HALF;
+      for (const f of crossoverFlights(x, fy))
+        steelFlight(b, cols, G, f, { guardFloor: fy });
+      steelLanding(b, cols, G, { x0: xa, x1: xb, z0: d0, z1: d1 }, x.deckY);
+      for (const gx of [xa + 0.025, xb - 0.025]) {
+        steelRail(b, cols, G, "z", gx, d0, d1, x.deckY);
+        // Toe board along the deck edge.
+        b.box(
+          "steelPainted",
+          v3(gx, x.deckY + 0.05, x.z),
+          v3(0.01, 0.1, d1 - d0),
+        );
+      }
+      for (const px of [xa + 0.06, xb - 0.06])
+        for (const pz of [d0 + 0.06, d1 - 0.06])
+          steelPost(b, cols, G, px, pz, fy, x.deckY - 0.19);
     }
   }
 

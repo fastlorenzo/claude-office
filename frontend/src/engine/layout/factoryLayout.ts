@@ -33,6 +33,14 @@ export const FACTORY = {
   STATION_X: [28, 25.5, 23, 20.5, 18, 15.5],
   REWORK_X: 29,
   INTAKE_X: 31.75,
+  /** Technician's bench against the outer wall, at the end of the entry-bay walkway. */
+  BENCH_X: 32.85,
+  /**
+   * Loading aisle along the outer wall (|x| range): between the lane belt
+   * starts (31) and the intake racks (≥ 32.49); joins every cell's entry-bay
+   * walkway (the perimeter route from the factory door to every cell).
+   */
+  AISLE_X: [31.1, 32.35] as const,
   QA_X: 13.5,
   GATE_X: 11,
   TRUNK_X: 8.5,
@@ -76,6 +84,11 @@ export const ENTRANCE = {
   WALL_T: 0.3,
 } as const;
 
+/** Structural glass strip down the spine (over the factory main line). */
+export const SPINE_GLASS_W = 1.6;
+/** Glazed tower bay at the control-room end of the spine. */
+export const TOWER_BAY_D = 4;
+
 const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y, z });
 const sgn = (s: RoomSide): 1 | -1 => (s === "east" ? 1 : -1);
 
@@ -106,6 +119,113 @@ export interface StairLayout {
   top: Vec3;
   /** Landing at floor level (y = floorY). */
   bottom: Vec3;
+}
+
+/**
+ * Per-cell switchback stair: three 2 m flights side by side in the entry bay
+ * (|x| / z offsets from the cell's z0, mirrored toward the balcony door).
+ */
+export const CELL_STAIR = {
+  /** Top landing, joined to the balcony edge (balustrade gap there). */
+  top: { x0: 14.3, x1: 15.4, z0: 0.15, z1: 1.15 },
+  /** Flight x bands (flight 1 starts at the top landing). */
+  flights: [
+    { x0: 14.4, x1: 15.4 },
+    { x0: 15.4, x1: 16.4 },
+    { x0: 16.4, x1: 17.4 },
+  ],
+  /** Flights run between these z offsets. */
+  zNear: 1.15,
+  zFar: 4.02,
+  /** Far-end landing (flights 1 → 2, y = −2) and near-end (2 → 3, y = −4). */
+  far: { x0: 14.4, x1: 16.4, z0: 4.02, z1: 4.72 },
+  near: { x0: 15.4, x1: 17.4, z0: 0.15, z1: 1.15 },
+} as const;
+
+/**
+ * World z range of a cell stair's top landing on the balcony edge (the
+ * balcony balustrade leaves this gap open). The landing sits at the balcony
+ * door's end of the entry bay. Pure.
+ */
+export function cellStairGap(
+  z0: number,
+  doorZ: number,
+): { z0: number; z1: number } {
+  const W = LAYOUT.ROOM_W;
+  const m = doorZ - z0 > W / 2;
+  const a = m ? z0 + W - CELL_STAIR.top.z1 : z0 + CELL_STAIR.top.z0;
+  const b = m ? z0 + W - CELL_STAIR.top.z0 : z0 + CELL_STAIR.top.z1;
+  return { z0: a, z1: b };
+}
+
+/** Floor point just off a cell stair's last flight (teleports land here). */
+export function cellStairFoot(
+  side: "east" | "west",
+  z0: number,
+  doorZ: number,
+): { x: number; z: number } {
+  const s = side === "east" ? 1 : -1;
+  const W = LAYOUT.ROOM_W;
+  const m = doorZ - z0 > W / 2;
+  const o = (CELL_STAIR.far.z0 + CELL_STAIR.far.z1) / 2;
+  return { x: s * 18.4, z: m ? z0 + W - o : z0 + o };
+}
+
+/**
+ * Step-over crossover (stair · deck · stair) over a feeder belt, running
+ * along z at x. Every cell's feeder (trunk → main line) cuts the central
+ * strip between the main line and the trunks into bays; one crossover per
+ * feeder joins them, so the spine-stair feet and every bay reach the
+ * factory door on foot.
+ */
+export interface CrossoverLayout {
+  id: string;
+  x: number;
+  /** Belt centre line crossed (feeder z). */
+  z: number;
+  /** Deck top above the floor (y = floorY + deckH). */
+  deckY: number;
+  /** Plan footprint including both flights (x0 <= x1, z0 <= z1). */
+  rect: Rect;
+  /** Floor points just off each flight's foot (south, north). */
+  feet: [Vec3, Vec3];
+}
+
+export const CROSSOVER = {
+  /** |x| of the centre line: clear of the spine flights (≤ 3.5), the feeder
+   * bollards (3.3 / 6.3) and the trunk (≥ 8.05). */
+  X: 4.8,
+  /** Clear width between the handrail posts (flight / deck width). */
+  W: 1.0,
+  /** Deck top above the floor: the tallest piece tops out at 1.65 (belt
+   * 0.85 + pallet 0.14 + body 0.66); the deck structure clears it. */
+  DECK_H: 2.0,
+  /** Deck half length (z) over the belt (0.9 + skirts, posts outside). */
+  DECK_HALF: 0.75,
+  /** Each flight's run: 2.0 / 3.0 → 33.7° (≤ STAIR_MAX_DEG). */
+  RUN: 3.0,
+} as const;
+
+/** Feeder crossovers of a cell set (pure). */
+export function crossoverPlan(
+  cells: readonly Pick<CellLayout, "projectId" | "side" | "trunk">[],
+  floorY = FLOOR_Y,
+): CrossoverLayout[] {
+  const C = CROSSOVER;
+  const reach = C.DECK_HALF + C.RUN;
+  return cells.map((c) => {
+    const s = sgn(c.side);
+    const x = s * C.X;
+    const z = c.trunk.feederZ;
+    return {
+      id: `crossover:${c.projectId}`,
+      x,
+      z,
+      deckY: floorY + C.DECK_H,
+      rect: rectOf(x - C.W / 2, x + C.W / 2, z - reach, z + reach),
+      feet: [v3(x, floorY, z - reach - 0.6), v3(x, floorY, z + reach + 0.6)],
+    };
+  });
 }
 
 export interface CellLayout {
@@ -191,8 +311,8 @@ export interface FactoryLayout {
   mainLine: { x: number; z0: number; z1: number; qc: number };
   dock: Rect;
   spineStairs: StairLayout[];
-  /** The west entrance stair (alias of `entrance.stairs[0]`). */
-  lobbyStair: StairLayout;
+  /** Step-over crossovers on the feeders (one per cell). */
+  crossovers: CrossoverLayout[];
   /** The entrance lift (G ↔ 1); interaction-driven, see EntranceHall. */
   liftSpots: { id: string; rect: Rect; top: Vec3; bottom: Vec3 }[];
   entrance: EntranceLayout;
@@ -245,13 +365,23 @@ export function buildFactoryLayout(
     }));
     const entryZ = z0 + ROOM_W / 2;
     const doorZ = room.balcony.door.z;
-    const stairX0 = s * 14.4;
-    const stairX1 = s * 16.4;
+    // The built switchback (CELL_STAIR): landings + flights footprint, and
+    // the foot just off its last flight.
+    const S = CELL_STAIR;
+    const gap = cellStairGap(z0, doorZ);
+    const mirrored = doorZ - z0 > ROOM_W / 2;
+    const zo = (o: number) => (mirrored ? z0 + ROOM_W - o : z0 + o);
+    const foot = cellStairFoot(room.slot.side, z0, doorZ);
     const stair: StairLayout = {
       id: `cell:${room.projectId}`,
-      rect: rectOf(stairX0, stairX1, z0 + 0.3, z0 + ROOM_W - 0.3),
+      rect: rectOf(
+        s * S.top.x0,
+        s * S.flights[2].x1,
+        Math.min(zo(S.top.z0), zo(S.far.z1), gap.z0),
+        Math.max(zo(S.top.z0), zo(S.far.z1), gap.z1),
+      ),
       top: v3(room.balcony.door.x, 0, doorZ),
-      bottom: v3(s * 17.2, FLOOR_Y, entryZ),
+      bottom: v3(foot.x, FLOOR_Y, foot.z),
     };
     return {
       projectId: room.projectId,
@@ -266,9 +396,11 @@ export function buildFactoryLayout(
         position: v3(s * (outerX - 0.4), FLOOR_Y + 3, (z0 + z1) / 2),
         yaw: s > 0 ? -Math.PI / 2 : Math.PI / 2,
       },
-      bench: v3(s * FACTORY.INTAKE_X, FLOOR_Y, z0 + 2.4),
-      holding: v3(s * 24, FLOOR_Y, z0 + 3.6),
-      scrap: v3(s * 24, FLOOR_Y, z0 + 1.2),
+      bench: v3(s * FACTORY.BENCH_X, FLOOR_Y, z0 + 2.4),
+      // Holding rack (long side along x) and scrap bin flank the entry-bay
+      // walkway (z0 + 2.4 ± 0.66) without blocking it.
+      holding: v3(s * 24, FLOOR_Y, z0 + 4.2),
+      scrap: v3(s * 24, FLOOR_Y, z0 + 0.95),
       technician: v3(s * 20, FLOOR_Y, entryZ),
       stair,
       columns: room.columns.map((c) => v3(c.x, FLOOR_Y, c.z)),
@@ -307,7 +439,7 @@ export function buildFactoryLayout(
     mainLine: { x: 0, z0: 0, z1: dock.z0, qc: dock.z0 - 3 },
     dock,
     spineStairs,
-    lobbyStair: entrance.stairs[0],
+    crossovers: crossoverPlan(cells),
     liftSpots: [
       {
         id: lift.id,
@@ -354,8 +486,8 @@ export const SPINE_STAIR = {
   PLANTER_CLEAR: 0.5,
   /** Feeder belt half width + capsule + margin. */
   FEEDER_CLEAR: 1.0,
-  /** Glazed tower bay at the hall end (mirrors Building TOWER_BAY_D). */
-  TOWER_BAY_D: 4,
+  /** Glazed tower bay at the hall end. */
+  TOWER_BAY_D,
 } as const;
 
 /** Floor-level z range a spine flight + its foot occupy (from the well's z0). */
