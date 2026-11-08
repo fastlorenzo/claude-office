@@ -163,6 +163,14 @@ function parseParams() {
     demoFactory: q.get("demoFactory") === "1",
     drawBreakdown: q.get("drawdbg") === "1",
     panel: q.get("panel") === "1",
+    /** Dispose a first world after this many ms and build a second one on the same canvas (HMR / Fast Refresh remount). */
+    remount: Number(q.get("remount") ?? 0) || 0,
+    /** Session count changes after ready (nstep=10@2000,3@5000: n@ms). */
+    nSteps: (q.get("nstep") ?? "")
+      .split(",")
+      .map((x) => x.split("@").map(Number))
+      .filter(([c, ms]) => c >= 0 && c <= 32 && ms >= 0)
+      .map(([c, ms]) => ({ n: c, ms })),
     tierSteps: (q.get("tierStep") ?? "")
       .split(",")
       .map((x) => x.split("@"))
@@ -201,6 +209,25 @@ export default function WorldDebugPage() {
         import("@/engine/demo/demoCampus"),
       ]);
       if (cancelled) return;
+      if (p.remount > 0) {
+        // Fast Refresh re-runs WorldCanvas' effect: the first world is
+        // disposed mid-init and a new one takes the same canvas.
+        const first = createWorld(
+          canvas,
+          {
+            quality: p.quality,
+            graphics: p.graphics,
+            cameraMode: p.cameraMode,
+            isMobile: false,
+            assetBase: "/assets",
+          },
+          { preserveDrawingBuffer: p.shot },
+        );
+        void first.init().catch(() => undefined);
+        await new Promise((r) => setTimeout(r, p.remount));
+        first.dispose();
+        if (cancelled) return;
+      }
       world = createWorld(
         canvas,
         {
@@ -244,6 +271,12 @@ export default function WorldDebugPage() {
             const w = world as unknown as { debugInspect?: () => void };
             w.debugInspect?.();
           }
+          for (const st of p.nSteps)
+            setTimeout(() => {
+              if (cancelled) return;
+              n = st.n;
+              feed();
+            }, st.ms);
           if (p.tierSteps.length) {
             // Deterministic live tier change (e.g. tierStep=low@60,high@120).
             let n = 0;
@@ -272,6 +305,7 @@ export default function WorldDebugPage() {
       );
       // Screenshot mode freezes the demo clock so frames are deterministic.
       const t0 = Date.now();
+      let n = p.n;
       let live: LiveCampus | null = null;
       if (p.live)
         offs.push(
@@ -282,7 +316,7 @@ export default function WorldDebugPage() {
         );
       const feed = () => {
         const demo = createDemoCampus(
-          p.n,
+          n,
           p.shot ? (p.t ?? 20000) : Date.now() - t0 + 20000,
         );
         if (live) {

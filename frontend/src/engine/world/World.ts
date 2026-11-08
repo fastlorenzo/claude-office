@@ -106,6 +106,7 @@ import { computeCellVisibility } from "@/engine/world/factoryVisibility";
 import { ControlRoom } from "@/engine/world/ControlRoom";
 import { ProjectRoom } from "@/engine/world/ProjectRoom";
 import { Room, type RoomContext } from "@/engine/world/Room";
+import { claimCanvas, type ClaimedCanvas } from "@/engine/world/ownCanvas";
 import {
   halfFovFor,
   VISIBILITY_HZ,
@@ -302,28 +303,44 @@ class World implements IWorld {
    * (WorldCanvas) skips the 2 Hz scene walk.
    */
   private readonly statsOn: boolean;
+  /** Private canvas (own WebGL context, lost on dispose): see ownCanvas.ts. */
+  private readonly claimed: ClaimedCanvas;
+  private readonly canvas: HTMLCanvasElement;
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    host: HTMLCanvasElement,
     private readonly opts: WorldOptions,
     debug?: WorldDebugOptions,
   ) {
+    this.claimed = claimCanvas(host);
+    const canvas = this.claimed.canvas;
+    this.canvas = canvas;
     this.debug = debug ?? {};
-    this.statsOn = debug !== undefined;
+    this.statsOn =
+      debug !== undefined ||
+      (typeof location !== "undefined" &&
+        /[?&]worldstats=1/.test(location.search));
     this.cameraMode = opts.cameraMode;
     Logger.LogLevels = Logger.WarningLogLevel | Logger.ErrorLogLevel;
-    this.engine = new Engine(
-      canvas,
-      true,
-      {
-        stencil: true,
-        antialias: true,
-        preserveDrawingBuffer: !!debug?.preserveDrawingBuffer,
-        powerPreference: "high-performance",
-        doNotHandleContextLost: false,
-      },
-      true,
-    );
+    try {
+      this.engine = new Engine(
+        canvas,
+        true,
+        {
+          stencil: true,
+          antialias: true,
+          preserveDrawingBuffer: !!debug?.preserveDrawingBuffer,
+          powerPreference: "high-performance",
+          doNotHandleContextLost: false,
+          // Safe: the context is this World's alone (claimCanvas).
+          loseContextOnDispose: true,
+        },
+        true,
+      );
+    } catch (err) {
+      this.claimed.release(); // no WebGL: leave the host as it was
+      throw err;
+    }
     const scene = new Scene(this.engine);
     scene.clearColor = new Color4(0.86, 0.87, 0.88, 1);
     scene.skipPointerMovePicking = true;
@@ -591,6 +608,7 @@ class World implements IWorld {
     this.engineInstr.dispose();
     this.scene.dispose();
     this.engine.dispose();
+    this.claimed.release();
     this.events.clear();
   }
 
@@ -1192,6 +1210,30 @@ class World implements IWorld {
     );
   }
 
+  /**
+   * Debug: building-part meshes that cannot draw (disabled, invisible, or
+   * material not ready) — the architecture must never silently vanish.
+   */
+  private buildingDiag(): { n: number; bad: string[] } {
+    const bad: string[] = [];
+    let n = 0;
+    for (const m of this.scene.meshes) {
+      if (!/^(lobby|entrance|outer|shell|factory|exterior|empty):/.test(m.name))
+        continue;
+      n += 1;
+      const why: string[] = [];
+      if (!m.isEnabled()) why.push(m.isEnabled(false) ? "parentOff" : "off");
+      if (!m.isVisible) why.push("invisible");
+      const mat = m.material;
+      if (mat && !mat.isReady(m)) why.push("matNotReady");
+      if (why.length) {
+        const y = Math.round(m.getBoundingInfo().boundingBox.minimumWorld.y);
+        bad.push(`${m.name}:${why.join("+")}@y${y}`);
+      }
+    }
+    return { n, bad: bad.slice(0, 40) };
+  }
+
   /** Debug: active meshes of the building parts with their world bounds. */
   private activeNames(): string[] {
     const out: string[] = [];
@@ -1300,6 +1342,7 @@ class World implements IWorld {
         zone: zone.kind,
         kinds: this.activeKinds(),
         factory: this.factoryLines?.stats(),
+        bld: this.buildingDiag(),
         ...(this.debug.drawBreakdown
           ? {
               passes: this.passDraws,
