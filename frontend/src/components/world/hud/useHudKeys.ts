@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useWorldUiStore, type HudPanel } from "@/stores/worldUiStore";
+import { BINDINGS } from "@/engine/input/bindings";
 import { PANELS } from "./panels";
 
 /** Opens the full-screen Ops dashboard from anywhere. */
@@ -23,7 +24,7 @@ function isTyping(el: Element | null): boolean {
   );
 }
 
-/** Keyboard-first panel control: Tab/G/C/L/A/M/O/H toggle, B ops dashboard, Esc closes the top. */
+/** Keyboard-first panel control: Tab/G/C/L/T/M/O/H toggle, B ops dashboard, Esc closes the top. */
 export function useHudKeys(): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -33,6 +34,12 @@ export function useHudKeys(): void {
 
       const ui = useWorldUiStore.getState();
       if (!ui.ready) return;
+
+      // Engine-owned codes (WASD, arrows, V, N, F, R, Enter...) never reach the
+      // HUD while the world has input; this is what froze the player on `A`.
+      const inputEnabled =
+        ui.panels.length === 0 && !ui.opsOpen && ui.peerPopup === null;
+      if (inputEnabled && BINDINGS[e.code] !== undefined) return;
 
       if (e.key === "Escape") {
         if (ui.opsOpen) {

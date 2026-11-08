@@ -1,6 +1,7 @@
 /**
  * Key bindings by `KeyboardEvent.code` (layout independent: WASD stays put on
- * AZERTY). The HUD owns Tab/G/C/L/A/M/H/Esc; the engine owns these.
+ * AZERTY). The HUD owns Tab/G/C/L/T/M/O/H/B/Esc; the engine owns these. The two sets
+ * must stay disjoint (useHudKeys also ignores engine codes while input is on).
  */
 export type HoldAction =
   "forward" | "back" | "left" | "right" | "sprint" | "jump" | "lobby";

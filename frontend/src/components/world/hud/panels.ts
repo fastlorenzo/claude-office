@@ -63,8 +63,8 @@ export const PANELS: Record<HudPanel, PanelMeta> = {
   },
   agents: {
     id: "agents",
-    keyLabel: "A",
-    keys: ["a"],
+    keyLabel: "T",
+    keys: ["t"],
     icon: Bot,
     titleKey: "hud.panel.agents",
     hintKey: "hud.keys.agents",
