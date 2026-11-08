@@ -43,6 +43,13 @@ from app.models.common import (  # noqa: E402  # type: ignore[import]
     SpeechContent,
     TodoItem,
 )
+from app.models.console import (  # noqa: E402  # type: ignore[import]
+    AgentNode,
+    ConsoleHeader,
+    ConsoleSnapshot,
+    ToolCall,
+    ToolCallDetail,
+)
 from app.models.events import (  # noqa: E402  # type: ignore[import]
     AgentEventData,
     BackgroundTaskEventData,
@@ -137,6 +144,12 @@ MODELS = [
     PrLabel,
     PullRequestInfo,
     ReleaseInfo,
+    # Session Console (docs/design/session-console.md, section 3.3).
+    ToolCall,
+    AgentNode,
+    ConsoleHeader,
+    ConsoleSnapshot,
+    ToolCallDetail,
 ]
 
 # Generate combined JSON schema with camelCase field names (by_alias=True)
@@ -172,6 +185,15 @@ try:
         print(result.stdout)
     if result.stderr:
         print(result.stderr, file=sys.stderr)
+    # json2ts formats with its own bundled prettier defaults; re-format with the
+    # frontend's config so `make fmt` (prettier --write .) never rewrites the file.
+    subprocess.run(
+        ["bunx", "prettier", "--write", str(output_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=str(Path(__file__).parent.parent / "frontend"),
+    )
 except subprocess.CalledProcessError as e:
     print(f"Error generating types: {e.stderr}", file=sys.stderr)
     sys.exit(1)

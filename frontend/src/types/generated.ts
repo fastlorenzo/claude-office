@@ -78,10 +78,27 @@ export type Agentname = string;
 export type Color1 = string;
 export type Starttime = string;
 export type Endtime = string | null;
+export type Id1 = string;
+export type Nativeid1 = string | null;
+export type Parentid1 = string | null;
+export type Kind = "main" | "subagent" | "teammate" | "background";
+export type Name1 = string;
+export type Agenttype = string | null;
+export type Color2 = string | null;
+export type Taskpreview = string | null;
+export type State = string;
+export type Startedat = string | null;
+export type Endedat = string | null;
+export type Spawntooluseid = string | null;
+export type Resultpreview = string | null;
+export type Toolcalls = number;
+export type Errors = number;
+export type Currentactivity = string | null;
+export type Rev = number;
 export type Taskid = string;
 export type Status = string;
 export type Summary1 = string | null;
-export type Startedat = string | null;
+export type Startedat1 = string | null;
 export type Completedat = string | null;
 export type ProjectName1 = string | null;
 export type ProjectDir1 = string | null;
@@ -127,8 +144,8 @@ export type Timestamp = string;
 export type Type = string;
 export type Agentid1 = string;
 export type Summary3 = string;
-export type Id1 = string;
-export type Name1 = string;
+export type Id2 = string;
+export type Name2 = string;
 export type Repo = string | null;
 export type Defaultbranch = string | null;
 export type Sessionids = string[];
@@ -138,23 +155,23 @@ export type Branch = string;
 export type Author = string | null;
 export type Url = string | null;
 export type Draft = boolean;
-export type State = "open" | "merged" | "closed";
+export type State1 = "open" | "merged" | "closed";
 export type Reviewdecision =
   ("approved" | "changes_requested" | "review_required") | null;
 export type Mergeable = ("mergeable" | "conflicting" | "unknown") | null;
-export type State1 =
+export type State2 =
   "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Total = number;
 export type Passed = number;
 export type Failed = number;
 export type Pending = number;
-export type Name2 = string;
-export type State2 =
+export type Name3 = string;
+export type State3 =
   "none" | "queued" | "running" | "success" | "failure" | "cancelled";
-export type Startedat1 = string | null;
+export type Startedat2 = string | null;
 export type Durations = number | null;
 export type Url1 = string | null;
-export type Kind =
+export type Kind1 =
   "test" | "build" | "lint" | "security" | "deploy" | "release" | "other";
 export type Attempt = number | null;
 export type Flaky = boolean;
@@ -165,8 +182,8 @@ export type Basebranch = string | null;
 export type Additions = number | null;
 export type Deletions = number | null;
 export type Changedfiles = number | null;
-export type Name3 = string;
-export type Color2 = string | null;
+export type Name4 = string;
+export type Color3 = string | null;
 export type Labels = PrLabel[];
 export type Bot = boolean;
 export type Conflict = boolean;
@@ -176,13 +193,13 @@ export type Createdat = string | null;
 export type Mergedat = string | null;
 export type Closedat = string | null;
 export type Pullrequests = PullRequestInfo[];
-export type Id2 = string;
+export type Id3 = string;
 export type Workflow = string;
-export type Kind1 = "ci" | "deploy" | "release" | "other";
+export type Kind2 = "ci" | "deploy" | "release" | "other";
 export type Branch1 = string | null;
-export type State3 =
+export type State4 =
   "none" | "queued" | "running" | "success" | "failure" | "cancelled";
-export type Startedat2 = string | null;
+export type Startedat3 = string | null;
 export type Durations1 = number | null;
 export type Url2 = string | null;
 export type Event = string | null;
@@ -195,7 +212,7 @@ export type Updatedat1 = string;
 export type Mainhealth =
   "none" | "queued" | "running" | "success" | "failure" | "cancelled";
 export type Tag = string;
-export type Name4 = string | null;
+export type Name5 = string | null;
 export type Publishedat = string | null;
 export type Prerelease = boolean;
 export type Url3 = string | null;
@@ -261,7 +278,7 @@ export type Summary4 = string | null;
 export type Refs = string[];
 export type Project = string | null;
 export type Projectid = string | null;
-export type Kind2 =
+export type Kind3 =
   | "needs_approval"
   | "waiting_user"
   | "planning"
@@ -298,12 +315,12 @@ export type Outputstyle = string | null;
 export type Source2 = ("statusline" | "transcript") | null;
 export type Updatedat2 = string;
 export type Eventspermin = number[];
-export type Toolcalls = number;
+export type Toolcalls1 = number;
 export type Subagentsspawned = number;
 export type Subagentsrunning = number | null;
 export type Testruns = number;
 export type Testfailures = number;
-export type Errors = number;
+export type Errors1 = number;
 export type Lasteventat = string | null;
 export type Lastupdated = string;
 export type Sessions = CampusSession[];
@@ -348,12 +365,54 @@ export type Timestamp1 = string;
  * Human-readable relative time (e.g., '2 hours ago')
  */
 export type RelativeTime = string;
-export type Id3 = string;
-export type Role = string;
+export type Sessionid3 = string;
+export type Project1 = string | null;
+export type Branch4 = string | null;
+export type Alive1 = boolean | null;
+export type Ended1 = boolean;
+export type Startedat4 = string | null;
+export type Lasteventat1 = string | null;
+export type Agents1 = AgentNode[];
+export type Id4 = string;
+export type Seq = number;
+export type Rev1 = number;
 export type Agentid2 = string;
+export type Toolname = string;
+export type Kind4 = string | null;
+export type Target = string | null;
+export type Inputpreview = {
+  [k: string]: unknown;
+} | null;
+export type Inputtruncated = boolean;
+export type Outputpreview = string | null;
+export type Outputbytes = number | null;
+export type Outputtruncated = boolean;
+export type Error = string | null;
+export type Status1 =
+  | "running"
+  | "waiting_permission"
+  | "ok"
+  | "error"
+  | "denied"
+  | "interrupted"
+  | "spawned";
+export type Startedat5 = string;
+export type Endedat1 = string | null;
+export type Durationms1 = number | null;
+export type Permissionrequestedat = string | null;
+export type Permissionwaitms = number | null;
+export type Spawnedagentid = string | null;
+export type Toolcalls2 = ToolCall[];
+export type Hasmore = boolean;
+export type Oldestseq = number | null;
+export type Id5 = string;
+export type Role = string;
+export type Agentid3 = string;
 export type Text1 = string;
 export type Timestamp2 = string;
-export type Toolname = string;
+export type Toolname1 = string;
+export type Conversation = ConversationEntry[];
+export type Todos1 = TodoItem[];
 /**
  * Visual states for the elevator.
  *
@@ -433,6 +492,14 @@ export type TeamName2 = string | null;
 export type TeammateName2 = string | null;
 export type TaskId1 = string | null;
 export type TaskSubject = string | null;
+export type CallerNativeAgentId = string | null;
+export type CallerAgentType = string | null;
+export type ToolOutput = string | null;
+export type ToolOutputBytes = number | null;
+export type ToolOutputTruncated = boolean | null;
+export type ErrorMessage = string | null;
+export type Interrupted = boolean | null;
+export type PromptTruncated = boolean | null;
 export type ProjectName3 = string | null;
 export type ProjectDir3 = string | null;
 export type WorkingDir3 = string | null;
@@ -454,21 +521,21 @@ export type FloorId3 = string | null;
 export type RoomId3 = string | null;
 export type Filepath = string;
 export type Editcount = number;
-export type Sessionid3 = string;
-export type Agents1 = Agent[];
+export type Sessionid4 = string;
+export type Agents2 = Agent[];
 export type Lastupdated2 = string;
-export type Id4 = string;
+export type Id6 = string;
 export type Type1 = string;
-export type Agentid3 = string;
+export type Agentid4 = string;
 export type Summary7 = string;
 export type Timestamp4 = string;
 export type History = HistoryEntry[];
-export type Todos1 = TodoItem[];
+export type Todos2 = TodoItem[];
 export type Arrivalqueue = string[];
 export type Departurequeue = string[];
 export type Taskid1 = string;
 export type Subject = string;
-export type Status1 = string;
+export type Status2 = string;
 export type Assignee = string | null;
 export type Linearid = string | null;
 export type Kanbantasks = KanbanTask[];
@@ -488,13 +555,13 @@ export type Timestamp5 = string;
 export type Newsitems = NewsItem[];
 export type Coffeecups = number;
 export type Backgroundtasks = BackgroundTask[];
-export type Conversation = ConversationEntry[];
+export type Conversation1 = ConversationEntry[];
 export type Floorid = string | null;
 export type Roomid = string | null;
 /**
  * Current branch name
  */
-export type Branch4 = string;
+export type Branch5 = string;
 /**
  * Commits ahead of remote
  */
@@ -535,7 +602,7 @@ export type RoomId4 = string | null;
 export type NotificationType1 = string | null;
 export type ErrorType1 = string | null;
 export type Reason1 = string | null;
-export type Sessionid4 = string;
+export type Sessionid5 = string;
 export type Bucket1 = "needs_you" | "working" | "done";
 export type Currenttask2 = string | null;
 export type Tododone = number;
@@ -570,10 +637,11 @@ export type CacheCreationTokens5 = number | null;
 export type FloorId5 = string | null;
 export type RoomId5 = string | null;
 export type Prompt1 = string | null;
-export type Id5 = string;
+export type PromptTruncated1 = boolean | null;
+export type Id7 = string;
 export type CreatedAt = string;
 export type UpdatedAt = string;
-export type Status2 = string;
+export type Status3 = string;
 export type EventCount = number;
 export type AgentCount = number;
 export type ProjectName6 = string | null;
@@ -617,6 +685,12 @@ export type FloorId7 = string | null;
 export type RoomId7 = string | null;
 export type TaskId2 = string | null;
 export type TaskSubject1 = string | null;
+export type Input = {
+  [k: string]: unknown;
+} | null;
+export type Output = string | null;
+export type Outputsource = "transcript" | "hook" | "none";
+export type Outputtruncated1 = boolean;
 export type ProjectName8 = string | null;
 export type ProjectDir8 = string | null;
 export type WorkingDir8 = string | null;
@@ -645,6 +719,13 @@ export type Success2 = boolean | null;
 export type ResultSummary2 = string | null;
 export type ErrorType2 = string | null;
 export type Thinking2 = string | null;
+export type CallerNativeAgentId1 = string | null;
+export type CallerAgentType1 = string | null;
+export type ToolOutput1 = string | null;
+export type ToolOutputBytes1 = number | null;
+export type ToolOutputTruncated1 = boolean | null;
+export type ErrorMessage1 = string | null;
+export type Interrupted1 = boolean | null;
 
 export interface ClaudeOfficeBackendTypes {
   [k: string]: unknown;
@@ -756,6 +837,32 @@ export interface AgentLifespan {
   [k: string]: unknown;
 }
 /**
+ * One node of the session's agent tree (main is the root).
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "AgentNode".
+ */
+export interface AgentNode {
+  id: Id1;
+  nativeId: Nativeid1;
+  parentId: Parentid1;
+  kind: Kind;
+  name: Name1;
+  agentType: Agenttype;
+  color: Color2;
+  taskPreview: Taskpreview;
+  state: State;
+  startedAt: Startedat;
+  endedAt: Endedat;
+  spawnToolUseId: Spawntooluseid;
+  resultPreview: Resultpreview;
+  toolCalls: Toolcalls;
+  errors: Errors;
+  currentActivity: Currentactivity;
+  rev: Rev;
+  [k: string]: unknown;
+}
+/**
  * Background task tracking for remote workers display.
  *
  * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
@@ -765,7 +872,7 @@ export interface BackgroundTask {
   taskId: Taskid;
   status: Status;
   summary?: Summary1;
-  startedAt?: Startedat;
+  startedAt?: Startedat1;
   completedAt?: Completedat;
   [k: string]: unknown;
 }
@@ -835,8 +942,8 @@ export interface CampusActivity {
  * via the `definition` "CampusProject".
  */
 export interface CampusProject {
-  id: Id1;
-  name: Name1;
+  id: Id2;
+  name: Name2;
   repo?: Repo;
   defaultBranch?: Defaultbranch;
   sessionIds?: Sessionids;
@@ -864,7 +971,7 @@ export interface PullRequestInfo {
   author?: Author;
   url?: Url;
   draft?: Draft;
-  state: State;
+  state: State1;
   reviewDecision?: Reviewdecision;
   mergeable?: Mergeable;
   checks?: CheckSummary;
@@ -889,7 +996,7 @@ export interface PullRequestInfo {
  * via the `definition` "CheckSummary".
  */
 export interface CheckSummary {
-  state?: State1;
+  state?: State2;
   total?: Total;
   passed?: Passed;
   failed?: Failed;
@@ -902,12 +1009,12 @@ export interface CheckSummary {
  * via the `definition` "CheckRun".
  */
 export interface CheckRun {
-  name: Name2;
-  state: State2;
-  startedAt?: Startedat1;
+  name: Name3;
+  state: State3;
+  startedAt?: Startedat2;
   durationS?: Durations;
   url?: Url1;
-  kind?: Kind;
+  kind?: Kind1;
   attempt?: Attempt;
   flaky?: Flaky;
   [k: string]: unknown;
@@ -917,8 +1024,8 @@ export interface CheckRun {
  * via the `definition` "PrLabel".
  */
 export interface PrLabel {
-  name: Name3;
-  color?: Color2;
+  name: Name4;
+  color?: Color3;
   [k: string]: unknown;
 }
 /**
@@ -926,12 +1033,12 @@ export interface PrLabel {
  * via the `definition` "PipelineRun".
  */
 export interface PipelineRun {
-  id: Id2;
+  id: Id3;
   workflow: Workflow;
-  kind?: Kind1;
+  kind?: Kind2;
   branch?: Branch1;
-  state?: State3;
-  startedAt?: Startedat2;
+  state?: State4;
+  startedAt?: Startedat3;
   durationS?: Durations1;
   url?: Url2;
   event?: Event;
@@ -946,7 +1053,7 @@ export interface PipelineRun {
  */
 export interface ReleaseInfo {
   tag: Tag;
-  name?: Name4;
+  name?: Name5;
   publishedAt?: Publishedat;
   prerelease?: Prerelease;
   url?: Url3;
@@ -1061,7 +1168,7 @@ export interface TodoItem {
  * via the `definition` "SessionPhase".
  */
 export interface SessionPhase {
-  kind: Kind2;
+  kind: Kind3;
   label: Label;
   detail?: Detail;
   since?: Since;
@@ -1096,12 +1203,12 @@ export interface SessionTelemetry {
 export interface SessionActivityStats {
   eventsPerMin?: Eventspermin;
   toolMix?: Toolmix;
-  toolCalls?: Toolcalls;
+  toolCalls?: Toolcalls1;
   subagentsSpawned?: Subagentsspawned;
   subagentsRunning?: Subagentsrunning;
   testRuns?: Testruns;
   testFailures?: Testfailures;
-  errors?: Errors;
+  errors?: Errors1;
   [k: string]: unknown;
 }
 export interface Toolmix {
@@ -1181,18 +1288,81 @@ export interface Commit {
   [k: string]: unknown;
 }
 /**
+ * Console header, assembled from CampusSession + telemetry + the sessions row.
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "ConsoleHeader".
+ */
+export interface ConsoleHeader {
+  sessionId: Sessionid3;
+  project: Project1;
+  branch: Branch4;
+  phase: SessionPhase | null;
+  alive: Alive1;
+  ended: Ended1;
+  startedAt: Startedat4;
+  lastEventAt: Lasteventat1;
+  telemetry: SessionTelemetry | null;
+  [k: string]: unknown;
+}
+/**
+ * ``GET /api/v1/sessions/{id}/console`` response.
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "ConsoleSnapshot".
+ */
+export interface ConsoleSnapshot {
+  header: ConsoleHeader;
+  agents: Agents1;
+  toolCalls: Toolcalls2;
+  hasMore: Hasmore;
+  oldestSeq: Oldestseq;
+  conversation: Conversation;
+  todos: Todos1;
+  [k: string]: unknown;
+}
+/**
+ * One tool call: pre, post and permission events merged (previews only).
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "ToolCall".
+ */
+export interface ToolCall {
+  id: Id4;
+  seq: Seq;
+  rev: Rev1;
+  agentId: Agentid2;
+  toolName: Toolname;
+  kind: Kind4;
+  target: Target;
+  inputPreview: Inputpreview;
+  inputTruncated: Inputtruncated;
+  outputPreview: Outputpreview;
+  outputBytes: Outputbytes;
+  outputTruncated: Outputtruncated;
+  error: Error;
+  status: Status1;
+  startedAt: Startedat5;
+  endedAt: Endedat1;
+  durationMs: Durationms1;
+  permissionRequestedAt: Permissionrequestedat;
+  permissionWaitMs: Permissionwaitms;
+  spawnedAgentId: Spawnedagentid;
+  [k: string]: unknown;
+}
+/**
  * A single turn in the conversation history.
  *
  * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
  * via the `definition` "ConversationEntry".
  */
 export interface ConversationEntry {
-  id: Id3;
+  id: Id5;
   role: Role;
-  agentId: Agentid2;
+  agentId: Agentid3;
   text: Text1;
   timestamp: Timestamp2;
-  toolName?: Toolname;
+  toolName?: Toolname1;
   [k: string]: unknown;
 }
 /**
@@ -1268,6 +1438,14 @@ export interface EventData {
   teammate_name?: TeammateName2;
   task_id?: TaskId1;
   task_subject?: TaskSubject;
+  caller_native_agent_id?: CallerNativeAgentId;
+  caller_agent_type?: CallerAgentType;
+  tool_output?: ToolOutput;
+  tool_output_bytes?: ToolOutputBytes;
+  tool_output_truncated?: ToolOutputTruncated;
+  error_message?: ErrorMessage;
+  interrupted?: Interrupted;
+  prompt_truncated?: PromptTruncated;
   [k: string]: unknown;
 }
 /**
@@ -1319,17 +1497,17 @@ export interface FileEdit {
  * via the `definition` "GameState".
  */
 export interface GameState {
-  sessionId: Sessionid3;
+  sessionId: Sessionid4;
   boss: Boss1;
-  agents: Agents1;
+  agents: Agents2;
   office: OfficeState;
   lastUpdated: Lastupdated2;
   history?: History;
-  todos?: Todos1;
+  todos?: Todos2;
   arrivalQueue?: Arrivalqueue;
   departureQueue?: Departurequeue;
   whiteboardData?: WhiteboardData;
-  conversation?: Conversation;
+  conversation?: Conversation1;
   floorId?: Floorid;
   roomId?: Roomid;
   [k: string]: unknown;
@@ -1341,9 +1519,9 @@ export interface GameState {
  * via the `definition` "HistoryEntry".
  */
 export interface HistoryEntry {
-  id: Id4;
+  id: Id6;
   type: Type1;
-  agentId: Agentid3;
+  agentId: Agentid4;
   summary: Summary7;
   timestamp: Timestamp4;
   detail: Detail1;
@@ -1389,7 +1567,7 @@ export interface Toolusage {
 export interface KanbanTask {
   taskId: Taskid1;
   subject: Subject;
-  status: Status1;
+  status: Status2;
   assignee?: Assignee;
   linearId?: Linearid;
   [k: string]: unknown;
@@ -1416,7 +1594,7 @@ export interface Fileedits {
  * via the `definition` "GitStatus".
  */
 export interface GitStatus {
-  branch: Branch4;
+  branch: Branch5;
   ahead?: Ahead2;
   behind?: Behind1;
   changed_files?: ChangedFiles;
@@ -1466,7 +1644,7 @@ export interface LifecycleEventData {
  * via the `definition` "OverviewEntry".
  */
 export interface OverviewEntry {
-  sessionId: Sessionid4;
+  sessionId: Sessionid5;
   bucket: Bucket1;
   state: BossState;
   currentTask?: Currenttask2;
@@ -1513,6 +1691,7 @@ export interface PromptEventData {
   floor_id?: FloorId5;
   room_id?: RoomId5;
   prompt?: Prompt1;
+  prompt_truncated?: PromptTruncated1;
   [k: string]: unknown;
 }
 /**
@@ -1522,10 +1701,10 @@ export interface PromptEventData {
  * via the `definition` "Session".
  */
 export interface Session {
-  id: Id5;
+  id: Id7;
   created_at: CreatedAt;
   updated_at: UpdatedAt;
-  status: Status2;
+  status: Status3;
   event_count: EventCount;
   agent_count: AgentCount;
   [k: string]: unknown;
@@ -1590,6 +1769,20 @@ export interface TaskEventData {
   [k: string]: unknown;
 }
 /**
+ * ``GET /api/v1/sessions/{id}/tool-calls/{tool_use_id}``: on demand, never streamed.
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "ToolCallDetail".
+ */
+export interface ToolCallDetail {
+  call: ToolCall;
+  input: Input;
+  output: Output;
+  outputSource: Outputsource;
+  outputTruncated: Outputtruncated1;
+  [k: string]: unknown;
+}
+/**
  * Payload for PRE_TOOL_USE, POST_TOOL_USE, PERMISSION_REQUEST.
  *
  * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
@@ -1622,5 +1815,12 @@ export interface ToolEventData {
   result_summary?: ResultSummary2;
   error_type?: ErrorType2;
   thinking?: Thinking2;
+  caller_native_agent_id?: CallerNativeAgentId1;
+  caller_agent_type?: CallerAgentType1;
+  tool_output?: ToolOutput1;
+  tool_output_bytes?: ToolOutputBytes1;
+  tool_output_truncated?: ToolOutputTruncated1;
+  error_message?: ErrorMessage1;
+  interrupted?: Interrupted1;
   [k: string]: unknown;
 }

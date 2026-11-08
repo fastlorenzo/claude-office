@@ -124,6 +124,15 @@ class EventData(BaseModel):
     # Task-specific fields
     task_id: str | None = None
     task_subject: str | None = None
+    # Session Console capture (spec section 3.1); all optional, old hooks omit them.
+    caller_native_agent_id: str | None = None
+    caller_agent_type: str | None = None
+    tool_output: str | None = None
+    tool_output_bytes: int | None = None
+    tool_output_truncated: bool | None = None
+    error_message: str | None = None
+    interrupted: bool | None = None
+    prompt_truncated: bool | None = None
 
 
 class Event(BaseModel):
@@ -235,12 +244,25 @@ class ToolEventData(EventDataBase):
     result_summary: str | None = None
     error_type: str | None = None
     thinking: str | None = None
+    # Session Console capture (spec section 3.1). ``caller_*`` are the raw
+    # ``agent_id`` / ``agent_type`` Claude Code puts on hooks fired inside a
+    # subagent (``agent_id`` itself stays "main" for old backends). The
+    # ``tool_output*`` fields carry a capped text preview of ``tool_response``.
+    caller_native_agent_id: str | None = None
+    caller_agent_type: str | None = None
+    tool_output: str | None = None
+    tool_output_bytes: int | None = None
+    tool_output_truncated: bool | None = None
+    error_message: str | None = None
+    interrupted: bool | None = None
 
 
 class PromptEventData(EventDataBase):
     """Payload for USER_PROMPT_SUBMIT."""
 
     prompt: str | None = None
+    # True when the hook capped ``prompt`` (16 KB, spec section 3.1).
+    prompt_truncated: bool | None = None
 
 
 class AgentEventData(EventDataBase):
