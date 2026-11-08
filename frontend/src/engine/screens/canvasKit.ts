@@ -11,8 +11,8 @@ import {
   Mesh,
   PBRMaterial,
   Scene,
-  StandardMaterial,
   Texture,
+  type Material,
 } from "../babylon";
 
 export type Ctx2D = CanvasRenderingContext2D;
@@ -179,32 +179,75 @@ export function createScreenTexture(
   return dt;
 }
 
-/** Unlit emissive material showing a texture (screens). */
+/**
+ * Screen glass: a glossy black dielectric (anti-glare coat, rough 0.12) that
+ * reflects the room through the IBL, with the picture as its emission. A
+ * real display is never an unlit sticker — the reflection is what sells it.
+ * Kept out of the SSAO/SSR G-buffer (`metadata.noGBuffer`): the IBL already
+ * gives the reflection and a screen must not occlude AO.
+ */
+function screenGlass(name: string, scene: Scene, rough = 0.12): PBRMaterial {
+  const m = new PBRMaterial(name, scene);
+  m.albedoColor = new Color3(0.01, 0.012, 0.015);
+  m.metallic = 0;
+  m.roughness = rough;
+  m.environmentIntensity = 0.6;
+  m.enableSpecularAntiAliasing = true;
+  m.maxSimultaneousLights = 4;
+  m.metadata = { noGBuffer: true };
+  return m;
+}
+
+/** Glow of a screen with no picture bound (the backlight through black). */
+const NO_SIGNAL = new Color3(0.02, 0.025, 0.035);
+
+/** Emissive screen material showing a texture (monitors, wall screens). */
 export function createEmissiveMaterial(
   name: string,
   scene: Scene,
   tex: Texture | null,
-): StandardMaterial {
-  const m = new StandardMaterial(name, scene);
-  m.disableLighting = true;
-  m.diffuseColor = Color3.Black();
-  m.specularColor = Color3.Black();
-  m.emissiveColor = tex ? Color3.Black() : new Color3(0.02, 0.025, 0.035);
-  m.emissiveTexture = tex;
+): PBRMaterial {
+  const m = screenGlass(name, scene);
+  setScreenTexture(m, tex);
   return m;
 }
 
+/**
+ * Bind (or clear) a screen's picture. PBR multiplies emissiveColor with the
+ * emissive texture, so the colour is white with a picture and the dark
+ * backlight without one. Frozen screen materials thaw and re-freeze.
+ */
+export function setScreenTexture(
+  m: PBRMaterial,
+  tex: Texture | null,
+  noSignal: Color3 = NO_SIGNAL,
+): void {
+  thawed(m, () => {
+    m.emissiveTexture = tex;
+    m.emissiveColor = tex ? Color3.White() : noSignal.clone();
+  });
+}
+
+/**
+ * Mutate a (possibly frozen) material: thaw, apply, re-freeze. Frozen
+ * materials ignore property changes, so every swap on a frozen screen /
+ * sign material goes through here.
+ */
+export function thawed(m: Material, apply: () => void): void {
+  const frozen = m.isFrozen;
+  if (frozen) m.unfreeze();
+  apply();
+  if (frozen) m.freeze();
+}
+
 type SharedKey = "bezel" | "screenOff" | "screenIdle" | "frame";
-const shared = new WeakMap<
-  Scene,
-  Map<SharedKey, StandardMaterial | PBRMaterial>
->();
+const shared = new WeakMap<Scene, Map<SharedKey, PBRMaterial>>();
 
 /** Per-scene shared materials for screen hardware. */
 export function sharedScreenMaterial(
   scene: Scene,
   key: SharedKey,
-): StandardMaterial | PBRMaterial {
+): PBRMaterial {
   let map = shared.get(scene);
   if (!map) {
     map = new Map();
@@ -212,30 +255,28 @@ export function sharedScreenMaterial(
   }
   const hit = map.get(key);
   if (hit && scene.materials.includes(hit)) return hit;
-  let m: StandardMaterial | PBRMaterial;
-  if (key === "bezel" || key === "frame") {
-    const p = new PBRMaterial(`screens_${key}`, scene);
-    if (key === "bezel") {
-      p.albedoColor = new Color3(0.03, 0.032, 0.036);
-      p.metallic = 0.15;
-      p.roughness = 0.42;
-    } else {
-      p.albedoColor = new Color3(0.72, 0.74, 0.77);
-      p.metallic = 0.9;
-      p.roughness = 0.32;
-    }
-    m = p;
+  let m: PBRMaterial;
+  if (key === "bezel") {
+    // Satin black ABS (dielectric).
+    m = new PBRMaterial(`screens_${key}`, scene);
+    m.albedoColor = new Color3(0.03, 0.032, 0.036);
+    m.metallic = 0;
+    m.roughness = 0.45;
+  } else if (key === "frame") {
+    // Anodised aluminium whiteboard / sign frame.
+    m = new PBRMaterial(`screens_${key}`, scene);
+    m.albedoColor = new Color3(0.72, 0.74, 0.77);
+    m.metallic = 1;
+    m.roughness = 0.35;
   } else {
-    const s = new StandardMaterial(`screens_${key}`, scene);
-    s.diffuseColor = new Color3(0.01, 0.012, 0.015);
-    s.specularColor = new Color3(0.32, 0.34, 0.38);
-    s.specularPower = 96;
-    s.emissiveColor =
+    m = screenGlass(`screens_${key}`, scene);
+    m.emissiveColor =
       key === "screenIdle"
         ? new Color3(0.035, 0.05, 0.075)
         : new Color3(0.006, 0.007, 0.01);
-    m = s;
   }
+  // Static hardware: never changes after creation.
+  m.freeze();
   map.set(key, m);
   return m;
 }

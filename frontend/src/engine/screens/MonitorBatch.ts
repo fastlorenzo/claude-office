@@ -11,13 +11,7 @@
  * the set dirty, and the GPU buffer is rebuilt once per `flush()`.
  */
 
-import {
-  CreatePlane,
-  Matrix,
-  Mesh,
-  Scene,
-  type StandardMaterial,
-} from "../babylon";
+import { CreatePlane, Matrix, Mesh, Scene } from "../babylon";
 import { buildMonitorBody, sharedScreenMaterial } from "./canvasKit";
 
 export type StaticKind = "off" | "idle";
@@ -115,7 +109,7 @@ export class MonitorBatch {
       plane.material = sharedScreenMaterial(
         scene,
         kind === "idle" ? "screenIdle" : "screenOff",
-      ) as StandardMaterial;
+      );
       return new InstanceSet(plane);
     };
     this.statics = { off: mk("off"), idle: mk("idle") };

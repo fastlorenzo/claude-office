@@ -313,11 +313,17 @@ export class GraphicsController {
         const m = list[i];
         // Unlit (emissive screens, LED panels, sky) neither receive AO nor
         // reflect: the surface behind them stands in for their depth.
+        // Screens (lit glass, `metadata.noGBuffer`) reflect via the IBL.
         const mat = m.material as {
           disableLighting?: boolean;
           unlit?: boolean;
+          metadata?: { noGBuffer?: boolean } | null;
         } | null;
-        if (mat && (mat.disableLighting || mat.unlit)) continue;
+        if (
+          mat &&
+          (mat.disableLighting || mat.unlit || mat.metadata?.noGBuffer)
+        )
+          continue;
         if ((m as Mesh).hasThinInstances) {
           if (thinNear(m as Mesh, eye, range)) out.push(m);
           continue;

@@ -72,6 +72,7 @@ import {
 import {
   createEmissiveMaterial,
   createScreenTexture,
+  setScreenTexture,
   whenFontsReady,
   type Ctx2D,
 } from "@/engine/screens/canvasKit";
@@ -112,6 +113,9 @@ import {
 import { buildControlShell } from "./ControlRoomShell";
 import { isLocale } from "@/i18n";
 import { lowerTiles, lowerWallKey, wallClock } from "./controlRoomWall";
+
+/** Backlight of a wall feed tile with no room bound. */
+const FEED_NO_SIGNAL = new Color3(0.012, 0.014, 0.02);
 
 export interface ControlRoomContext {
   scene: Scene;
@@ -163,7 +167,7 @@ interface Canvas {
   name: string;
   mesh: Mesh;
   tex: DynamicTexture;
-  mat: StandardMaterial;
+  mat: PBRMaterial;
   w: number;
   h: number;
   keys: Map<string, string>;
@@ -189,7 +193,7 @@ interface Monitor {
 interface FeedSlot {
   cell: FeedCell;
   mesh: Mesh;
-  mat: StandardMaterial;
+  mat: PBRMaterial;
   /** Project room shown (its feed texture is keyed by the room id). */
   room: FeedRoom | null;
   /** Session the feed enters / inspects (the room's most urgent one). */
@@ -256,7 +260,7 @@ export class ControlRoom {
   private readonly lowerCenter: [number, number];
   private readonly monitor: Mesh;
   private readonly monTex: DynamicTexture;
-  private readonly monMat: StandardMaterial;
+  private readonly monMat: PBRMaterial;
   private readonly monitors: Monitor[] = [];
   private readonly cellKeys: string[] = new Array(ATLAS_COLS * ATLAS_ROWS).fill(
     "",
@@ -389,6 +393,7 @@ export class ControlRoom {
         null,
       );
       mat.backFaceCulling = false;
+      mat.freeze(); // feed swaps go through setScreenTexture
       mesh.material = mat;
       mesh.isPickable = false;
       mesh.setEnabled(false);
@@ -427,6 +432,7 @@ export class ControlRoom {
     this.dotMat.specularColor = Color3.Black();
     this.dotMat.emissiveColor = Color3.White();
     this.dotMat.backFaceCulling = false;
+    this.dotMat.freeze(); // colour per instance
     this.dots = CreateDisc(
       "opsMapDots",
       { radius: 0.032, tessellation: 14 },
@@ -447,6 +453,7 @@ export class ControlRoom {
       ATLAS_ROWS * CELL_H,
     );
     this.monMat = createEmissiveMaterial("opsMonitorsMat", scene, this.monTex);
+    this.monMat.freeze();
     const { mesh, seats } = this.buildMonitors();
     this.monitor = mesh;
     this.seatCount = seats;
@@ -587,7 +594,7 @@ export class ControlRoom {
       cv.mesh.dispose();
     }
     for (const f of this.feedSlots) {
-      f.mat.emissiveTexture = null;
+      setScreenTexture(f.mat, null);
       f.mat.dispose();
       f.mesh.dispose();
     }
@@ -622,10 +629,10 @@ export class ControlRoom {
     // Toned-down ceiling (the dome read overexposed next to the wall).
     const ceiling = materials.tinted("ceiling", "#B9BEC6");
     const felt = materials.felt("#B9C4D2");
-    const plinth = materials.color("#C9CFD7", 0.42, 0.35);
+    const plinth = materials.color("#C9CFD7", 0.42, 0);
     const consoleBody = materials.color("#E4E8EC", 0.5);
     const consoleTop = materials.color("#F5F6F7", 0.3);
-    const surround = materials.color("#1A1E25", 0.38, 0.2);
+    const surround = materials.color("#1A1E25", 0.38, 0);
     const carpet = materials.tinted("floorRoom", "#2B3E66");
     const carpetDeck = materials.tinted("floorRoom", "#344A78");
     const deg = Math.PI / 180;
@@ -1357,6 +1364,7 @@ export class ControlRoom {
     tex.level = 1.3;
     const mat = createEmissiveMaterial(`ops_${name}Mat`, this.scene, tex);
     mat.backFaceCulling = false;
+    mat.freeze();
     const mesh = arcStrip(
       `wallScreen_ops_${name}`,
       this.scene,
@@ -1817,12 +1825,8 @@ export class ControlRoom {
   private bindFeeds(): void {
     for (const f of this.feedSlots) {
       const tex = f.room ? this.ctx.feeds.getTexture(f.room.id) : null;
-      if (f.mat.emissiveTexture !== tex) {
-        f.mat.emissiveTexture = tex;
-        f.mat.emissiveColor = tex
-          ? Color3.Black()
-          : new Color3(0.012, 0.014, 0.02);
-      }
+      if (f.mat.emissiveTexture !== tex)
+        setScreenTexture(f.mat, tex, FEED_NO_SIGNAL);
     }
   }
 

@@ -14,8 +14,8 @@
 import {
   CreatePlane,
   Mesh,
+  PBRMaterial,
   Scene,
-  StandardMaterial,
   TransformNode,
   Vector3,
   type DynamicTexture,
@@ -28,6 +28,7 @@ import {
   fitText,
   roundRect,
   screenFonts,
+  setScreenTexture,
   sharedScreenMaterial,
   whenFontsReady,
   withAlpha,
@@ -57,7 +58,7 @@ abstract class ScreenBase implements HubScreen {
   protected readonly pivot: TransformNode;
   readonly sessionId: string;
   readonly worldPos: Vector3;
-  protected readonly liveMat: StandardMaterial;
+  protected readonly liveMat: PBRMaterial;
   protected tex: DynamicTexture | null = null;
   protected lod: Lod = "near";
   protected dirty = true;
@@ -118,6 +119,7 @@ abstract class ScreenBase implements HubScreen {
     };
     this.screenMesh.setEnabled(false); // the hub enables it while live
     this.liveMat = createEmissiveMaterial(`${id}_mat`, scene, null);
+    this.liveMat.freeze(); // picture swaps go through setScreenTexture
     this.screenMesh.material = this.liveMat;
     this.hub.add(this);
     whenFontsReady(() => {
@@ -191,7 +193,7 @@ abstract class ScreenBase implements HubScreen {
   }
 
   protected abstract draw(ctx: Ctx2D, w: number, h: number): void;
-  protected abstract offMaterial(): StandardMaterial;
+  protected abstract offMaterial(): PBRMaterial;
   protected isLive(): boolean {
     return true;
   }
@@ -214,7 +216,7 @@ abstract class ScreenBase implements HubScreen {
         this.texW,
         this.texH,
       );
-      this.liveMat.emissiveTexture = this.tex;
+      setScreenTexture(this.liveMat, this.tex);
     }
     const ctx = this.tex.getContext() as unknown as Ctx2D;
     ctx.save();
@@ -226,7 +228,7 @@ abstract class ScreenBase implements HubScreen {
 
   private releaseTexture(): void {
     if (!this.tex) return;
-    this.liveMat.emissiveTexture = null;
+    setScreenTexture(this.liveMat, null);
     this.tex.dispose();
     this.tex = null;
     this.dirty = true;
@@ -252,8 +254,8 @@ export class BossMonitor extends ScreenBase {
     this.setKey(key);
   }
 
-  protected offMaterial(): StandardMaterial {
-    return sharedScreenMaterial(this.scene, "screenIdle") as StandardMaterial;
+  protected offMaterial(): PBRMaterial {
+    return sharedScreenMaterial(this.scene, "screenIdle");
   }
 
   protected draw(ctx: Ctx2D, W: number, H: number): void {
@@ -526,8 +528,8 @@ export class AgentMonitor extends ScreenBase {
     return this.active;
   }
 
-  protected offMaterial(): StandardMaterial {
-    return sharedScreenMaterial(this.scene, "screenOff") as StandardMaterial;
+  protected offMaterial(): PBRMaterial {
+    return sharedScreenMaterial(this.scene, "screenOff");
   }
 
   private applyActive(): void {

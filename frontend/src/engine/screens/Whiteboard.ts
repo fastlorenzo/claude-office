@@ -27,6 +27,7 @@ import {
   roundRect,
   screenFonts,
   sharedScreenMaterial,
+  thawed,
   whenFontsReady,
   wrapText,
   type Ctx2D,
@@ -122,6 +123,7 @@ export class WhiteboardScreen implements HubScreen {
     this.mat.specularPower = 90;
     this.mat.emissiveColor = Color3.Black();
     this.mesh.material = this.mat;
+    this.mat.freeze(); // texture swaps thaw and re-freeze
 
     this.frame = buildBoardFrame(id, scene, w, h);
     this.frame.parent = this.pivot;
@@ -181,8 +183,10 @@ export class WhiteboardScreen implements HubScreen {
 
   private release(): void {
     if (!this.tex) return;
-    this.mat.diffuseTexture = null;
-    this.mat.emissiveTexture = null;
+    thawed(this.mat, () => {
+      this.mat.diffuseTexture = null;
+      this.mat.emissiveTexture = null;
+    });
     this.tex.dispose();
     this.tex = null;
     this.dirty = true;
@@ -199,8 +203,11 @@ export class WhiteboardScreen implements HubScreen {
         this.texH,
       );
       this.tex.level = 0.78;
-      this.mat.diffuseTexture = this.tex;
-      this.mat.emissiveTexture = this.tex;
+      const tex = this.tex;
+      thawed(this.mat, () => {
+        this.mat.diffuseTexture = tex;
+        this.mat.emissiveTexture = tex;
+      });
     }
     const ctx = this.tex.getContext() as unknown as Ctx2D;
     ctx.save();

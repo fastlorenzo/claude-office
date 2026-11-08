@@ -31,6 +31,7 @@ import {
   roundRect,
   screenFonts,
   sharedScreenMaterial,
+  thawed,
   whenFontsReady,
   withAlpha,
   wrapText,
@@ -163,6 +164,9 @@ export class DoorSign {
     this.led.material = this.ledMat;
     this.led.metadata = { interact };
     this.applyLed(this.data.status);
+    // Static between status / texture changes (those thaw and re-freeze).
+    this.mat.freeze();
+    this.ledMat.freeze();
 
     this.render(true);
     whenFontsReady(() => {
@@ -218,12 +222,14 @@ export class DoorSign {
   }
 
   private applyLed(status: RoomStatus): void {
-    this.ledMat.emissiveColor = Color3.FromHexString(STATUS_COLORS[status]);
+    thawed(this.ledMat, () => {
+      this.ledMat.emissiveColor = Color3.FromHexString(STATUS_COLORS[status]);
+    });
   }
 
   private release(): void {
     if (!this.tex) return;
-    this.mat.emissiveTexture = null;
+    thawed(this.mat, () => (this.mat.emissiveTexture = null));
     this.tex.dispose();
     this.tex = null;
     this.dirty = true;
@@ -240,8 +246,11 @@ export class DoorSign {
         this.texH,
       );
       // StandardMaterial ADDS emissiveColor to the emissive texture: keep it black.
-      this.mat.emissiveColor = Color3.Black();
-      this.mat.emissiveTexture = this.tex;
+      const tex = this.tex;
+      thawed(this.mat, () => {
+        this.mat.emissiveColor = Color3.Black();
+        this.mat.emissiveTexture = tex;
+      });
     }
     const ctx = this.tex.getContext() as unknown as Ctx2D;
     ctx.save();

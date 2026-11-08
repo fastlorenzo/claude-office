@@ -17,14 +17,19 @@ import {
   DynamicTexture,
   Mesh,
   Scene,
-  StandardMaterial,
+  type PBRMaterial,
   Texture,
   TransformNode,
   VertexBuffer,
   VertexData,
 } from "@/engine/babylon";
 import type { Lod } from "@/engine/characters/types";
-import { screenFonts, whenFontsReady } from "@/engine/screens/canvasKit";
+import {
+  createEmissiveMaterial,
+  screenFonts,
+  setScreenTexture,
+  whenFontsReady,
+} from "@/engine/screens/canvasKit";
 
 export interface LedSegment {
   text: string;
@@ -49,7 +54,7 @@ const STATIC_U = 0.5;
 export class LedPanel {
   readonly mesh: Mesh;
   private readonly root: TransformNode;
-  private readonly mat: StandardMaterial;
+  private readonly mat: PBRMaterial;
   private tex: DynamicTexture | null = null;
   private content: LedContent = { line: [], ticker: null };
   private key = "";
@@ -150,11 +155,11 @@ export class LedPanel {
     mesh.isPickable = opts.interact !== undefined;
     if (opts.interact !== undefined)
       mesh.metadata = { interact: opts.interact };
-    this.mat = new StandardMaterial(`${opts.name}:ledMat`, scene);
-    this.mat.disableLighting = true;
-    this.mat.diffuseColor = Color3.Black();
-    this.mat.specularColor = Color3.Black();
-    this.mat.emissiveColor = Color3.Black();
+    // Lit diffuser (rough 0.3) over the LED matrix: reflects the room.
+    this.mat = createEmissiveMaterial(`${opts.name}:ledMat`, scene, null);
+    this.mat.roughness = 0.3;
+    // Frozen except while pulsing (setPulse thaws; texture swaps re-freeze).
+    this.mat.freeze();
     mesh.material = this.mat;
     this.mesh = mesh;
     whenFontsReady(() => {
@@ -170,15 +175,21 @@ export class LedPanel {
 
   /** Gentle brightness pulse (needs-you). */
   setPulse(on: boolean): void {
+    if (on === this.pulsing) return;
     this.pulsing = on;
-    if (!on) this.mat.emissiveColor = Color3.Black();
+    if (on) {
+      this.mat.unfreeze();
+      return;
+    }
+    if (this.tex) this.mat.emissiveColor = Color3.White();
+    this.mat.freeze();
   }
 
   setLod(lod: Lod): void {
     if (lod === this.lod) return;
     this.lod = lod;
     if (lod === "far") {
-      this.mat.emissiveTexture = null;
+      setScreenTexture(this.mat, null);
       this.tex?.dispose();
       this.tex = null;
       this.key = "";
@@ -193,8 +204,9 @@ export class LedPanel {
     if (this.lod === "far") return;
     if (this.pulsing) {
       this.pulseT += dt;
+      // PBR multiplies colour × texture: pulse as a warm gain over white.
       const k = 0.08 + 0.08 * Math.sin(this.pulseT * 4);
-      this.mat.emissiveColor.set(k, k * 0.6, 0);
+      if (this.tex) this.mat.emissiveColor.set(1 + k * 3, 1 + k * 1.8, 1);
     }
     if (!this.scrolling) return;
     this.scroll = (this.scroll + dt * 0.045) % 1;
@@ -224,7 +236,7 @@ export class LedPanel {
       this.tex.wrapU = Texture.WRAP_ADDRESSMODE;
       this.tex.wrapV = Texture.CLAMP_ADDRESSMODE;
       this.tex.anisotropicFilteringLevel = 8;
-      this.mat.emissiveTexture = this.tex;
+      setScreenTexture(this.mat, this.tex);
     }
     const ctx = this.tex.getContext() as unknown as CanvasRenderingContext2D;
     this.scrolling = drawLed(ctx, c, this.single) && !this.single;

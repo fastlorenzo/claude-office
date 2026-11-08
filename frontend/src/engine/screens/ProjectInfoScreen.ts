@@ -32,6 +32,7 @@ import {
   roundRect,
   screenFonts,
   sharedScreenMaterial,
+  thawed,
   whenFontsReady,
   withAlpha,
   type Ctx2D,
@@ -89,6 +90,7 @@ export class ProjectInfoScreen {
     this.mat.specularColor = Color3.Black();
     this.mat.emissiveColor = new Color3(0.02, 0.025, 0.035);
     this.surface.material = this.mat;
+    this.mat.freeze(); // swaps below thaw and re-freeze
     this.render(true);
     whenFontsReady(() => {
       this.dirty = true;
@@ -135,8 +137,10 @@ export class ProjectInfoScreen {
 
   private release(): void {
     if (!this.tex) return;
-    this.mat.emissiveTexture = null;
-    this.mat.emissiveColor = new Color3(0.02, 0.025, 0.035);
+    thawed(this.mat, () => {
+      this.mat.emissiveTexture = null;
+      this.mat.emissiveColor = new Color3(0.02, 0.025, 0.035);
+    });
     this.tex.dispose();
     this.tex = null;
     this.dirty = true;
@@ -153,8 +157,11 @@ export class ProjectInfoScreen {
         this.texH,
       );
       // StandardMaterial ADDS emissiveColor to the emissive texture: keep it black.
-      this.mat.emissiveColor = Color3.Black();
-      this.mat.emissiveTexture = this.tex;
+      const tex = this.tex;
+      thawed(this.mat, () => {
+        this.mat.emissiveColor = Color3.Black();
+        this.mat.emissiveTexture = tex;
+      });
     }
     const ctx = this.tex.getContext() as unknown as Ctx2D;
     ctx.save();
