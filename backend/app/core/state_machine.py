@@ -935,6 +935,20 @@ class StateMachine:
         if agent_id in self.handin_queue:
             self.handin_queue.remove(agent_id)
 
+    def finished_office_agents(self) -> list[str]:
+        """Office agents whose agent-tree node is terminal (done/error).
+
+        The tree is the source of truth: whatever path ended the node
+        (SubagentStop, hand-back, task-notification, poller, restore), the
+        office agent must leave. A running/waiting/zombie node is never listed.
+        """
+        out: list[str] = []
+        for aid in self.agents:
+            node = self.agent_tree.get(aid)
+            if node is not None and node.ended_at is not None and node.state in ("done", "error"):
+                out.append(aid)
+        return out
+
     def transition(self, event: AnyEvent) -> None:
         """Process an event and update state accordingly.
 

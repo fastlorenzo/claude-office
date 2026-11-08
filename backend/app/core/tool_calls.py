@@ -67,7 +67,11 @@ _WAITING_MARK = "waiting on its own background work"
 # The main agent receiving a subagent's final report: the prompt starts with
 # ``<agent-message from="<native id>">`` then ``[Subagent hand-back] ...``
 # (hook prompts are truncated, so only the "[Subag" prefix is relied on).
-_HANDBACK = re.compile(r'^\s*<agent-message from="(a[0-9a-f]{16})">\s*\[Subag')
+# Claude Code may prefix the frame with "Another Claude session sent a message:".
+_HANDBACK = re.compile(
+    r"^\s*(?:Another Claude session sent a message:\s*)?"
+    r'<agent-message from="(a[0-9a-f]{16})">\s*\[Subag'
+)
 _BACKGROUND_LOOKBACK = 500
 _ENDED: frozenset[str] = frozenset({"ok", "error", "denied", "interrupted"})
 _STDERR_MARK = "--- stderr ---"

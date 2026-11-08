@@ -665,3 +665,114 @@ async def test_restart_backfills_missed_calls_and_restore_matches(
         if poller is not None:
             await poller.stop_all()
         await _wipe(sid)
+
+
+# ---------------------------------------------------------------------------
+# Office agents released whenever the tree node goes terminal
+# ---------------------------------------------------------------------------
+
+
+def _notify(t: float, status: str, summary: str) -> AnyEvent:
+    return _ev(
+        "background_task_notification",
+        t,
+        background_task_id=ASYNC_NATIVE,
+        background_task_status=status,
+        background_task_summary=summary,
+        tool_use_id=ASYNC,
+    )
+
+
+def test_handback_regex_accepts_the_claude_code_prefix_line() -> None:
+    real = (
+        "Another Claude session sent a message:\n"
+        f'<agent-message from="{NATIVE}">\n  [Subagent hand-back] report'
+    )
+    assert handback_native(real) == NATIVE
+    assert handback_native(f'  indented\n<agent-message from="{NATIVE}">') is None
+
+
+def test_prefixed_handback_prompt_releases_the_office_agent() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn())
+    prompt = (
+        "Another Claude session sent a message:\n"
+        f'<agent-message from="{ASYNC_NATIVE}">\n  [Subagent hand-back] x'
+    )
+    sm.transition(_ev("user_prompt_submit", 50, prompt=prompt))
+    assert sm.last_console.handed_back == ASYNC_SUB
+    assert ASYNC_SUB in sm.handin_queue
+
+
+def test_finished_notification_makes_the_office_agent_releasable() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn())
+    assert sm.finished_office_agents() == []
+    sm.transition(_notify(50, "completed", 'Agent "Fix fixture regression" finished'))
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None and node.state == "done"
+    assert sm.finished_office_agents() == [ASYNC_SUB]
+
+
+def test_waiting_notification_is_not_an_end() -> None:
+    sm = StateMachine()
+    _run(sm, _async_spawn())
+    summary = 'Agent "Fix fixture regression" is waiting on its own background work'
+    sm.transition(_notify(50, "completed", summary))
+    assert sm.finished_office_agents() == []
+    assert ASYNC_SUB in sm.agents
+
+
+@pytest.mark.asyncio
+async def test_processor_releases_agent_after_finished_notification_with_cleanup() -> None:
+    sid = "agent-done-notify"
+    await _wipe(sid)
+    ep = EventProcessor()
+    await ep.process_event(_ev("session_start", 0, sid))
+    for e in _async_spawn():
+        await ep.process_event(
+            _ev(e.event_type, (e.timestamp - BASE).total_seconds(), sid, **e.data.model_dump())
+        )
+    sm = ep.sessions[sid]
+    assert ASYNC_SUB in sm.agents
+    await ep.process_event(
+        _ev(
+            "background_task_notification",
+            60,
+            sid,
+            background_task_id=ASYNC_NATIVE,
+            background_task_status="completed",
+            background_task_summary='Agent "Fix fixture regression" finished',
+            tool_use_id=ASYNC,
+        )
+    )
+    assert ASYNC_SUB not in sm.agents
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+
+        rows = (
+            (await db.execute(select(EventRecord).where(EventRecord.session_id == sid)))
+            .scalars()
+            .all()
+        )
+    assert any(r.event_type == "cleanup" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_reconciles_an_already_stuck_ghost() -> None:
+    sid = "agent-done-ghost"
+    await _wipe(sid)
+    ep = EventProcessor()
+    await ep.process_event(_ev("session_start", 0, sid))
+    for e in _async_spawn():
+        await ep.process_event(
+            _ev(e.event_type, (e.timestamp - BASE).total_seconds(), sid, **e.data.model_dump())
+        )
+    sm = ep.sessions[sid]
+    # Simulate the old bug: the node ended but the office agent stayed.
+    node = sm.agent_tree.get(ASYNC_SUB)
+    assert node is not None
+    node.state, node.ended_at = "done", BASE.isoformat()
+    assert ASYNC_SUB in sm.agents
+    await ep._release_finished_agents(sm, sid, BASE)
+    assert ASYNC_SUB not in sm.agents

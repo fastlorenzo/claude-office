@@ -533,17 +533,6 @@ class EventProcessor:
     ) -> None:
         assert isinstance(event, PromptEvent), "dispatch routes USER_PROMPT_SUBMIT only"
         await handle_user_prompt_submit(sm, event, agent_id, entry_id)
-        handed_back = sm.last_console.handed_back
-        if handed_back and handed_back in sm.agents:
-            # A hand-back is the subagent's end even when no SubagentStop
-            # follows: the office lets it go now (CLEANUP is persisted).
-            stop = AgentEvent(
-                event_type=EventType.SUBAGENT_STOP,
-                session_id=event.session_id,
-                timestamp=event.timestamp,
-                data=AgentEventData(agent_id=handed_back, source="handback"),
-            )
-            await handle_subagent_stop(sm, stop, self._persist_synthetic_event)
 
     async def _enrich_pre_tool_use(
         self, sm: StateMachine, event: AnyEvent, agent_id: str, entry_id: str, summary: str
@@ -815,6 +804,8 @@ class EventProcessor:
         enricher = self._post_broadcast_enrichers.get(event.event_type)
         if enricher is not None and not already_applied and not duplicate:
             await enricher(sm, event, agent_id, event_dict["id"], event_dict["summary"])
+        if not already_applied and not duplicate:
+            await self._release_finished_agents(sm, event.session_id, event.timestamp)
 
         # ------------------------------------------------------------------
         # Cross-session overview broadcast (Command Center). Scheduled LAST so
@@ -829,6 +820,28 @@ class EventProcessor:
     # ------------------------------------------------------------------
     # Command Center overview (debounced cross-session broadcast)
     # ------------------------------------------------------------------
+
+    async def _release_finished_agents(
+        self, sm: StateMachine, session_id: str, timestamp: datetime
+    ) -> int:
+        """Let office agents go whose tree node is terminal (any end path).
+
+        A hand-back, a "finished" task-notification, a poller end or a restore
+        all end the node; none of them is guaranteed a SubagentStop. Departs
+        like SubagentStop does, persisting CLEANUP. Never touches a node that
+        is still running or waiting.
+        """
+        released = 0
+        for aid in sm.finished_office_agents():
+            stop = AgentEvent(
+                event_type=EventType.SUBAGENT_STOP,
+                session_id=session_id,
+                timestamp=timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=UTC),
+                data=AgentEventData(agent_id=aid, source="handback"),
+            )
+            await handle_subagent_stop(sm, stop, self._persist_synthetic_event)
+            released += 1
+        return released
 
     def _schedule_overview_broadcast(self) -> None:
         """Coalesce overview broadcasts into one deferred flush per ~50 ms.
@@ -894,6 +907,8 @@ class EventProcessor:
         await self.restore_active_sessions_for_campus(force=True)
         await self.sweep_campus_liveness(broadcast=False)
         async with self._sessions_lock:
+            for sid, sm in list(self.sessions.items()):
+                await self._release_finished_agents(sm, sid, datetime.now(UTC))
             return build_campus(self.sessions)
 
     async def build_campus_heartbeat(self) -> CampusState:
