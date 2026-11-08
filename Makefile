@@ -6,7 +6,7 @@
 	build-static frontend-build-static \
 	docker-build docker-up docker-down docker-logs docker-shell docker-config \
 	pre-commit pre-commit-update depsupdate depsshow uv-lock uv-sync setup resetup remove-venv \
-	bump-version version-check help
+	bump-version version-check perf-gate walk-gate help
 
 # Detect package manager: prefer bun if available, otherwise use npm
 PKG_MGR := $(shell command -v bun >/dev/null 2>&1 && echo "bun" || echo "npm")
@@ -39,6 +39,12 @@ build-static frontend-build-static:
 	make -C frontend build-static
 	@echo "Frontend built and copied to backend/static"
 	@echo "Start backend with 'make backend' to serve at http://localhost:8000"
+
+perf-gate:			# Draw-call budgets at the reference cameras (shot.sh, heavy lock; ALL=1 for every camera)
+	scripts/perf-gate.sh
+
+walk-gate:			# Scripted collider walks must end on the right floor (shot.sh, heavy lock)
+	scripts/walk-gate.sh
 
 simulate:			# Run event simulation
 	uv run python scripts/simulate_events.py

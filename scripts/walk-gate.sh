@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Walk gate: scripted player walks (world-debug ?walk=) must end where the
+# colliders say they should (WS2 acceptance in docs/design/review-plan.md).
+#
+#   make walk-gate
+#   BASE=http://localhost:3000 make walk-gate
+#
+# Each walk is one shot.sh call; __worldStats.walk gives done/reached/feet/log.
+# Exits 1 when any walk ends on the wrong floor or position. Runs under the
+# machine-wide heavy lock and only ever calls shot.sh.
+set -euo pipefail
+
+SHOT_DIR="${SHOT_DIR:-$HOME/.local/share/claude-office-shot}"
+if [ -z "${GATE_LOCKED:-}" ]; then
+  export GATE_LOCKED=1
+  exec flock "$SHOT_DIR/.heavy.lock" "$0" "$@"
+fi
+
+BASE="${BASE:-http://localhost:3000}"
+OUT="${OUT:-$SHOT_DIR/out/walk-gate}"
+mkdir -p "$OUT"
+# no shot=1: shot.mjs treats title "ready" as done and would not wait for the walk
+# (it waits for __worldShotReady, which the walk sets when finished).
+COMMON="n=6&demoFactory=1&gfx=low&quality=low"
+
+# name | walk | python predicate over (x,y,z,reached,miny) -> bool
+WALKS=(
+  "end_wall_west|8,0,1.5,180;8,-2|abs(z-0.1)<0.5 and abs(y)<0.15 and reached==0"
+  "end_wall_far|8,0,22.5,0;8,27|miny>-0.3 and abs(y)<0.15 and reached==0"
+  "factory_conveyor|20,-6,10,-90;15,10|reached==0 and x>15.4 and abs(y+6)<0.5"
+  "control_tier|0,0,30,0;0,38|abs(y-0.25)<0.06"
+  "forecourt|0,-6,-20,180;0,-56|z<=-55"
+)
+
+check() { # json predicate -> prints "x y z reached done RESULT"
+  python3 - "$1" "$2" "$3" <<'PY'
+import json, sys
+raw, pred = sys.argv[1], sys.argv[2]
+try:
+    w = json.loads(raw or "{}").get("walk")
+except Exception:
+    w = None
+if not w:
+    print("- - - - - NODATA"); sys.exit(0)
+log = w.get("log") or []
+pts = [tuple(map(float, s.split(","))) for s in ([l for l in log if "," in l and not l.startswith("end")] or [])]
+feet = w["feet"][0] if w.get("feet") else None
+x, y, z = (float(v) for v in (feet or "0,0,0").split(","))
+miny = min([p[1] for p in pts] + [y])
+reached = w.get("reached", -1)
+# A walk blocked by a wall never finishes within the sampling window on
+# SwiftShader (40 s of sim time); treat an unchanged position over the last
+# 4 log samples (2 s), away from the start pose, as "stuck" = settled.
+start = tuple(float(v) for v in sys.argv[3].split(",")[:3])
+moved = max(abs(a - b) for a, b in zip((x, y, z), start)) > 0.05
+stuck = len(log) >= 4 and len(set(log[-4:])) == 1 and moved
+settled = bool(w.get("done")) or stuck
+ok = settled and bool(eval(pred, {"abs": abs}, dict(x=x, y=y, z=z, reached=reached, miny=miny)))
+print(f"{x:.2f} {y:.2f} {z:.2f} {reached}/{w.get('of')} {'yes' if w.get('done') else ('stuck' if stuck else 'unsettled')} {'ok' if ok else 'FAIL'}")
+PY
+}
+
+fail=0
+printf '\n%-18s %8s %8s %8s %8s %5s  %s\n' walk x y z reached done result
+for c in "${WALKS[@]}"; do
+  IFS='|' read -r name walk pred <<<"$c"
+  log="$OUT/$name.log"
+  "$SHOT_DIR/shot.sh" "$BASE/world-debug?$COMMON&walk=$walk" "$OUT/$name.png" 20 >"$log" 2>&1 || true
+  json="$(sed -n 's/^stats //p' "$log" | tail -1)"
+  read -r x y z reached done res <<<"$(check "$json" "$pred" "${walk%%;*}")"
+  printf '%-18s %8s %8s %8s %8s %5s  %s\n' "$name" "$x" "$y" "$z" "$reached" "$done" "$res"
+  [ "$res" = ok ] || fail=1
+done
+echo
+echo "screenshots + logs: $OUT"
+[ "$fail" -eq 0 ] && echo "walk-gate: PASS" || echo "walk-gate: FAIL"
+exit "$fail"

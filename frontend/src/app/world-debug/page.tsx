@@ -26,6 +26,18 @@
  *   walk=x,y,z,yawDeg;x,z;…  scripted walk with the real player collider from
  *                            the start pose through the waypoints (stairs);
  *                            progress in __worldStats.walk
+ *
+ * `window.__worldStats` (refreshed every 500 ms; read by shot.sh and by
+ * `make perf-gate` / `make walk-gate`, see scripts/perf-gate.sh, walk-gate.sh):
+ *   draws            smoothed draw calls (budgets: docs/design/review-plan.md WS4)
+ *   active, textures active mesh count, scene texture count
+ *   zone, kinds      current zone and active visibility-unit kinds
+ *   actors, factory  actor-hub and factory stats (factory.animMs, bufferWrites)
+ *   postProcesses    (WS4) post-process pass count; gate: <= 12 high, <= 6 medium
+ *   screenUploads    (WS4) screen canvas uploads per second; gate: <= 2 while idle
+ *   textureMB        (WS5) estimated GPU texture memory in MB
+ *   walk             only with ?walk=: { done, reached, of, t, feet:["x,y,z"], log }
+ * The gates print "-" for fields the build does not report yet.
  */
 
 import { useEffect, useRef, useState } from "react";
