@@ -714,6 +714,7 @@ const en = {
   "console.noMatchingCalls": "No calls match the filters.",
   "console.clearFilters": "Clear filters",
   "console.timeline": "Timeline",
+  "console.loadingOlder": "Loading older calls…",
   "console.tabs": "Console sections",
   "console.rightPane": "Details",
   "console.tab.timeline": "Timeline",

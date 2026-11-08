@@ -102,10 +102,19 @@ interface Draft {
   base: ConsoleSession;
   /** Ids appended out of seq order, needing a re-sort. */
   needsSort: boolean;
+  /** Smallest seq among newly added calls. */
+  minAdded: number;
 }
 
 function startDraft(base: ConsoleSession): Draft {
-  return { calls: null, agents: null, order: null, base, needsSort: false };
+  return {
+    calls: null,
+    agents: null,
+    order: null,
+    base,
+    needsSort: false,
+    minAdded: Infinity,
+  };
 }
 
 function draftCall(d: Draft, incoming: ToolCall): void {
@@ -114,6 +123,7 @@ function draftCall(d: Draft, incoming: ToolCall): void {
   d.calls ??= new Map(d.base.calls);
   d.calls.set(incoming.id, incoming);
   if (!cur) {
+    d.minAdded = Math.min(d.minAdded, incoming.seq);
     d.order ??= d.base.order.slice();
     const last = d.order.length
       ? d.calls.get(d.order[d.order.length - 1])
@@ -143,16 +153,12 @@ function finishDraft(d: Draft): Partial<ConsoleSession> | null {
         );
       }
       patch.order = d.order;
-      const first = calls0(d.calls, d.order[0]);
-      patch.oldestSeq = first ? first.seq : d.base.oldestSeq;
+      const m = Math.min(d.base.oldestSeq ?? Infinity, d.minAdded);
+      patch.oldestSeq = Number.isFinite(m) ? m : d.base.oldestSeq;
     }
   }
   if (d.agents) patch.agents = d.agents;
   return patch;
-}
-
-function calls0(m: ReadonlyMap<string, ToolCall>, id: string | undefined) {
-  return id === undefined ? undefined : m.get(id);
 }
 
 function applyFrames(
@@ -225,6 +231,11 @@ interface ConsoleStoreState {
     calls: readonly ToolCall[],
     hasMore: boolean,
   ) => void;
+  /**
+   * Insert one call fetched on its own (deep link outside the loaded window)
+   * without moving the paging cursor.
+   */
+  putFocusedCall: (sessionId: string, call: ToolCall) => void;
   /** Backend has no console data for this session (404). */
   markMissing: (sessionId: string) => void;
   /** Snapshot fetch failed. */
@@ -358,6 +369,17 @@ export const useConsoleStore = create<ConsoleStoreState>()((set) => ({
         for (const c of older) draftCall(d, c);
         const patch = finishDraft(d);
         return { ...s, ...(patch ?? {}), hasMore };
+      }),
+    ),
+
+  putFocusedCall: (sessionId, call) =>
+    set((state) =>
+      withSession(state, sessionId, (s) => {
+        const d = startDraft(s);
+        draftCall(d, call);
+        d.minAdded = Infinity; // keep the paging cursor
+        const patch = finishDraft(d);
+        return patch ? { ...s, ...patch } : s;
       }),
     ),
 

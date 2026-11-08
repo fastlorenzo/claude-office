@@ -727,6 +727,7 @@ const ptBR: Record<TranslationKey, string> = {
   "console.noMatchingCalls": "Nenhuma chamada corresponde aos filtros.",
   "console.clearFilters": "Limpar filtros",
   "console.timeline": "Linha do tempo",
+  "console.loadingOlder": "Carregando chamadas anteriores…",
   "console.tabs": "Seções do console",
   "console.rightPane": "Detalhes",
   "console.tab.timeline": "Linha do tempo",

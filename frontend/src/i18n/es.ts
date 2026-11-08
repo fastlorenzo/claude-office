@@ -729,6 +729,7 @@ const es: Record<TranslationKey, string> = {
   "console.noMatchingCalls": "Ninguna llamada coincide con los filtros.",
   "console.clearFilters": "Quitar filtros",
   "console.timeline": "Cronología",
+  "console.loadingOlder": "Cargando llamadas anteriores…",
   "console.tabs": "Secciones de la consola",
   "console.rightPane": "Detalles",
   "console.tab.timeline": "Cronología",

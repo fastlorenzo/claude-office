@@ -23,6 +23,7 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useFocusCall } from "./useFocusCall";
 import { useSessionConsole } from "@/hooks/useSessionConsole";
 import { useCampusStore } from "@/stores/campusStore";
 import type { ConsoleSession } from "@/stores/consoleStore";
@@ -171,6 +172,8 @@ export interface SessionConsoleViewProps {
   onEnterRoom?: () => void;
   crossLink?: CrossLink | null;
   onLoadOlder?: () => void;
+  /** Paging back to the focused call: show a hint, reveal it when done. */
+  seeking?: boolean;
   /** Compact: open the full console focused on a call (else expand inline). */
   onOpenCall?: (callId: string) => void;
   /** Fixed container width (tests); measured otherwise. */
@@ -188,6 +191,7 @@ export function SessionConsoleView({
   onEnterRoom,
   crossLink,
   onLoadOlder,
+  seeking,
   onOpenCall,
   width: fixedWidth,
   initialMode,
@@ -230,6 +234,15 @@ export function SessionConsoleView({
     if (touch) setPushed(true);
     else if (hasDetailCol) setRightTab("detail");
     else if (!ui.isTaskRow(focusCallId)) ui.toggleExpand(focusCallId);
+  }
+
+  // When paging for the focused call ends, scroll it into view again.
+  const [wasSeeking, setWasSeeking] = useState(false);
+  if (!!seeking !== wasSeeking) {
+    setWasSeeking(!!seeking);
+    if (!seeking && focusCallId && session?.calls.has(focusCallId)) {
+      ui.reveal(focusCallId);
+    }
   }
 
   const selected: ToolCall | undefined = ui.selectedId
@@ -368,23 +381,33 @@ export function SessionConsoleView({
     );
 
   const timeline = (density: "full" | "compact") => (
-    <Timeline
-      ui={timelineUi}
-      session={session}
-      density={density}
-      touch={touch}
-      listId={listId}
-      label={t("console.timeline")}
-      renderBody={
-        hasDetailCol || touch || (layout === "compact" && onOpenCall)
-          ? undefined
-          : renderInline
-      }
-      narrow={timelineWidth < 720}
-      onActivate={activate}
-      onMarker={hasDetailCol ? () => setRightTab("chat") : undefined}
-      onLoadOlder={onLoadOlder}
-    />
+    <>
+      {seeking ? (
+        <div
+          role="status"
+          className="shrink-0 border-b border-white/[0.06] bg-sky-500/10 px-3 py-1 text-xs text-sky-200"
+        >
+          {t("console.loadingOlder")}
+        </div>
+      ) : null}
+      <Timeline
+        ui={timelineUi}
+        session={session}
+        density={density}
+        touch={touch}
+        listId={listId}
+        label={t("console.timeline")}
+        renderBody={
+          hasDetailCol || touch || (layout === "compact" && onOpenCall)
+            ? undefined
+            : renderInline
+        }
+        narrow={timelineWidth < 720}
+        onActivate={activate}
+        onMarker={hasDetailCol ? () => setRightTab("chat") : undefined}
+        onLoadOlder={onLoadOlder}
+      />
+    </>
   );
 
   const header =
@@ -586,6 +609,12 @@ export function SessionConsole({
 }): ReactNode {
   const selectedId = useGameStore(selectSessionId);
   const { session, loadOlder } = useSessionConsole(sessionId, selectedId);
+  const seeking = useFocusCall(
+    sessionId,
+    rest.focusCallId,
+    session?.status === "ready",
+    loadOlder,
+  );
   const isSelected = sessionId === selectedId;
   const conversation = useGameStore(selectConversation);
   const todos = useGameStore(selectTodos);
@@ -607,6 +636,7 @@ export function SessionConsole({
       session={view}
       pr={pr}
       onLoadOlder={() => void loadOlder()}
+      seeking={seeking}
     />
   );
 }
