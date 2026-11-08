@@ -55,10 +55,6 @@ import { ArtBatcher } from "@/engine/art/geometry";
 import { v3 } from "@/engine/util/MeshBatcher";
 import {
   buildOpsModel,
-  fmtClock,
-  fmtCount,
-  fmtPct,
-  fmtUsd,
   opsKey,
   type OpsModel,
   type OpsRow,
@@ -93,7 +89,8 @@ import {
   drawWallBoard,
   drawTileSeams,
   drawUsagePanel,
-  OPS_THEME,
+  opsLocaleRev,
+  setOpsLocale,
   type CardExtras,
   type ProjectsPanelRow,
 } from "@/engine/screens/opsCanvas";
@@ -113,6 +110,8 @@ import {
   type UpperPanel,
 } from "./controlRoomPlan";
 import { buildControlShell } from "./ControlRoomShell";
+import { isLocale } from "@/i18n";
+import { lowerTiles, lowerWallKey, wallClock } from "./controlRoomWall";
 
 export interface ControlRoomContext {
   scene: Scene;
@@ -286,6 +285,7 @@ export class ControlRoom {
   private pulseColor = "";
   private rotate = 0;
   private lastClock = "";
+  private localeRev = -1;
   private feedKey = "";
   private far = false;
   private near = false;
@@ -520,11 +520,14 @@ export class ControlRoom {
     stats: CampusStats | null | undefined,
     labels: ReadonlyMap<string, string>,
     projects?: CampusProject[] | null,
+    locale?: string,
   ): void {
     this.campus = campus;
     this.stats = stats ?? null;
     this.labels = labels;
     this.projects = projects ?? null;
+    // Canvas text language; a change bumps opsLocaleRev (part of every key).
+    if (locale && isLocale(locale)) setOpsLocale(locale);
     this.dirty = true;
   }
 
@@ -545,8 +548,7 @@ export class ControlRoom {
     this.sinceClock += dt * 1000;
     if (this.sinceClock >= 1000) {
       this.sinceClock = 0;
-      if (fmtClock(new Date().toISOString()) !== this.lastClock)
-        this.dirty = true;
+      if (wallClock(Date.now()) !== this.lastClock) this.dirty = true;
     }
     // Elapsed times ("for 2m") drift without new data: rebuild every 15 s.
     if (this.sinceBuild >= 15_000) this.dirty = true;
@@ -1381,14 +1383,18 @@ export class ControlRoom {
     this.pulseMat.emissiveIntensity = any ? 2.4 * k : 0.8;
   }
 
-  private redraw(force: boolean): void {
+  private redraw(forceIn: boolean): void {
     if (this.disposed) return;
+    // Language change (opsLocaleRev): every canvas key is stale.
+    const rev = opsLocaleRev();
+    const force = forceIn || rev !== this.localeRev;
+    this.localeRev = rev;
     this.dirty = false;
     this.sinceBuild = 0;
     const now = Date.now();
     const m = buildOpsModel(this.campus, this.stats, now, this.labels);
     this.model = m;
-    const clock = fmtClock(new Date(now).toISOString());
+    const clock = wallClock(now);
     this.lastClock = clock;
     const groups = projectGroups(this.campus, this.projects, this.labels);
     const sessions = mapSessions(this.campus);
@@ -1550,57 +1556,21 @@ export class ControlRoom {
           },
         };
       });
-    const us = m.usage;
-    const act = m.activity;
-    const pct = (w: typeof us.fiveHour) => (w ? fmtPct(w.usedPct) : "—");
-    const noFeed = "status line off";
-    const leftTiles = [
-      {
-        label: "Live sessions",
-        value: String(m.counts.live),
-        sub: `${m.counts.subagents} subagents`,
-      },
-      {
-        label: "Needs you",
-        value: String(m.counts.needs_you),
-        color: m.counts.needs_you ? OPS_THEME.amber : undefined,
-      },
-      {
-        label: "Cost today",
-        value: fmtUsd(us.costTodayUsd),
-        sub: us.costTodayUsd == null ? noFeed : undefined,
-      },
-      {
-        label: "5-hour limit",
-        value: pct(us.fiveHour),
-        sub: us.fiveHour ? undefined : noFeed,
-      },
-    ];
-    const rightTiles = [
-      {
-        label: "Events / min",
-        value: act.eventsLastMin != null ? String(act.eventsLastMin) : "—",
-      },
-      { label: "Tool calls", value: fmtCount(act.toolCalls) },
-      {
-        label: "Tests failing",
-        value: act.testFailures != null ? String(act.testFailures) : "—",
-        color: (act.testFailures ?? 0) > 0 ? OPS_THEME.red : undefined,
-      },
-      {
-        label: "7-day limit",
-        value: pct(us.sevenDay),
-        sub: us.sevenDay ? undefined : noFeed,
-      },
-    ];
-    const key = opsKey([
-      m.alerts,
+    const tiles = lowerTiles(m);
+    const leftTiles = tiles.left;
+    const rightTiles = tiles.right;
+    const key = lowerWallKey(
+      m,
       clock,
-      m.ticker.slice(0, 6).map((t) => t.key),
-      feeds.map((x) => [x.f.cell.side, x.f.cell.index, x.s]),
-      leftTiles,
-      rightTiles,
-    ]);
+      feeds.map((x) => ({
+        side: x.f.cell.side,
+        index: x.f.cell.index,
+        label: x.s.label,
+        status: x.s.status,
+        phase: x.s.phase,
+      })),
+      tiles,
+    );
     const [c0, c1] = this.lowerCenter;
     const gap = 0.1 / p.R;
     const draw = (cv: Canvas, off: number) => {
@@ -1736,7 +1706,8 @@ export class ControlRoom {
             total: live.length,
           }
         : null;
-      const { spark: _s, ...rk } = r ?? ({ spark: [] } as unknown as OpsRow);
+      // Empty seat: a null row (sparklines animate; they stay out of the key).
+      const rk = r ? rowSansSpark(r) : null;
       cell(i, opsKey([rk, extra]), (w, h) =>
         drawSessionCard(ctx, 0, 0, w, h, r, extra),
       );
@@ -1859,34 +1830,52 @@ export class ControlRoom {
       this.dotCol = new Float32Array(4 * n);
       this.dots.thinInstanceSetBuffer("matrix", this.dotBuf, 16, false);
       this.dots.thinInstanceSetBuffer("color", this.dotCol, 4, false);
+      this.dotColorsOf = null;
     }
     const t = performance.now() / 1000;
     const span = panel.a1 - panel.a0;
     const yTop = WALL_Y.upper1;
     const yH = WALL_Y.upper1 - WALL_Y.upper0;
-    const tmp = new Matrix();
-    const scale = new Vector3(1, 1, 1);
-    const pos = new Vector3();
-    const q = new Quaternion();
-    map.dots.forEach((d, i) => {
+    const tmp = this.dotTmp;
+    const pos = this.dotPos;
+    const q = this.dotQ;
+    // Colours only change with the map layout (new object on redraw).
+    const recolor = map !== this.dotColorsOf;
+    this.dotColorsOf = map;
+    for (let i = 0; i < n; i++) {
+      const d = map.dots[i];
       const pt = dotPosition(d, t);
       const a = panel.a0 + ((pt.x + g) / panel.w) * span;
       const y = yTop - ((pt.y + g) / cv.h) * yH;
       const r = p.R - 0.012;
       pos.set(p.cx + Math.sin(a) * r, y, p.cz + Math.cos(a) * r);
       Quaternion.RotationYawPitchRollToRef(a, 0, 0, q);
-      Matrix.ComposeToRef(scale, q, pos, tmp);
+      Matrix.ComposeToRef(this.dotScale, q, pos, tmp);
       tmp.copyToArray(this.dotBuf, i * 16);
+      if (!recolor) continue;
       const col = Color3.FromHexString(d.color);
       this.dotCol[i * 4] = Math.min(1, col.r * 1.25 + 0.15);
       this.dotCol[i * 4 + 1] = Math.min(1, col.g * 1.25 + 0.15);
       this.dotCol[i * 4 + 2] = Math.min(1, col.b * 1.25 + 0.15);
       this.dotCol[i * 4 + 3] = 1;
-    });
+    }
     this.dots.thinInstanceCount = n;
     this.dots.thinInstanceBufferUpdated("matrix");
-    this.dots.thinInstanceBufferUpdated("color");
+    if (recolor) this.dots.thinInstanceBufferUpdated("color");
   }
+
+  /** Scratch for moveDots (no per-frame allocation). */
+  private readonly dotTmp = new Matrix();
+  private readonly dotScale = new Vector3(1, 1, 1);
+  private readonly dotPos = new Vector3();
+  private readonly dotQ = new Quaternion();
+  private dotColorsOf: ProjectMapLayout | null = null;
+}
+
+/** Row content without its sparkline (redraw-key ingredient). */
+function rowSansSpark(r: OpsRow): Omit<OpsRow, "spark"> {
+  const { spark: _s, ...rest } = r;
+  return rest;
 }
 
 function rankTodo(s: string): number {

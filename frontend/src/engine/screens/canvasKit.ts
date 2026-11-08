@@ -41,16 +41,39 @@ export function screenFonts(): { mono: string; sans: string; hand: string } {
   return fontCache;
 }
 
-/** Calls cb once web fonts have loaded (so screens can redraw crisp). */
+let fontsState: "idle" | "loading" | "ready" = "idle";
+let fontWaiters: (() => void)[] = [];
+
+/**
+ * Calls cb once web fonts have loaded (so screens can redraw crisp). One
+ * shared load for the page: callbacks queued before it resolves run once and
+ * are dropped; screens created afterwards already draw with the web fonts,
+ * so later calls are no-ops.
+ */
 export function whenFontsReady(cb: () => void): void {
   if (typeof document === "undefined" || !document.fonts) return;
+  if (fontsState === "ready") return;
+  fontWaiters.push(cb);
+  if (fontsState === "loading") return;
+  fontsState = "loading";
   const f = screenFonts();
   void Promise.all([
     document.fonts.load(`20px ${f.mono}`),
     document.fonts.load(`20px ${f.sans}`),
   ])
     .then(() => document.fonts.ready)
-    .then(cb, () => undefined);
+    .then(
+      () => {
+        fontsState = "ready";
+        const list = fontWaiters;
+        fontWaiters = [];
+        for (const w of list) w();
+      },
+      () => {
+        fontsState = "ready";
+        fontWaiters = [];
+      },
+    );
 }
 
 // ---------------------------------------------------------------------------
