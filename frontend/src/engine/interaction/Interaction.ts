@@ -6,6 +6,7 @@
  */
 import {
   Matrix,
+  Ray,
   Scene,
   Vector3,
   type AbstractMesh,
@@ -21,7 +22,7 @@ import type {
 } from "@/engine/contracts";
 import { actionsFor, isInteractionTarget } from "@/engine/interaction/actions";
 import type { PostFx } from "@/engine/fx/PostFx";
-import { isStaticCollider } from "@/engine/physics/Colliders";
+import { Colliders } from "@/engine/physics/Colliders";
 import { FocusFrame } from "@/engine/interaction/FocusFrame";
 import {
   hasThinResolver,
@@ -98,6 +99,9 @@ export class Interaction {
     const w = engine.getRenderWidth();
     const h = engine.getRenderHeight();
     const cam = this.getCamera();
+    // Interactables only; the opaque static colliders are tested afterwards
+    // against the registry's own list (P10: `scene.pick` no longer walks
+    // several hundred invisible proxies, and only when a target is in range).
     const pick = this.scene.pick(
       w / 2,
       h / 2,
@@ -105,14 +109,11 @@ export class Interaction {
         if (!m.isEnabled()) return false;
         const meta = m.metadata as {
           interact?: unknown;
-          staticCollider?: boolean;
           thinInteract?: unknown;
-          seeThrough?: boolean;
         } | null;
         if (!meta) return false;
         // Interactables may be invisible pick proxies (characters): no visibility check.
-        if (meta.interact || meta.thinInteract) return m.isPickable;
-        return isStaticCollider(meta) && !meta.seeThrough;
+        return !!(meta.interact || meta.thinInteract) && m.isPickable;
       },
       false,
       cam,
@@ -134,7 +135,11 @@ export class Interaction {
       (mesh?.metadata as { interactRange?: number } | null)?.interactRange ??
       INTERACT_RANGE;
     const range = this.rangeBoost ? Math.max(base, this.rangeBoost) : base;
-    if (!target || distance > range) {
+    if (
+      !target ||
+      distance > range ||
+      (pick && this.occluded(w / 2, h / 2, cam, pick.distance))
+    ) {
       this.set(null, null);
       return;
     }
@@ -151,6 +156,22 @@ export class Interaction {
       mesh,
       thin,
     );
+  }
+
+  private readonly ray = new Ray(Vector3.Zero(), new Vector3(0, 0, 1));
+
+  /** An opaque static collider crosses the view ray before `dist` (m). */
+  private occluded(x: number, y: number, cam: Camera, dist: number): boolean {
+    const list = Colliders.of(this.scene)?.occluders();
+    if (!list?.length) return false;
+    this.scene.createPickingRayToRef(x, y, null, this.ray, cam);
+    this.ray.length = dist;
+    for (const m of list) {
+      if (!m.isEnabled()) continue;
+      const hit = this.ray.intersectsMesh(m, false);
+      if (hit.hit && hit.distance < dist - 1e-4) return true;
+    }
+    return false;
   }
 
   private set(
