@@ -65,7 +65,14 @@ export function RightSidebar(): React.ReactNode {
 
   // Console sheet over the canvas: "Open console" button or a log row click.
   const sessionId = useGameStore(selectSessionId);
-  const [sheet, setSheet] = useState<{ callId?: string } | null>(null);
+  // Debug: `?console=1` (optionally `&call=<tool_use_id>`) opens the sheet once.
+  const [sheet, setSheet] = useState<{ callId?: string } | null>(() => {
+    if (typeof window === "undefined") return null;
+    const q = new URLSearchParams(window.location.search);
+    return q.get("console") === "1"
+      ? { callId: q.get("call") ?? undefined }
+      : null;
+  });
   useEffect(() => {
     if (!sheet) return;
     const onKey = (e: KeyboardEvent): void => {

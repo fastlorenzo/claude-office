@@ -152,7 +152,15 @@ export default function V2TestPage(): React.ReactNode {
     (state) => state.loadPersistedDebugSettings,
   );
   const loadPreferences = usePreferencesStore((s) => s.loadPreferences);
-  const renderer = usePreferencesStore((s) => s.renderer);
+  const preferredRenderer = usePreferencesStore((s) => s.renderer);
+  // Debug/screenshot override: `?renderer=pixel|3d` wins over the preference
+  // without persisting it.
+  const [rendererOverride] = useState<"pixel" | "3d" | null>(() => {
+    if (typeof window === "undefined") return null;
+    const r = new URLSearchParams(window.location.search).get("renderer");
+    return r === "pixel" || r === "3d" ? r : null;
+  });
+  const renderer = rendererOverride ?? preferredRenderer;
   const prefsLoaded = usePreferencesStore((s) => s.isLoaded);
 
   // Navigation store
