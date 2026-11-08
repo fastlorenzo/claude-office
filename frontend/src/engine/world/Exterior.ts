@@ -10,13 +10,15 @@
  *    becomes the skybox (zero per-frame cost).
  *  - NEAR (textured ground atlas: grass / asphalt / concrete / gravel with
  *    kerbs, markings and wear; neighbouring sheds with cladding, parapets,
- *    rooftop plant, loading doors; cars; alpha-tested crossed-card trees;
- *    baked sun shadows) is real geometry merged into FIVE draws: ground,
- *    buildings, props, trees, shadows.
+ *    rooftop plant, loading doors; alpha-tested crossed-card trees; baked
+ *    sun shadows) is real geometry merged into FIVE draws: ground,
+ *    buildings, props, trees, shadows — plus TWO for the parked cars
+ *    (exterior/cars.ts: lit clear-coat PBR bodies + thin-instanced wheels).
  *
  * Placement is the pure, tested `layout/exteriorPlan.ts`. Lighting is baked
  * into vertex colours on unlit PBR materials (warm sun side, cool sky side,
- * same direction as fx/Lighting.ts): no light budget, no runtime shadows.
+ * same direction as fx/Lighting.ts): no light budget, no runtime shadows
+ * (the cars alone are lit, so paint and glass catch the sun and the sky).
  */
 import {
   Color3,
@@ -46,6 +48,12 @@ import {
   type Footprint,
   type Rect,
 } from "@/engine/layout/exteriorPlan";
+import {
+  buildParkedCars,
+  carMaterial,
+  setCarReflection,
+} from "@/engine/world/exterior/cars";
+import { carModel } from "@/engine/layout/carModels";
 import {
   GROUND_TILE_M,
   TILE_ASPHALT,
@@ -108,17 +116,6 @@ const ACCENTS: RGB[] = [
   [0.2, 0.26, 0.5],
   [0.8, 0.62, 0.1],
 ];
-const CAR_COLORS: RGB[] = [
-  [0.75, 0.76, 0.78],
-  [0.1, 0.11, 0.13],
-  [0.55, 0.08, 0.09],
-  [0.12, 0.2, 0.42],
-  [0.88, 0.88, 0.88],
-  [0.3, 0.32, 0.34],
-  [0.16, 0.32, 0.24],
-  [0.6, 0.48, 0.2],
-];
-
 const SUN_TINT: RGB = [1.0, 0.94, 0.84];
 const SKY_TINT: RGB = [0.74, 0.84, 1.0];
 
@@ -526,6 +523,8 @@ export class Exterior {
   private readonly owned: { dispose(): void }[] = [];
   private disposed = false;
   private mats: Mats;
+  /** Parked cars: clear-coat paint / glass / rubber in one material. */
+  private readonly carMat: PBRMaterial;
   plan: ExteriorPlan | null = null;
   /** ms from construction until the baked cube replaced the sky (null: pending). */
   bakeMs: number | null = null;
@@ -550,6 +549,11 @@ export class Exterior {
       shadow: unlit(scene, "exterior:shadowMat", null),
     };
     this.owned.push(gtex, ctex, ttex, ...Object.values(this.mats));
+    const car = carMaterial(scene);
+    this.carMat = car.mat;
+    this.owned.push(car.mat, car.tex);
+    if (lighting.skyReflection)
+      setCarReflection(this.carMat, lighting.skyReflection);
     this.mats.ground.backFaceCulling = false;
     const t = this.mats.trees;
     t.backFaceCulling = false;
@@ -1026,60 +1030,22 @@ export class Exterior {
       }
     });
 
-    // --- Cars: body, glasshouse, roof, wheels ------------------------------
+    // --- Cars: real-proportion body variants (exterior/cars.ts), baked into
+    // two draws (bodies + thin-instanced wheels); soft footprint shadows here.
     for (const c of plan.cars) {
-      const col = CAR_COLORS[c.color % CAR_COLORS.length];
-      const len = c.van ? 5.0 : 4.3;
-      const cs = Math.cos(c.yaw);
-      const sn = Math.sin(c.yaw);
-      const L = (lx: number, lz: number): [number, number] => [
-        c.x + lx * cs - lz * sn,
-        c.z + lx * sn + lz * cs,
-      ];
-      box(props, c.x, c.z, g + 0.28, g + 0.82, 0.9, len / 2, col, {
-        yaw: c.yaw,
-      });
-      const cabLen = c.van ? len / 2 - 0.15 : len / 4;
-      const cabZ = c.van ? 0 : -0.25;
-      const [gx, gz] = L(0, cabZ);
-      const topY = g + (c.van ? 1.95 : 1.42);
-      box(
-        props,
-        gx,
-        gz,
-        g + 0.82,
-        topY - 0.06,
-        0.84,
-        cabLen,
-        [0.07, 0.1, 0.13],
-        { yaw: c.yaw },
-      );
-      box(
-        props,
-        gx,
-        gz,
-        topY - 0.06,
-        topY,
-        0.8,
-        cabLen - 0.05,
-        c.van ? col : mul(col, 1.05),
-        { yaw: c.yaw },
-      );
-      for (const wx of [-0.85, 0.85])
-        for (const wz of [-len * 0.32, len * 0.32]) {
-          const [x, z] = L(wx, wz);
-          box(props, x, z, g, g + 0.58, 0.13, 0.31, [0.06, 0.06, 0.07], {
-            yaw: c.yaw,
-          });
-        }
-      const [shx, shz] = L(0, 0);
+      const md = carModel(c);
+      const hx = md.width / 2 + 0.05;
+      const hz = md.length / 2 - 0.1;
+      const rot = Math.abs(Math.sin(c.yaw)) > 0.7;
+      const [ex, ez] = rot ? [hz, hx] : [hx, hz];
       boxShadow(
         shadow,
-        { x0: shx - 1.0, x1: shx + 1.0, z0: shz - len / 2, z1: shz + len / 2 },
-        c.van ? 1.7 : 1.3,
+        { x0: c.x - ex, x1: c.x + ex, z0: c.z - ez, z1: c.z + ez },
+        md.height * 0.85,
         gy + 0.07,
       );
     }
+    const cars = buildParkedCars(this.scene, plan.cars, g, this.carMat);
 
     // --- Trees: alpha-tested crossed cards + a top card, baked shading ------
     const tr = rng(6006);
@@ -1332,6 +1298,7 @@ export class Exterior {
       m("exterior:props", props, this.mats.props),
       m("exterior:trees", trees, this.mats.trees),
       sh,
+      ...cars,
     );
     console.warn(
       `[exterior] near build ${Math.round(performance.now() - t0)} ms, ${this.near.length} draws`,
@@ -1559,7 +1526,8 @@ export class Exterior {
       const ci = scene.customRenderTargets.indexOf(rtt);
       if (ci >= 0) scene.customRenderTargets.splice(ci, 1);
       if (this.disposed) return;
-      this.lighting.setSkyTexture(rtt);
+      const refl = this.lighting.setSkyTexture(rtt);
+      if (refl) setCarReflection(this.carMat, refl);
       cleanup();
       this.bakeMs = performance.now() - t0;
       (globalThis as { __exteriorBakeMs?: number }).__exteriorBakeMs =

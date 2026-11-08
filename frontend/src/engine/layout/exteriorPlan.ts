@@ -10,6 +10,7 @@
  */
 
 import { rng } from "../art/random";
+import { carModel } from "./carModels";
 
 /** Outside ground / factory floor level (the office floor is y = 0). */
 export const GROUND_Y = -6;
@@ -374,8 +375,10 @@ export function shedRect(s: Shed): Rect {
 
 /** Car body footprint (axis-aligned bound, regardless of yaw). */
 export function carRect(c: CarSpot): Rect {
-  const w = 2.0;
-  const d = c.van ? 5.0 : 4.4;
+  const m = carModel(c);
+  // Mirrors stick out ~0.1 m a side; bumpers / plates a few cm.
+  const w = m.width + 0.2;
+  const d = m.length + 0.1;
   const rot = Math.abs(Math.sin(c.yaw)) > 0.7;
   const hx = (rot ? d : w) / 2;
   const hz = (rot ? w : d) / 2;

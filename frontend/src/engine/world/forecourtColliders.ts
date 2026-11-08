@@ -15,6 +15,7 @@ import {
   treeRadius,
   type ExteriorPlan,
 } from "@/engine/layout/exteriorPlan";
+import { carModel } from "@/engine/layout/carModels";
 import { FACTORY, type EntranceLayout } from "@/engine/layout/factoryLayout";
 
 /** Mirrors planExterior's fence: rect(-halfW-30, halfW+30, zF-46, …). */
@@ -80,17 +81,17 @@ export function exteriorPropBoxes(plan: ExteriorPlan): PropBox[] {
     x > walk.x0 - m && x < walk.x1 + m && z > walk.z0 - m && z < walk.z1 + m;
   const out: PropBox[] = [];
   for (const c of plan.cars) {
-    const len = c.van ? 5.0 : 4.3;
-    if (!inside(c.x, c.z, len)) continue;
-    const h = c.van ? 1.95 : 1.42;
+    // Same body variant (footprint) the exterior draws for this spot.
+    const m = carModel(c);
+    if (!inside(c.x, c.z, m.length)) continue;
     // Exterior draws the body rotated by −yaw in Babylon terms.
     out.push({
       x: c.x,
-      y: g + h / 2,
+      y: g + m.height / 2,
       z: c.z,
-      sx: 1.8,
-      sy: h,
-      sz: len,
+      sx: m.width,
+      sy: m.height,
+      sz: m.length,
       yaw: -c.yaw,
     });
   }
