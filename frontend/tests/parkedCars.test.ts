@@ -80,6 +80,13 @@ describe("parked car variants", () => {
       expect(low.mx[0] * 2).toBeLessThan(m.width + 0.01);
       expect(all.mx[0] * 2).toBeLessThan(m.width + 0.3);
       for (const v of t.nor) expect(Number.isFinite(v)).toBe(true);
+      // One front and one rear plate face, mapped inside the plate atlas.
+      expect(t.plate.filter((p) => p === 1)).toHaveLength(4);
+      expect(t.plate.filter((p) => p === 2)).toHaveLength(4);
+      for (const v of t.uv2) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
     }
   });
 

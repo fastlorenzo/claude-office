@@ -11,7 +11,8 @@
  *    regions of the same loft;
  *  - glasshouse: a second loft on the beltline with tumblehome — windscreen,
  *    roof, rear screen, side glass between A/B/C(/D) pillars;
- *  - mirrors, handles, wipers, fin, roof rails, EU plates.
+ *  - mirrors, handles, wipers, fin, roof rails, rear bumper / boot shut
+ *    lines, EU plates from a shared canvas atlas (UV2 albedo).
  *
  * Two draws for the whole car park:
  *  - bodies: every parked car's template copied into ONE world-space mesh,
@@ -26,6 +27,7 @@
  */
 import {
   Color3,
+  DynamicTexture,
   Matrix,
   Mesh,
   PBRMaterial,
@@ -114,9 +116,7 @@ const C = {
   calliper: hexColor("#3a3c40"),
   head: hexColor("#c3c9d0"),
   tail: hexColor("#900b12"),
-  plate: hexColor("#ecece6"),
-  plateBlue: hexColor("#1f40a4"),
-  plateText: hexColor("#16181b"),
+  plate: hexColor("#ffffff"),
 };
 
 const S = {
@@ -131,8 +131,6 @@ const S = {
   head: surf(ID.lens, C.head),
   tail: surf(ID.gloss, C.tail),
   plate: surf(ID.dull, C.plate),
-  plateBlue: surf(ID.dull, C.plateBlue),
-  plateText: surf(ID.dull, C.plateText),
   rail: surf(ID.alloy, C.rail),
   tread: surf(ID.rubber, C.rubber),
   sidewall: surf(ID.rubber, C.sidewall),
@@ -209,6 +207,8 @@ interface Shape {
   intakeX: number;
   /** Front / rear plate centre heights. */
   plate: [number, number];
+  /** Rear bumper shut line height (0: unpainted bumper, no line). */
+  bumper: number;
   /** Plan-view corner radius, nose / tail. */
   corner: [number, number];
   boxy: boolean;
@@ -228,9 +228,9 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
   hatch: {
     sill: 0.2,
     top: [
-      [0, 0.9],
-      [0.015, 0.95],
-      [0.05, 0.975],
+      [0, 0.95],
+      [0.01, 0.968],
+      [0.03, 0.978],
       [0.16, 0.985],
       [0.6, 1.0],
       [1.6, 0.975],
@@ -279,7 +279,8 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
     intake: [0.07, 0.6],
     intakeX: 0.58,
     plate: [0.4, 0.47],
-    corner: [0.42, 0.3],
+    bumper: 0.585,
+    corner: [0.42, 0.17],
     boxy: false,
     tumble: 0.3,
     crown: 0.04,
@@ -293,9 +294,9 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
   saloon: {
     sill: 0.19,
     top: [
-      [0, 0.88],
-      [0.02, 0.95],
-      [0.08, 1.0],
+      [0, 0.96],
+      [0.012, 0.99],
+      [0.035, 1.005],
       [0.22, 1.015],
       [0.6, 1.035],
       [1.05, 1.03],
@@ -344,7 +345,8 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
     intake: [0.07, 0.3],
     intakeX: 0.6,
     plate: [0.4, 0.5],
-    corner: [0.45, 0.34],
+    bumper: 0.6,
+    corner: [0.45, 0.18],
     boxy: false,
     tumble: 0.32,
     crown: 0.04,
@@ -358,9 +360,9 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
   suv: {
     sill: 0.3,
     top: [
-      [0, 1.05],
-      [0.015, 1.1],
-      [0.06, 1.125],
+      [0, 1.1],
+      [0.01, 1.118],
+      [0.035, 1.128],
       [0.14, 1.135],
       [0.8, 1.16],
       [2.0, 1.13],
@@ -411,7 +413,8 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
     intake: [0.07, 0.3],
     intakeX: 0.6,
     plate: [0.47, 0.6],
-    corner: [0.42, 0.26],
+    bumper: 0.73,
+    corner: [0.42, 0.16],
     boxy: true,
     tumble: 0.26,
     crown: 0.035,
@@ -425,9 +428,9 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
   estate: {
     sill: 0.19,
     top: [
-      [0, 0.9],
-      [0.015, 0.95],
-      [0.05, 0.975],
+      [0, 0.95],
+      [0.01, 0.968],
+      [0.03, 0.978],
       [0.14, 0.985],
       [0.8, 1.0],
       [2.0, 0.975],
@@ -478,7 +481,8 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
     intake: [0.07, 0.4],
     intakeX: 0.6,
     plate: [0.4, 0.47],
-    corner: [0.45, 0.26],
+    bumper: 0.585,
+    corner: [0.45, 0.16],
     boxy: false,
     tumble: 0.3,
     crown: 0.04,
@@ -537,6 +541,7 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
     intake: [0.2, 0.6],
     intakeX: 0.62,
     plate: [0.55, 0.62],
+    bumper: 0,
     corner: [0.38, 0.1],
     boxy: true,
     tumble: 0.12,
@@ -551,12 +556,14 @@ const SHAPES: Readonly<Record<CarKind, Shape>> = {
 };
 
 /** Side-section half-width profile f(u), u = 0 at the sill .. 1 at the top. */
-const SIDE_U = [0, 0.07, 0.2, 0.4, 0.6, 0.75, 0.86, 0.93, 0.975, 1];
+const SIDE_U = [0, 0.07, 0.2, 0.4, 0.6, 0.75, 0.84, 0.88, 0.93, 0.975, 1];
+// The kink at u 0.84 – 0.88 is the shoulder (character) line; the top edge
+// rolls over tightly so decks and the bonnet read crisp, not inflated.
 const SIDE_CAR = [
-  0.95, 0.982, 0.997, 1, 0.996, 0.983, 0.962, 0.935, 0.9, 0.865,
+  0.95, 0.982, 0.997, 1, 0.997, 0.99, 0.983, 0.972, 0.955, 0.93, 0.9,
 ];
 const SIDE_BOX = [
-  0.965, 0.988, 0.998, 1, 0.998, 0.99, 0.978, 0.96, 0.935, 0.905,
+  0.965, 0.988, 0.998, 1, 0.999, 0.994, 0.988, 0.981, 0.968, 0.948, 0.925,
 ];
 
 /** Monotone cubic (Fritsch–Carlson) through (s, y) points: no overshoot. */
@@ -643,7 +650,8 @@ class Body {
     const sf = m.length - m.front;
     this.axles = [sf, sf - m.wheelbase];
     this.yc = m.tyreR;
-    this.Ra = m.tyreR + 0.06;
+    // 4-5 cm between the tyre top and the arch lip.
+    this.Ra = m.tyreR + (sh.boxy ? 0.05 : 0.04);
     this.side = sh.boxy ? SIDE_BOX : SIDE_CAR;
     // Tail-lamp heights on the flat tail panel: the flank band just ahead.
     const yt = this.top(0.1) - sh.sill;
@@ -771,6 +779,102 @@ const norm = (a: V3): V3 => {
   return [a[0] / l, a[1] / l, a[2] / l];
 };
 
+// ------------------------------------------------------------- plate atlas
+
+/**
+ * EU number plates: one shared 512 × 256 canvas, 2 × 4 slots of 256 × 56 px
+ * (plate drawn 520 × 110 mm aspect), white below them. The body mesh samples
+ * it through UV2 as albedo (×vertex colour), so plates cost no draw.
+ */
+const ATLAS_W = 512;
+const ATLAS_H = 256;
+const SLOT_W = 256;
+const SLOT_H = 56;
+const PLATE_SLOTS = 8;
+/** Slot 7 is a yellow (rear-only) plate. */
+const YELLOW_SLOT = 7;
+const ATLAS_WHITE: readonly [number, number] = [0.5, 1 - 244 / ATLAS_H];
+
+/** [u0, v0, u1, v1] of a slot (v up: canvas top is v = 1). */
+function slotRect(i: number): [number, number, number, number] {
+  const x0 = (i % 2) * SLOT_W + 2;
+  const y0 = Math.floor(i / 2) * SLOT_H + 1;
+  const x1 = x0 + SLOT_W - 4;
+  const y1 = y0 + 53;
+  return [x0 / ATLAS_W, 1 - y1 / ATLAS_H, x1 / ATLAS_W, 1 - y0 / ATLAS_H];
+}
+
+/** Front / rear atlas slots of a parked car (deterministic per stall). */
+function plateSlots(c: CarSpot): [number, number] {
+  let h =
+    Math.imul(Math.round(c.x * 10), 2654435761) ^
+    Math.imul(Math.round(c.z * 10) + 7, 40503);
+  h ^= h >>> 15;
+  const rear = (h >>> 0) % PLATE_SLOTS;
+  return [rear === YELLOW_SLOT ? (rear + 3) % PLATE_SLOTS : rear, rear];
+}
+
+type Ctx2D = CanvasRenderingContext2D;
+
+/** Plate legends: national styles, made-up registrations. */
+const PLATES: readonly { cc: string; text: string }[] = [
+  { cc: "D", text: "M·KL 4821" },
+  { cc: "F", text: "GH-482-KT" },
+  { cc: "B", text: "1-ABX-372" },
+  { cc: "I", text: "FR 238 BD" },
+  { cc: "D", text: "B·TR 175" },
+  { cc: "E", text: "4417 KLB" },
+  { cc: "F", text: "AZ-905-RC" },
+  { cc: "NL", text: "GX-482-V" },
+];
+
+function drawPlateAtlas(ctx: Ctx2D): void {
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, ATLAS_W, ATLAS_H);
+  PLATES.forEach((p, i) => {
+    const x = (i % 2) * SLOT_W + 2;
+    const y = Math.floor(i / 2) * SLOT_H + 1;
+    const w = SLOT_W - 4;
+    const h = 53;
+    ctx.fillStyle = i === YELLOW_SLOT ? "#f2c418" : "#f4f4ef";
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    // EU band: blue, ring of 12 yellow stars, country code.
+    const bw = 26;
+    ctx.fillStyle = "#1d3fa0";
+    ctx.fillRect(x + 3, y + 3, bw, h - 6);
+    ctx.fillStyle = "#f6d100";
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      ctx.fillRect(
+        x + 3 + bw / 2 + Math.cos(a) * 7 - 1,
+        y + 16 + Math.sin(a) * 7 - 1,
+        2,
+        2,
+      );
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(p.cc, x + 3 + bw / 2, y + h - 8);
+    // Registration, condensed to fit.
+    ctx.fillStyle = "#121212";
+    ctx.font = "bold 40px 'Arial Narrow', Arial, Helvetica, sans-serif";
+    ctx.textBaseline = "middle";
+    const room = w - bw - 16;
+    const tw = ctx.measureText(p.text).width;
+    const sx = Math.min(1, room / Math.max(1, tw));
+    ctx.save();
+    ctx.translate(x + bw + 8 + room / 2, y + h / 2 + 2);
+    ctx.scale(sx, 1);
+    ctx.fillText(p.text, 0, 0);
+    ctx.restore();
+  });
+}
+
 /**
  * Geometry accumulator with per-vertex surface id (U), colour and a paint
  * flag. Triangles are stored with cross(b − a, c − a) along the outward
@@ -781,18 +885,45 @@ class Acc {
   readonly nor: number[] = [];
   readonly col: number[] = [];
   readonly uv: number[] = [];
+  /** Plate-atlas UV (white texel everywhere but on the plates). */
+  readonly uv2: number[] = [];
   readonly paint: number[] = [];
+  /** 1 front plate face, 2 rear plate face (atlas slot set per car). */
+  readonly plate: number[] = [];
   readonly idx: number[] = [];
 
-  vert(p: V3, n: V3, s: Surf): number {
+  vert(
+    p: V3,
+    n: V3,
+    s: Surf,
+    uv2: readonly [number, number] = ATLAS_WHITE,
+    plate = 0,
+  ): number {
     const i = this.pos.length / 3;
     this.pos.push(p[0], p[1], p[2]);
     this.nor.push(n[0], n[1], n[2]);
     const c = s.col ?? [1, 1, 1, 1];
     this.col.push(c[0], c[1], c[2], 1);
     this.uv.push((s.id + 0.5) / SURF_N, 0.5);
+    this.uv2.push(uv2[0], uv2[1]);
     this.paint.push(s.col ? 0 : 1);
+    this.plate.push(plate);
     return i;
+  }
+
+  /** Plate face: quad p (viewer's left-bottom, right-bottom, right-top, left-top) on slot 0. */
+  plateFace(p: readonly V3[], n: V3, which: 1 | 2): void {
+    const [u0, v0, u1, v1] = slotRect(0);
+    const uvs: [number, number][] = [
+      [u0, v0],
+      [u1, v0],
+      [u1, v1],
+      [u0, v1],
+    ];
+    const c = cross(sub(p[1], p[0]), sub(p[2], p[0]));
+    const a = p.map((q, k) => this.vert(q, n, S.plate, uvs[k], which));
+    if (dot(c, n) < 0) this.idx.push(a[0], a[2], a[1], a[0], a[3], a[2]);
+    else this.idx.push(a[0], a[1], a[2], a[0], a[2], a[3]);
   }
 
   /** Flat polygon (3 or 4 corners), winding oriented to face `n`. */
@@ -1282,18 +1413,25 @@ function buildDetails(a: Acc, b: Body): void {
       }
     }
   }
-  // EU plates (520 × 110 mm): blue band on the viewer's left.
+  // EU plates (520 × 110 mm) on a dark holder; the face samples the atlas.
   const plate = (y: number, z: number, dir: 1 | -1) => {
-    a.box([0, y, z + dir * 0.006], [0.52, 0.11, 0.012], S.plate);
-    const zf = z + dir * 0.0135;
-    a.box([dir * 0.235, y, zf], [0.045, 0.104, 0.003], S.plateBlue);
-    for (let k = 0; k < 7; k++) {
-      const x = dir * (0.17 - k * 0.058) - (k > 1 ? dir * 0.012 : 0);
-      a.box([x, y, zf], [0.032, 0.062, 0.003], S.plateText);
-    }
+    a.box([0, y, z + dir * 0.006], [0.53, 0.12, 0.012], S.plastic);
+    const zf = z + dir * 0.0125;
+    const xl = dir * 0.26; // viewer's left
+    a.plateFace(
+      [
+        [xl, y - 0.055, zf],
+        [-xl, y - 0.055, zf],
+        [-xl, y + 0.055, zf],
+        [xl, y + 0.055, zf],
+      ],
+      [0, 0, dir],
+      dir > 0 ? 1 : 2,
+    );
   };
   plate(sh.plate[0], L / 2, 1);
   plate(sh.plate[1], -L / 2, -1);
+  if (sh.bumper > 0) tailLines(a, b);
   if (sh.van) {
     // Split rear doors.
     a.box(
@@ -1304,6 +1442,88 @@ function buildDetails(a: Acc, b: Body): void {
   }
 }
 
+/**
+ * Rear shut lines: the bumper split across the tail panel and along both
+ * flanks to the rear arches; on the saloon also the boot lid (its lower edge
+ * between the lamps and the two deck edges up to the rear screen).
+ */
+function tailLines(a: Acc, b: Body): void {
+  const { L, sh } = b;
+  const h = 0.007;
+  const strip = (pts: V3[], nrm: (k: number) => V3, up: V3) => {
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const n = nrm(k);
+      const off = (p: V3, d: number): V3 => [
+        p[0] + n[0] * 0.0015 + up[0] * d,
+        p[1] + n[1] * 0.0015 + up[1] * d,
+        p[2] + n[2] * 0.0015 + up[2] * d,
+      ];
+      a.quad(
+        [
+          off(pts[k], -h / 2),
+          off(pts[k + 1], -h / 2),
+          off(pts[k + 1], h / 2),
+          off(pts[k], h / 2),
+        ],
+        n,
+        S.seam,
+      );
+    }
+  };
+  const y = sh.bumper;
+  const xc = b.sideX(0, y);
+  strip(
+    [
+      [-xc, y, -L / 2],
+      [xc, y, -L / 2],
+    ],
+    () => [0, 0, -1],
+    [0, 1, 0],
+  );
+  const ar = b.axles[1];
+  const dy = y - b.yc;
+  const sEnd =
+    Math.abs(dy) < b.Ra ? ar - Math.sqrt(b.Ra * b.Ra - dy * dy) - 0.004 : ar;
+  const ss: number[] = [0, 0.004, 0.012, 0.025, 0.045, 0.07, 0.1, 0.14, 0.19];
+  for (let s = 0.25; s < sEnd; s += 0.12) ss.push(s);
+  ss.push(sEnd);
+  for (const sx of [-1, 1]) {
+    const pts = ss
+      .filter((s) => s <= sEnd)
+      .map((s): V3 => [sx * b.sideX(s, y), y, s - L / 2]);
+    strip(
+      pts,
+      (k) => {
+        const dx = pts[k + 1][0] - pts[k][0];
+        const dz = pts[k + 1][2] - pts[k][2];
+        return norm([sx * dz, 0, -sx * dx]);
+      },
+      [0, 1, 0],
+    );
+  }
+  if (!sh.deckSeams.length) return;
+  // Saloon boot lid: lower edge between the lamps, deck edges.
+  const yl = b.tailY[0] - 0.03;
+  const xl = sh.tailX * b.hw - 0.02;
+  strip(
+    [
+      [-xl, yl, -L / 2],
+      [xl, yl, -L / 2],
+    ],
+    () => [0, 0, -1],
+    [0, 1, 0],
+  );
+  const s1 = sh.deckSeams[0];
+  for (const sx of [-1, 1]) {
+    const pts: V3[] = [];
+    for (let s = 0.02; s < s1 + 1e-6; s += (s1 - 0.02) / 8) {
+      const x = 0.8 * b.halfW(s) * b.edge;
+      pts.push([sx * x, b.top(s) + 0.43 * b.crownAt(s), s - L / 2]);
+    }
+    strip(pts, () => [0, 1, 0], [sx, 0, 0]);
+  }
+}
+
 /** Template of one variant in its local frame (pure data, cached). */
 export interface CarTemplate {
   kind: CarKind;
@@ -1311,8 +1531,11 @@ export interface CarTemplate {
   nor: Float32Array;
   col: Float32Array;
   uv: Float32Array;
+  uv2: Float32Array;
   /** 1: vertex takes the car's paint (colour + solid / metallic id). */
   paint: Uint8Array;
+  /** 1 / 2: front / rear plate face (atlas slot offset per car). */
+  plate: Uint8Array;
   idx: Uint32Array;
 }
 
@@ -1332,7 +1555,9 @@ export function carTemplate(kind: CarKind): CarTemplate {
     nor: new Float32Array(a.nor),
     col: new Float32Array(a.col),
     uv: new Float32Array(a.uv),
+    uv2: new Float32Array(a.uv2),
     paint: new Uint8Array(a.paint),
+    plate: new Uint8Array(a.plate),
     idx: new Uint32Array(a.idx),
   };
   templates.set(kind, t);
@@ -1427,7 +1652,9 @@ export function wheelTemplate(): CarTemplate {
     nor: new Float32Array(a.nor),
     col: new Float32Array(a.col),
     uv: new Float32Array(a.uv),
+    uv2: new Float32Array(a.uv2),
     paint: new Uint8Array(a.paint),
+    plate: new Uint8Array(a.plate),
     idx: new Uint32Array(a.idx),
   };
   return wheelCache;
@@ -1470,7 +1697,7 @@ export function carWheelMatrices(
 /** Shared material: vertex-coloured PBR, surface response from a lookup. */
 export function carMaterial(scene: Scene): {
   mat: PBRMaterial;
-  tex: RawTexture;
+  textures: BaseTexture[];
 } {
   const data = new Uint8Array(SURF_N * 4);
   SURF_PROPS.forEach(([cc, rough, metal], i) => {
@@ -1491,8 +1718,22 @@ export function carMaterial(scene: Scene): {
   tex.name = "exterior:carSurfaces";
   tex.wrapU = Texture.CLAMP_ADDRESSMODE;
   tex.wrapV = Texture.CLAMP_ADDRESSMODE;
+  const atlas = new DynamicTexture(
+    "exterior:carPlates",
+    { width: ATLAS_W, height: ATLAS_H },
+    scene,
+    true,
+  );
+  atlas.wrapU = Texture.CLAMP_ADDRESSMODE;
+  atlas.wrapV = Texture.CLAMP_ADDRESSMODE;
+  atlas.anisotropicFilteringLevel = 4;
+  atlas.coordinatesIndex = 1;
+  drawPlateAtlas(atlas.getContext() as unknown as Ctx2D);
+  atlas.update(true);
   const mat = new PBRMaterial("exterior:carMat", scene);
   mat.albedoColor = Color3.White();
+  // Albedo = vertex colour × plate atlas (UV2; white off the plates).
+  mat.albedoTexture = atlas;
   // R: clear-coat intensity · G: roughness · B: metallic.
   mat.metallic = 1;
   mat.roughness = 1;
@@ -1510,7 +1751,7 @@ export function carMaterial(scene: Scene): {
   mat.enableSpecularAntiAliasing = true;
   mat.backFaceCulling = true;
   mat.freeze();
-  return { mat, tex };
+  return { mat, textures: [tex, atlas] };
 }
 
 /** Exterior sky (+ skyline) reflections once the far bake lands. */
@@ -1545,6 +1786,7 @@ export function buildParkedCars(
   const nor = new Float32Array(nv * 3);
   const col = new Float32Array(nv * 4);
   const uv = new Float32Array(nv * 2);
+  const uv2 = new Float32Array(nv * 2);
   const idx = new Uint32Array(ni);
   let v0 = 0;
   let i0 = 0;
@@ -1552,6 +1794,11 @@ export function buildParkedCars(
     const t = carTemplate(carModel(c).kind);
     const p = paintOf(c.color);
     const pu = (p.id + 0.5) / SURF_N;
+    // Plate slot offsets from slot 0 (front, rear).
+    const sl = plateSlots(c);
+    const r0 = slotRect(0);
+    const dU = sl.map((i) => slotRect(i)[0] - r0[0]);
+    const dV = sl.map((i) => slotRect(i)[1] - r0[1]);
     const cs = Math.cos(c.yaw);
     const sn = Math.sin(c.yaw);
     const n = t.pos.length / 3;
@@ -1572,6 +1819,9 @@ export function buildParkedCars(
       for (let e = 0; e < 4; e++) col[q + e] = pk ? p.col[e] : t.col[k * 4 + e];
       uv[(v0 + k) * 2] = pk ? pu : t.uv[k * 2];
       uv[(v0 + k) * 2 + 1] = 0.5;
+      const pl = t.plate[k];
+      uv2[(v0 + k) * 2] = t.uv2[k * 2] + (pl ? dU[pl - 1] : 0);
+      uv2[(v0 + k) * 2 + 1] = t.uv2[k * 2 + 1] + (pl ? dV[pl - 1] : 0);
     }
     // Flip to Babylon's front-face winding.
     for (let e = 0; e < t.idx.length; e += 3) {
@@ -1588,6 +1838,7 @@ export function buildParkedCars(
   vd.normals = nor;
   vd.colors = col;
   vd.uvs = uv;
+  vd.uvs2 = uv2;
   vd.indices = idx;
   vd.applyToMesh(body);
 
@@ -1598,6 +1849,7 @@ export function buildParkedCars(
   wd.normals = wt.nor;
   wd.colors = wt.col;
   wd.uvs = wt.uv;
+  wd.uvs2 = wt.uv2;
   const wi = new Uint32Array(wt.idx.length);
   for (let e = 0; e < wt.idx.length; e += 3) {
     wi[e] = wt.idx[e];

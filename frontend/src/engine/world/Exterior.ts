@@ -551,7 +551,7 @@ export class Exterior {
     this.owned.push(gtex, ctex, ttex, ...Object.values(this.mats));
     const car = carMaterial(scene);
     this.carMat = car.mat;
-    this.owned.push(car.mat, car.tex);
+    this.owned.push(car.mat, ...car.textures);
     if (lighting.skyReflection)
       setCarReflection(this.carMat, lighting.skyReflection);
     this.mats.ground.backFaceCulling = false;
