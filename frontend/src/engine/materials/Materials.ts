@@ -899,6 +899,8 @@ export class Materials {
     mat.roughness = spec.roughness;
     mat.environmentIntensity = spec.env ?? 1;
     mat.maxSimultaneousLights = 6;
+    // Scene fog is exterior-only (opt-in, see Exterior.enableFog).
+    mat.fogEnabled = false;
     // Stops glossy normal-mapped surfaces from shimmering.
     mat.enableSpecularAntiAliasing = true;
     mat.useHorizonOcclusion = true;
