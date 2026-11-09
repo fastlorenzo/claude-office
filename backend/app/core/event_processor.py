@@ -65,6 +65,7 @@ from app.core.telemetry import get_telemetry_store
 from app.core.tool_calls import ApplyResult
 from app.core.transcript_poller import get_transcript_poller, init_transcript_poller
 from app.core.transcript_telemetry import refresh_transcript_telemetry
+from app.core.wsl_bridge import pid_registry_applies, translate_event
 from app.db.database import AsyncSessionLocal
 from app.db.models import EventRecord, SessionRecord
 from app.models.agents import AgentState
@@ -459,6 +460,9 @@ class EventProcessor:
         )
 
         try:
+            # Desktop app on Windows: map WSL transcript paths to the
+            # \\wsl.localhost share before anything reads or persists them.
+            translate_event(event)
             await self._process_event_internal(event)
         except Exception as e:
             logger.exception(f"Error processing event {event.event_type}: {e}")
@@ -938,7 +942,10 @@ class EventProcessor:
             for sid, sm in self.sessions.items():
                 if sm.campus_hidden:
                     continue
-                alive = session_alive(sid, registry, sm.last_event_at, now)
+                # WSL sessions seen by a Windows backend (desktop app): the
+                # verdict is "unknown" and staleness decides (see wsl_bridge).
+                session_registry = registry if pid_registry_applies(sm.wsl_distro) else None
+                alive = session_alive(sid, session_registry, sm.last_event_at, now)
                 if alive is False and sm.alive is not True and sm.dead_since is None:
                     # Never seen alive by this process (restored ghost): no "ended"
                     # state to play, drop it right away.

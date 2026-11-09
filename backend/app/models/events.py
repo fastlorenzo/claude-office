@@ -115,6 +115,8 @@ class EventData(BaseModel):
     background_task_summary: str | None = None
     # Task list override (from CLAUDE_CODE_TASK_LIST_ID env var)
     task_list_id: str | None = None
+    # WSL distro of the producer (see EventDataBase.wsl_distro)
+    wsl_distro: str | None = None
     # Room assignment (populated by ProductMapper)
     floor_id: str | None = None
     room_id: str | None = None
@@ -212,6 +214,11 @@ class EventDataBase(BaseModel):
     # event type on its slow path).
     transcript_path: str | None = None
     agent_transcript_path: str | None = None
+    # WSL distro the producing Claude Code runs in (hooks send WSL_DISTRO_NAME).
+    # A Windows backend maps the Linux transcript paths to \\wsl.localhost\...
+    # at intake (app.core.wsl_bridge) and skips the Windows pid registry for
+    # these sessions' liveness.
+    wsl_distro: str | None = None
     # Free-form text fields used across multiple families.
     summary: str | None = None
     message: str | None = None

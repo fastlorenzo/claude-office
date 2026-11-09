@@ -49,7 +49,13 @@ def resolve_safe_path(path: str | Path | None) -> str | None:
         real = os.path.realpath(os.path.expanduser(raw))
         if not real.endswith(".jsonl"):
             return None
-        if not any(os.path.commonpath([real, root]) == root for root in allowed_roots()):
+        # Windows desktop app: transcripts of Claude Code running inside WSL
+        # (\\wsl.localhost\<distro>\...\.claude\...), see app.core.wsl_bridge.
+        from app.core.wsl_bridge import is_allowed_wsl_transcript
+
+        if not is_allowed_wsl_transcript(real) and not any(
+            os.path.commonpath([real, root]) == root for root in allowed_roots()
+        ):
             return None
         if not stat.S_ISREG(os.stat(real).st_mode):
             return None

@@ -15,6 +15,12 @@ export interface AppConfig {
   statusline: boolean;
   /** WSL distros the user connected (Windows only). */
   wslDistros: string[];
+  /**
+   * "<version>:<port>" the WSL distros' hooks were last installed for. Checking
+   * a distro means booting its VM, so launches re-point them only when this
+   * changes.
+   */
+  wslSyncedFor: string;
   closeToTray: boolean;
   onboarded: boolean;
   /**
@@ -35,6 +41,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform): App
     connected: false,
     statusline: false,
     wslDistros: [],
+    wslSyncedFor: "",
     // GNOME hides tray icons without an extension, so a hidden window could be
     // unreachable there: only Windows closes to tray by default.
     closeToTray: platform === "win32",

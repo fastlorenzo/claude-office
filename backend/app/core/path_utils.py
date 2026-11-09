@@ -20,7 +20,12 @@ def is_safe_transcript_path(path: str | Path) -> bool:
         container_root = get_settings().CLAUDE_PATH_CONTAINER
         if container_root:
             roots.append(Path(container_root).resolve())
-        return resolved.suffix == ".jsonl" and any(resolved.is_relative_to(r) for r in roots)
+        if resolved.suffix == ".jsonl" and any(resolved.is_relative_to(r) for r in roots):
+            return True
+        # Windows desktop app: transcripts of Claude Code running inside WSL.
+        from app.core.wsl_bridge import is_allowed_wsl_transcript
+
+        return is_allowed_wsl_transcript(str(resolved))
     except Exception:
         return False
 

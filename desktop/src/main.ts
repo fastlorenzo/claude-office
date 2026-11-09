@@ -27,6 +27,7 @@ import {
 import { resolvePaths } from "./paths";
 import { choosePort } from "./ports";
 import { Sidecar } from "./sidecar";
+import { connectDistro, disconnectDistro, listDistros, readNetworkingMode } from "./wsl";
 
 // Smoke mode (CI / local verification): isolated profile, load the office,
 // write a screenshot + report to CLAUDE_OFFICE_DESKTOP_SMOKE, then quit.
@@ -147,6 +148,46 @@ async function connectNative(statusline: boolean): Promise<HookStatus | null> {
   return parseStatus(res.stdout);
 }
 
+// ---------------------------------------------------------------------------
+// WSL distros (Windows builds)
+// ---------------------------------------------------------------------------
+
+const wslAvailable = () =>
+  process.platform === "win32" && !!PATHS.hookLinuxBundle && existsSync(PATHS.hookLinuxBundle);
+const wslSyncKey = () => `${VERSION}:${cfg.port}`;
+
+/**
+ * Bring the connected distros in line with `wanted`: connect new ones (and
+ * re-point existing ones), disconnect dropped ones. Returns per-distro errors;
+ * cfg.wslDistros keeps only the distros that are actually connected.
+ */
+async function syncDistros(wanted: string[], statusline: boolean): Promise<string[]> {
+  if (!wslAvailable() || !PATHS.hookLinuxBundle) return [];
+  const bundle = PATHS.hookLinuxBundle;
+  const errors: string[] = [];
+  const connected = new Set(cfg.wslDistros);
+  for (const distro of cfg.wslDistros.filter((d) => !wanted.includes(d))) {
+    try {
+      await disconnectDistro(distro, bundle, VERSION);
+      connected.delete(distro);
+    } catch (err) {
+      errors.push(String((err as Error).message ?? err));
+    }
+  }
+  for (const distro of wanted) {
+    try {
+      await connectDistro(distro, bundle, VERSION, cfg.apiKey, cfg.port, statusline);
+      connected.add(distro);
+    } catch (err) {
+      errors.push(String((err as Error).message ?? err));
+    }
+  }
+  cfg.wslDistros = [...connected].sort();
+  if (errors.length === 0) cfg.wslSyncedFor = wslSyncKey();
+  persist();
+  return errors;
+}
+
 /** On launch: keep hooks pointed at this version/port when the user connected before. */
 async function ensureHooks(): Promise<void> {
   if (!cfg.connected) return;
@@ -157,6 +198,10 @@ async function ensureHooks(): Promise<void> {
     }
   } catch (err) {
     console.error("ensureHooks:", err);
+  }
+  if (cfg.wslDistros.length > 0 && cfg.wslSyncedFor !== wslSyncKey()) {
+    const errors = await syncDistros(cfg.wslDistros, cfg.statusline);
+    if (errors.length) console.error("ensureHooks (WSL):", errors.join("; "));
   }
 }
 
@@ -294,12 +339,27 @@ function registerIpc(): void {
     claudeDirFound: existsSync(join(HOME, ".claude")),
     hooks: await hookStatus(null),
     wslDistros: cfg.wslDistros,
+    // Connected state comes from config: probing a distro would boot its VM.
+    wsl: wslAvailable()
+      ? {
+          available: true,
+          mirrored: readNetworkingMode(process.env.USERPROFILE || HOME) === "mirrored",
+          distros: (await listDistros()).map((name) => ({
+            name,
+            connected: cfg.wslDistros.includes(name),
+          })),
+        }
+      : { available: false, mirrored: false, distros: [] },
   }));
 
   ipcMain.handle("co:connect", async (_e, opts: { statusline: boolean; wslDistros: string[] }) => {
-    const status = await connectNative(Boolean(opts.statusline));
-    cfg = { ...cfg, connected: true, statusline: Boolean(opts.statusline), onboarded: true };
+    const statusline = Boolean(opts.statusline);
+    const status = await connectNative(statusline);
+    cfg = { ...cfg, connected: true, statusline, onboarded: true };
     persist();
+    const wanted = Array.isArray(opts.wslDistros) ? opts.wslDistros.map(String) : [];
+    const errors = await syncDistros(wanted, statusline);
+    if (errors.length) throw new Error(`Connected here, but not in WSL: ${errors.join("; ")}`);
     return status;
   });
 
@@ -307,6 +367,8 @@ function registerIpc(): void {
     const res = await runCli(deployedHook(), ["uninstall", "--json"]);
     cfg = { ...cfg, connected: false, onboarded: true };
     persist();
+    const errors = await syncDistros([], cfg.statusline);
+    if (errors.length) throw new Error(`Disconnected here, but not in WSL: ${errors.join("; ")}`);
     if (res.code !== 0) throw new Error(`hook uninstall failed: ${res.stderr || res.stdout}`);
     return parseStatus(res.stdout);
   });

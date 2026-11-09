@@ -755,6 +755,13 @@ class StateMachine:
     # Not part of ``to_game_state`` output — internal eviction metadata only.
     last_event_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
+    # WSL distro the session's Claude Code runs in (``data.wsl_distro``), or
+    # None for a native session. A Windows backend (``wsl_bridge.bridge_active``)
+    # cannot see Linux pids, so liveness for these sessions falls back to
+    # staleness instead of the Windows ``~/.claude/sessions`` registry; a Linux
+    # backend inside WSL ignores it. Internal metadata only.
+    wsl_distro: str | None = None
+
     # Entry ids (built by ``EventProcessor._entry_id``) already reflected in
     # this machine — appended by the live pipeline or rebuilt during a DB
     # restore. The event pipeline consults and updates it under
@@ -961,6 +968,13 @@ class StateMachine:
         callers that need full rollback should wrap this in a higher-level
         transaction.
         """
+        # Claude Code inside WSL (desktop app on Windows): remembered so liveness
+        # does not consult the Windows pid registry for this session. Set here
+        # so live, restore and replay all agree.
+        distro = getattr(event.data, "wsl_distro", None)
+        if distro:
+            self.wsl_distro = distro
+
         # Invariant: token reads inside update_from_event are tail-bounded
         # (_TOKEN_READ_SIZE = 20_000, see token_tracker.py); offloading them to
         # a thread would break replay token accounting, which relies on this

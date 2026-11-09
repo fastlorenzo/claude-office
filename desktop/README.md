@@ -36,6 +36,30 @@ Electron main (src/main.ts)
   live in Electron's userData dir (`~/.config/Claude Office`,
   `%APPDATA%\Claude Office`). The menu has *Open logs folder* / *Open data folder*.
 
+## Claude Code inside WSL (Windows)
+
+The Integrations window lists your WSL distributions. For each one you tick:
+
+1. the bundled **Linux** hook (`resources/hook-linux`) is copied into the distro's
+   `~/.local/share/claude-office/hook/<version>/` over `\\wsl.localhost`;
+2. `claude-office-hook install` runs *inside* the distro (via `wsl.exe`), writing
+   the distro's own `~/.claude/settings.json` and config file, with this app's
+   key (`--replace-api-key`).
+
+Hooks tag their events with `WSL_DISTRO_NAME`. The Windows backend rewrites the
+transcript paths to `\\wsl.localhost\<distro>\…` at intake
+(`backend/app/core/wsl_bridge.py`) and judges these sessions' liveness by
+staleness, because Windows cannot see Linux pids.
+
+**Networking:** this needs `networkingMode=mirrored` in `%UserProfile%\.wslconfig`
+(Windows 11 22H2+), so WSL reaches the app on `127.0.0.1`. The window shows
+which mode is active. NAT mode is not bridged yet: it would need a listener
+beyond loopback plus a firewall rule.
+
+Known limitations: git status for WSL repos is not shown (working dirs stay
+Linux paths), and connected distros are re-pointed on launch only after an app
+update or port change, because checking a distro boots its VM.
+
 ## Develop
 
 ```bash
