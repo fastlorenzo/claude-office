@@ -128,10 +128,22 @@ export interface ControlRoomContext {
   feeds: FeedScheduler;
 }
 
-/** Upper-tier texture pixels per metre (text ≥ 14 px from the consoles). */
-const PPM_UP = 400;
-/** Lower tier (captions, alerts, log). */
-const PPM_LOW = 300;
+/**
+ * Wall canvas density. The wall is read from 3 m and beyond (R up to 8 m), so
+ * 300 / 225 px per metre (3.3 / 4.4 mm per texel) already out-resolves a
+ * 1080p screen at 3 m; 400 / 300 cost 78% more VRAM for no visible gain.
+ * `?opsppm=400` restores the old density (A/B). Tile pitch stays integral
+ * (0.6 m x 300 = 180 px, x 225 = 135 px).
+ */
+const PPM_UP = ((): number => {
+  const q =
+    typeof location !== "undefined"
+      ? Number(new URLSearchParams(location.search).get("opsppm"))
+      : 0;
+  return q >= 100 && q <= 800 ? q : 300;
+})();
+/** Lower tier (captions, alerts, log): three quarters of the upper tier. */
+const PPM_LOW = PPM_UP * 0.75;
 const GUTTER_CM = 1.2;
 /** The wall is F-able from anywhere in the operator area. */
 const WALL_INTERACT_RANGE = 12;
@@ -145,8 +157,9 @@ const WALL_BG = "#05080D";
 
 const ATLAS_COLS = 4;
 const ATLAS_ROWS = 4;
-const CELL_W = 768;
-const CELL_H = 336;
+/** Seat-monitor cell: 576 x 252 px on a ~0.5 m screen read from 1-2 m. */
+const CELL_W = 576;
+const CELL_H = 252;
 const AUX = {
   board: 8,
   usage: 9,

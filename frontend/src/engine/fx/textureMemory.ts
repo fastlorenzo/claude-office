@@ -134,23 +134,54 @@ export function estimateTextureMB(engine: AbstractEngine): number {
 export function largestTextures(
   engine: AbstractEngine,
   n = 12,
-): { name: string; mb: number; w: number; cube: boolean; type: number }[] {
+): {
+  name: string;
+  mb: number;
+  w: number;
+  h: number;
+  mips: boolean;
+  cube: boolean;
+  type: number;
+}[] {
+  // `?drawdbg=1&texall=1` prints the complete inventory.
+  if (
+    typeof location !== "undefined" &&
+    new URLSearchParams(location.search).has("texall")
+  )
+    n = 400;
   const seen = new Set<unknown>();
+  // Producer names: internal textures are anonymous, their Texture wrappers
+  // carry the name the producer gave (DynamicTexture "ledPanel", ...).
+  const owner = new Map<unknown, string>();
+  for (const sc of engine.scenes)
+    for (const tx of sc.textures) {
+      const it = tx.getInternalTexture();
+      if (it && tx.name && !owner.has(it)) owner.set(it, tx.name);
+    }
   const out: {
     name: string;
     mb: number;
     w: number;
+    h: number;
+    mips: boolean;
     cube: boolean;
     type: number;
   }[] = [];
   for (const t of engine.getLoadedTexturesCache()) {
     if (seen.has(t)) continue;
     seen.add(t);
-    const name = (t.label || t.url || `src${t.source}`).slice(-60);
+    const name = (
+      t.label ||
+      owner.get(t) ||
+      t.url ||
+      `src${t.source}`
+    ).slice(-60);
     out.push({
       name,
       mb: Math.round((textureBytes(t) / 1048576) * 10) / 10,
       w: t.width,
+      h: t.height,
+      mips: t.generateMipMaps || (t.mipLevelCount ?? 1) > 1,
       cube: t.isCube,
       type: t.type,
     });

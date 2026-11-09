@@ -21,7 +21,9 @@
  * (the cars alone are lit, so paint and glass catch the sun and the sky).
  */
 import {
+  BaseTexture,
   Color3,
+  Constants,
   Mesh,
   PBRMaterial,
   RawTexture,
@@ -33,6 +35,11 @@ import {
   Texture,
 } from "@/engine/babylon";
 import { rng } from "@/engine/art/random";
+import {
+  encodeRGBD,
+  hdrStats,
+  resampleFace,
+} from "@/engine/world/exterior/skyRgbd";
 import {
   TERRAIN_R0,
   TERRAIN_R1,
@@ -90,8 +97,13 @@ const FOG_DENSITY = 0.0013;
 const fogAt = (d: number): number =>
   1 - Math.exp(-(FOG_DENSITY * d) * (FOG_DENSITY * d));
 const TERRAIN_SEED = 5;
-/** Baked sky cube face size (half-float RGBA: 6 faces x 8 B/px). */
+/** Bake render size per face (transient half-float RGBA: 6 faces x 8 B/px). */
 const CUBE_SIZE = 1536;
+/**
+ * Stored sky cube face size: RGBD RGBA8 (4 B/px, no mips) after the bake, so
+ * the resident cube is SKY_STORE_SIZE^2 x 24 B (1024: 25 MB vs 108 MB).
+ */
+const SKY_STORE_SIZE = 1024;
 /** Same direction as the interior sun (fx/Lighting.ts SUN_DIR). */
 const SUN = new Vector3(-0.5, -0.62, 0.6).normalize();
 const SUN_XZ = Math.hypot(SUN.x, SUN.z);
@@ -1823,15 +1835,93 @@ export class Exterior {
       const ci = scene.customRenderTargets.indexOf(rtt);
       if (ci >= 0) scene.customRenderTargets.splice(ci, 1);
       if (this.disposed) return;
-      const refl = this.lighting.setSkyTexture(rtt);
-      if (refl) setCarReflection(this.carMat, refl);
       cleanup();
-      this.bakeMs = performance.now() - t0;
-      (globalThis as { __exteriorBakeMs?: number }).__exteriorBakeMs =
-        this.bakeMs;
-      console.warn(`[exterior] bake ${Math.round(this.bakeMs)} ms`);
+      void this.storeSky(rtt).then((cube) => {
+        if (this.disposed) {
+          if (cube !== rtt) cube.dispose();
+          return;
+        }
+        const refl = this.lighting.setSkyTexture(cube);
+        if (refl) setCarReflection(this.carMat, refl);
+        if (cube !== rtt) {
+          // The half-float source is no longer referenced: free it.
+          this.probe?.dispose();
+          this.probe = null;
+        }
+        this.bakeMs = performance.now() - t0;
+        (globalThis as { __exteriorBakeMs?: number }).__exteriorBakeMs =
+          this.bakeMs;
+        console.warn(`[exterior] bake ${Math.round(this.bakeMs)} ms`);
+      });
     });
     this.probe = probe;
+  }
+
+  /**
+   * Re-store the half-float bake as an RGBD RGBA8 cube at SKY_STORE_SIZE
+   * (same GL face layout as the render target, so Lighting's flip handling
+   * is unchanged). Falls back to the float cube if the readback fails.
+   */
+  private async storeSky(rtt: BaseTexture): Promise<BaseTexture> {
+    // `?skyfloat=1`: keep the half-float cube (A/B against the RGBD store).
+    if (new URLSearchParams(globalThis.location?.search).has("skyfloat"))
+      return rtt;
+    try {
+      const engine = this.scene.getEngine();
+      const faces: Uint8Array[] = [];
+      let over1 = 0;
+      let max = 0;
+      for (let f = 0; f < 6; f++) {
+        const px = (await rtt.readPixels(
+          f,
+          0,
+          null,
+          true,
+          false,
+        )) as Float32Array;
+        if (!px || px.length < CUBE_SIZE * CUBE_SIZE * 4)
+          throw new Error("read");
+        const small = resampleFace(px, CUBE_SIZE, SKY_STORE_SIZE);
+        const hs = hdrStats(small);
+        over1 += hs.over1 / 6;
+        max = Math.max(max, hs.max);
+        faces.push(encodeRGBD(small, 1));
+        await new Promise<void>((r) => setTimeout(r, 0)); // keep frames flowing
+      }
+      const internal = engine.createRawCubeTexture(
+        faces,
+        SKY_STORE_SIZE,
+        Constants.TEXTUREFORMAT_RGBA,
+        Constants.TEXTURETYPE_UNSIGNED_BYTE,
+        false,
+        false,
+        Constants.TEXTURE_BILINEAR_SAMPLINGMODE,
+        null,
+      );
+      internal.label = "exterior:sky";
+      internal._isRGBD = true;
+      // Irradiance for the PBR consumers comes from the float source (the
+      // lazy path would read the encoded bytes as plain colours).
+      const { CubeMapToSphericalPolynomialTools } =
+        await import("@babylonjs/core/Misc/HighDynamicRange/cubemapToSphericalPolynomial");
+      const sp =
+        await CubeMapToSphericalPolynomialTools.ConvertCubeMapTextureToSphericalPolynomial(
+          rtt,
+        );
+      if (sp) internal._sphericalPolynomial = sp;
+      engine.getLoadedTexturesCache().push(internal);
+      console.warn(
+        `[exterior] sky RGBD ${SKY_STORE_SIZE}: HDR over1 ${(over1 * 100).toFixed(3)}% max ${max.toFixed(2)}`,
+      );
+      const tex = new BaseTexture(this.scene, internal);
+      tex.name = "exterior:sky";
+      tex.gammaSpace = false;
+      tex.coordinatesMode = Texture.SKYBOX_MODE;
+      return tex;
+    } catch (e) {
+      console.warn("[exterior] sky RGBD store failed, keeping float cube", e);
+      return rtt;
+    }
   }
 
   get meshes(): Mesh[] {

@@ -205,9 +205,13 @@ export function signHardware(b: ArtBatcher, specs: readonly SignSpec[]): void {
   }
 }
 
-/** Atlas slot layout: 2 columns × 4 rows of 1024 × 256 px. */
+/** Atlas slot layout: 2 columns × up to 4 rows of 1024 × 256 px. */
 const COLS = 2;
-const ROWS = 4;
+const MAX_ROWS = 4;
+/** Atlas rows needed for `faces` distinct faces (rows nobody uses cost VRAM). */
+export function signAtlasRows(faces: number): number {
+  return Math.max(1, Math.min(MAX_ROWS, Math.ceil(faces / COLS)));
+}
 const SW = 1024;
 const SH = 256;
 
@@ -224,7 +228,8 @@ export function buildSignMesh(
   const used: SignFaceId[] = [];
   for (const s of specs)
     for (const f of [s.front, s.back]) if (f && !used.includes(f)) used.push(f);
-  if (used.length > COLS * ROWS) throw new Error("sign atlas full");
+  if (used.length > COLS * MAX_ROWS) throw new Error("sign atlas full");
+  const ROWS = signAtlasRows(used.length);
   const tex = new DynamicTexture(
     `${name}:atlas`,
     { width: SW * COLS, height: SH * ROWS },
