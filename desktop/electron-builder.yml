@@ -18,6 +18,10 @@ files:
   - build/icon.png
   - package.json
 asar: true
+# Reuse the Electron that `node node_modules/electron/install.js` downloaded and
+# verified against the npm package's checksums.json, instead of a second
+# download from GitHub releases (which intermittently 504s in CI).
+electronDist: node_modules/electron/dist
 # Large static assets and native sidecars stay outside the asar archive.
 extraResources:
   - from: ../packaging/dist/claude-office-server

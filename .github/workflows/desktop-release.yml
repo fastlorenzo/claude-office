@@ -11,6 +11,12 @@ name: Desktop release
 # The frontend export is platform independent: built once and shared. The
 # Linux job also hands its frozen hook to the Windows job, which bundles it as
 # resources/hook-linux for WSL distros.
+#
+# GitHub release downloads intermittently 504 for long stretches, so the build
+# avoids them wherever it can: Bun comes from npm, Python from the runner's
+# tool cache (setup-python, no download for a cached version) with uv from
+# PyPI, and Electron is downloaded once (checksum-verified) and reused by
+# electron-builder (electronDist). The rest goes through .github/scripts/retry.sh.
 
 on:
   push:
@@ -20,6 +26,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  UV_PYTHON_DOWNLOADS: never
 
 concurrency:
   group: desktop-release-${{ github.ref }}
@@ -31,16 +40,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
+      - name: Install Bun from npm (avoids GitHub release downloads)
+        run: . .github/scripts/retry.sh && retry npm install -g bun@1.4.4 && bun --version
       - name: Install, fetch CC0/MIT assets, build static export
         working-directory: frontend
         # characters: Microsoft Rocketbox cast (MIT, pinned commit). The MPFB
         # cast needs Blender (tools/mpfb) and is not built here; the app
         # detects its absence at runtime and uses Rocketbox.
         run: |
-          bun install --frozen-lockfile
-          bun run assets
-          bun run characters
+          . ../.github/scripts/retry.sh
+          retry bun install --frozen-lockfile
+          retry bun run assets
+          retry bun run characters
           bun run build
       - uses: actions/upload-artifact@v7
         with:
@@ -57,10 +68,17 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: "3.13"
-      - uses: oven-sh/setup-bun@v2
+      - name: Install uv from PyPI; use the runner's Python
+        run: |
+          . .github/scripts/retry.sh
+          retry python -m pip install --disable-pip-version-check uv==0.11.4
+          echo "UV_PYTHON=${{ steps.py.outputs.python-path }}" >> "$GITHUB_ENV"
+      - name: Install Bun from npm (avoids GitHub release downloads)
+        run: . .github/scripts/retry.sh && retry npm install -g bun@1.4.4 && bun --version
       - uses: actions/download-artifact@v8
         with:
           name: frontend-out
@@ -72,9 +90,7 @@ jobs:
       - name: Package (AppImage + deb)
         working-directory: desktop
         run: |
-          # GitHub release downloads (Electron, AppImage/NSIS tooling) intermittently
-          # return 504: retry each network-bound step with backoff.
-          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed: $*"; sleep $((i * 20)); done; return 1; }
+          . ../.github/scripts/retry.sh
           retry bun install --frozen-lockfile
           retry node node_modules/electron/install.js
           bun run build
@@ -104,10 +120,17 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/setup-python@v7
+        id: py
         with:
           python-version: "3.13"
-      - uses: oven-sh/setup-bun@v2
+      - name: Install uv from PyPI; use the runner's Python
+        run: |
+          . .github/scripts/retry.sh
+          retry python -m pip install --disable-pip-version-check uv==0.11.4
+          echo "UV_PYTHON=${{ steps.py.outputs.python-path }}" >> "$GITHUB_ENV"
+      - name: Install Bun from npm (avoids GitHub release downloads)
+        run: . .github/scripts/retry.sh && retry npm install -g bun@1.4.4 && bun --version
       - uses: actions/download-artifact@v8
         with:
           name: frontend-out
@@ -133,9 +156,7 @@ jobs:
       - name: Package (NSIS)
         working-directory: desktop
         run: |
-          # GitHub release downloads (Electron, AppImage/NSIS tooling) intermittently
-          # return 504: retry each network-bound step with backoff.
-          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed: $*"; sleep $((i * 20)); done; return 1; }
+          . ../.github/scripts/retry.sh
           retry bun install --frozen-lockfile
           retry node node_modules/electron/install.js
           bun run build
