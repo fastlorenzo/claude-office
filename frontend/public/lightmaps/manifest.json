@@ -1,0 +1,688 @@
+{
+ "version": 1,
+ "sets": {
+  "control": {
+   "image": "control.png",
+   "encoding": "rgbd",
+   "rgbdGamma": 2.2,
+   "size": 2048,
+   "gain": 1.0,
+   "sun": false,
+   "frame": "control-local",
+   "origin": [
+    0,
+    0,
+    37.89999999999999
+   ],
+   "verify": "topology",
+   "uv2": "control_uv2.bin",
+   "uv2Unit": "float",
+   "parts": {
+    "control:mat:floorDark": {
+     "hash": "d7cd44d92d024f5507e3abbd3eb20512bd1f09e3",
+     "vertexCount": 1004,
+     "uv2Offset": 0,
+     "topoHash": "a50b3d5995a41fbec8a62d4005768c64993792ec",
+     "bbox": [
+      -8.901,
+      -0.1,
+      -9.1,
+      8.901,
+      0,
+      9.1
+     ]
+    },
+    "controlInt:mat:wall": {
+     "hash": "c5d0a223e390b89d5aee50ff5b6bb80eef3b69b8",
+     "vertexCount": 2088,
+     "uv2Offset": 2008,
+     "topoHash": "931275ce1bee29346c4e392c88b6175f8c046c84",
+     "bbox": [
+      -9.1,
+      -0.1,
+      -9.1,
+      9.1,
+      5.3,
+      9.1
+     ]
+    },
+    "controlInt:mat:t:wallFelt:#B9C4D2": {
+     "hash": "2df74024ffde477e692d8a387c586a6cbf438a8a",
+     "vertexCount": 192,
+     "uv2Offset": 6184,
+     "topoHash": "5fc283178016b499a22b52fe043865cdbc3647a1",
+     "bbox": [
+      -8.678,
+      0.6,
+      1.991,
+      8.678,
+      3.8,
+      2.725
+     ]
+    },
+    "controlInt:mat:t:ceiling:#B9BEC6": {
+     "hash": "20f4750a3a01ca4216100a1ba9e5e5c99a595ece",
+     "vertexCount": 2432,
+     "uv2Offset": 6568,
+     "topoHash": "5c8efc50b356c2a03c9b7d2bc1fca0d5ab367c99",
+     "bbox": [
+      -8.92,
+      4.78,
+      -8.92,
+      8.92,
+      5.3,
+      8.92
+     ]
+    },
+    "controlInt:mat:blackMetal": {
+     "hash": "eba61790712424ce4e51d66779d7c6054e764fc1",
+     "vertexCount": 11134,
+     "uv2Offset": 11432,
+     "topoHash": "424f1ef33fef8e9eff553dec848d9c32249897be",
+     "bbox": [
+      -7.725,
+      0.74,
+      -7.711,
+      7.725,
+      5.2,
+      7.73
+     ]
+    },
+    "controlInt:mat:aluminium": {
+     "hash": "f06694752b7aaa1f356212583dbf807527a98d30",
+     "vertexCount": 1774,
+     "uv2Offset": 33700,
+     "topoHash": "c529183237b8d1e5b6b6caa0d152ae2f250beeec",
+     "bbox": [
+      -4.48,
+      0.3,
+      -4.48,
+      4.48,
+      4.14,
+      4.48
+     ]
+    },
+    "controlInt:mat:c:#C9CFD7:0.42:0": {
+     "hash": "2f9e065ea27013b011f268b70b248e457edd753e",
+     "vertexCount": 3080,
+     "uv2Offset": 37248,
+     "topoHash": "95e34d43b48ccd9da61ea5c66adbe49c9518e3c0",
+     "bbox": [
+      -8.094,
+      0.07,
+      -1.5,
+      8.094,
+      0.85,
+      8.549
+     ]
+    },
+    "controlInt:mat:skirting": {
+     "hash": "63268a24678ec5c9e058ff59235d16427734390c",
+     "vertexCount": 2080,
+     "uv2Offset": 43408,
+     "topoHash": "12c3f7999639ef508d10a19a2136914336c348f1",
+     "bbox": [
+      -8.094,
+      0,
+      -2.624,
+      8.094,
+      0.4,
+      8.549
+     ]
+    },
+    "controlInt:mat:shadowGap": {
+     "hash": "97203a98dddb24dfc856d81c40c0141812145d48",
+     "vertexCount": 456,
+     "uv2Offset": 47568,
+     "topoHash": "344fbb44017a31ca006ab3cf361ddfddea358415",
+     "bbox": [
+      -7.669,
+      0.25,
+      2.73,
+      7.669,
+      0.59,
+      8.131
+     ]
+    },
+    "controlInt:mat:c:#1A1E25:0.38:0": {
+     "hash": "66d2ef9aa32b09d2e616559c5ec527e898e64762",
+     "vertexCount": 1600,
+     "uv2Offset": 48480,
+     "topoHash": "2e8e7e95b90708ece8c18905cea7b02e3e52ff0a",
+     "bbox": [
+      -8.441,
+      0.77,
+      2.579,
+      8.441,
+      4.58,
+      8.899
+     ]
+    },
+    "controlInt:mat:t:floorRoom:#2B3E66": {
+     "hash": "18ed4a769f5fdb045e265003dd3eba0b703a97a6",
+     "vertexCount": 784,
+     "uv2Offset": 51680,
+     "topoHash": "5a1f1fc69208a5880ae59617b81648634db559fa",
+     "bbox": [
+      -6.02,
+      0.001,
+      -6.02,
+      6.02,
+      0.008,
+      6.02
+     ]
+    },
+    "controlInt:mat:c:#E4E8EC:0.5:0": {
+     "hash": "fffaab68e0cd95865e4c8d2bab9d0a45189cc69c",
+     "vertexCount": 2072,
+     "uv2Offset": 53248,
+     "topoHash": "8c9658ec486a82794353f8048a86bc6443c4710e",
+     "bbox": [
+      -4.185,
+      0,
+      -2.679,
+      4.185,
+      1,
+      5.24
+     ]
+    },
+    "controlInt:mat:c:#F5F6F7:0.3:0": {
+     "hash": "00ea7283516dcefea8bbb7e299fdce68294c5261",
+     "vertexCount": 1304,
+     "uv2Offset": 57392,
+     "topoHash": "0d50c5338898e345a9c1a97b9f31fb507f66fcd4",
+     "bbox": [
+      -4.213,
+      0.7,
+      -2.806,
+      4.213,
+      1.04,
+      5.271
+     ]
+    },
+    "controlInt:mat:t:floorRoom:#344A78": {
+     "hash": "cdf5ed565f0d7e82a0c6e9a8713a0cac5c83ebb7",
+     "vertexCount": 720,
+     "uv2Offset": 60000,
+     "topoHash": "1d86df4584c426ce6e95038a0cdd42715db53580",
+     "bbox": [
+      -3.245,
+      0,
+      -3.65,
+      3.245,
+      0.3,
+      3.63
+     ]
+    },
+    "controlDrum:mat:wall": {
+     "hash": "980425f489f1c10215ff0d8f4af4a02a23620f28",
+     "vertexCount": 2472,
+     "uv2Offset": 61440,
+     "topoHash": "da88ee596189c358cdd64351047d0b454efe84b3",
+     "bbox": [
+      -9.15,
+      -0.1,
+      -9.15,
+      9.15,
+      5.25,
+      9.15
+     ]
+    },
+    "controlDrum:mat:blackMetal": {
+     "hash": "4b90dd499819cb7a93e479f1ad5b8cec6d685cfe",
+     "vertexCount": 8064,
+     "uv2Offset": 66384,
+     "topoHash": "0279ebf44fb7716a9f3ecffdde08dbaaf704c589",
+     "bbox": [
+      -9.18,
+      -0.45,
+      -9.162,
+      9.18,
+      5.25,
+      9.18
+     ]
+    },
+    "controlDrum:mat:concreteSoffit": {
+     "hash": "d2214c68c8efcb628c63038118068c274043e7f6",
+     "vertexCount": 1980,
+     "uv2Offset": 82512,
+     "topoHash": "750a896bd0aefac07076156e27fb6fa8c1a81358",
+     "bbox": [
+      -9.03,
+      -0.45,
+      -9.1,
+      9.03,
+      5.52,
+      9.03
+     ]
+    },
+    "controlDrum:mat:aluminium": {
+     "hash": "df55594386c580151b55f3f4bf15f0c10dfeb6ab",
+     "vertexCount": 1936,
+     "uv2Offset": 86472,
+     "topoHash": "ece20242f605086409fd5028b08b3a1b02d1e13d",
+     "bbox": [
+      -9.2,
+      5.3,
+      -9.2,
+      9.2,
+      5.7,
+      9.2
+     ]
+    },
+    "controlDrum:mat:steelPainted": {
+     "hash": "0395040fd20a5355cea44a6c1efd8595dff07170",
+     "vertexCount": 2304,
+     "uv2Offset": 90344,
+     "topoHash": "681fa665cd2128b4afcb1e0b415f57965e6c216b",
+     "bbox": [
+      -8.009,
+      -6,
+      -4.575,
+      8.009,
+      -0.45,
+      5.575
+     ]
+    },
+    "controlDrum:mat:paint": {
+     "hash": "d25537939d6140a0869241ede8c7c3b39794ac60",
+     "vertexCount": 768,
+     "uv2Offset": 94952,
+     "topoHash": "9a5ce85d22d7e674f7d05f4f3e7736bce81baaa2",
+     "bbox": [
+      -7.899,
+      -5.95,
+      -4.465,
+      7.899,
+      -5.05,
+      5.465
+     ]
+    }
+   },
+   "bake": {
+    "samples": 512,
+    "device": "OPTIX",
+    "seconds": 35.6,
+    "denoised": true,
+    "layout": "demo n=6",
+    "date": "2026-11-09"
+   }
+  },
+  "entrance": {
+   "image": "entrance.png",
+   "encoding": "rgbd",
+   "rgbdGamma": 2.2,
+   "size": 2048,
+   "gain": 1.0,
+   "sun": true,
+   "frame": "world",
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "verify": "position",
+   "uv2": "entrance_uv2.bin",
+   "uv2Unit": "float",
+   "parts": {
+    "entrance:mat:quartz": {
+     "hash": "bc7b9c63c93a02688ff2a7592ab83534b2b8c641",
+     "vertexCount": 24,
+     "uv2Offset": 0
+    },
+    "entrance:mat:blackMetal": {
+     "hash": "f4a70a0b1087e497316787de572fa11bd5c5c9cd",
+     "vertexCount": 15792,
+     "uv2Offset": 48
+    },
+    "entrance:mat:charcoal": {
+     "hash": "bf0ca271317d230d7515980a34fc8fbcbddc4ad8",
+     "vertexCount": 1080,
+     "uv2Offset": 31632
+    },
+    "entrance:mat:ceiling": {
+     "hash": "6ee2792b0ddba0e3623ff7bf0ec13fbb8d3b9e38",
+     "vertexCount": 312,
+     "uv2Offset": 33792
+    },
+    "entrance:mat:shadowGap": {
+     "hash": "e64d1a4fcf44fa30cbd00747bdc982554cbfecad",
+     "vertexCount": 576,
+     "uv2Offset": 34416
+    },
+    "entrance:mat:wall": {
+     "hash": "7fee92bb9dd3f4c8fa1c290ba03441afbf0c6569",
+     "vertexCount": 120,
+     "uv2Offset": 35568
+    },
+    "entrance:mat:wallFeature": {
+     "hash": "7dfd6ae5c4071314d3291c6b672f6d002c987bd8",
+     "vertexCount": 960,
+     "uv2Offset": 35808
+    },
+    "entrance:mat:oak": {
+     "hash": "7a46eabf5391ea2581ef31128f2e00e33e5756fd",
+     "vertexCount": 8304,
+     "uv2Offset": 37728
+    }
+   },
+   "bake": {
+    "samples": 512,
+    "device": "OPTIX",
+    "seconds": 28.6,
+    "denoised": true,
+    "layout": "demo n=6",
+    "date": "2026-11-09"
+   }
+  },
+  "lobby": {
+   "image": "lobby.png",
+   "encoding": "rgbd",
+   "rgbdGamma": 2.2,
+   "size": 2048,
+   "gain": 1.0,
+   "sun": true,
+   "frame": "world",
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "verify": "position",
+   "uv2": "lobby_uv2.bin",
+   "uv2Unit": "float",
+   "parts": {
+    "lobby:mat:floorLobby": {
+     "hash": "b08193f176477792b23a33232c283c55468932d1",
+     "vertexCount": 312,
+     "uv2Offset": 0
+    },
+    "lobby:mat:aluminium": {
+     "hash": "b4e38db0142f4d925c5e378497f7bae3c02e3ae1",
+     "vertexCount": 48,
+     "uv2Offset": 624
+    },
+    "lobby:mat:ceiling": {
+     "hash": "8f48d0d9bfb354d78857300486b941b5ecc21e12",
+     "vertexCount": 24,
+     "uv2Offset": 720
+    },
+    "lobby:mat:shadowGap": {
+     "hash": "ef2e42e9a9087f9118761143dbf8da38f9647133",
+     "vertexCount": 464,
+     "uv2Offset": 768
+    },
+    "lobby:mat:oakSlat": {
+     "hash": "96b6a25f21904a68c80a3394d615ff46d85e9d8e",
+     "vertexCount": 18816,
+     "uv2Offset": 1696
+    },
+    "lobby:mat:blackMetal": {
+     "hash": "0f6b892b1faa17f9e450cf691f0bf5c2bb527dca",
+     "vertexCount": 17595,
+     "uv2Offset": 39328
+    },
+    "lobby:mat:wall": {
+     "hash": "47675825b23b78ef0be3b0d6dddc50ff421ab708",
+     "vertexCount": 264,
+     "uv2Offset": 74518
+    },
+    "lobby:mat:wallFeature": {
+     "hash": "7e94151867096c07df8c52a0db1b16babd493ccd",
+     "vertexCount": 576,
+     "uv2Offset": 75046
+    },
+    "lobby:mat:oak": {
+     "hash": "0169268c3c8545db6b2e0284ea76739c497879a0",
+     "vertexCount": 992,
+     "uv2Offset": 76198
+    },
+    "lobby:mat:moss": {
+     "hash": "c88407497ef755fa15983c14c11c4af7c78cccf2",
+     "vertexCount": 24,
+     "uv2Offset": 78182
+    },
+    "lobby:mat:quartz": {
+     "hash": "8f390b995c532b398c6ffe3137d59b5cc6e03b18",
+     "vertexCount": 624,
+     "uv2Offset": 78230
+    },
+    "lobby:mat:wallDark": {
+     "hash": "327dc0fb63c313daba9304146ba26be29552c460",
+     "vertexCount": 24,
+     "uv2Offset": 79478
+    },
+    "lobby:mat:rug": {
+     "hash": "9c388619c8b84e060d3d5975f43eb4446ed0896c",
+     "vertexCount": 96,
+     "uv2Offset": 79526
+    }
+   },
+   "bake": {
+    "samples": 512,
+    "device": "OPTIX",
+    "seconds": 41.5,
+    "denoised": true,
+    "layout": "demo n=6",
+    "date": "2026-11-09"
+   }
+  },
+  "modules": {
+   "image": "modules.png",
+   "encoding": "rgbd",
+   "rgbdGamma": 2.2,
+   "size": 2048,
+   "gain": 1.0,
+   "sun": false,
+   "frame": "module-local",
+   "origin": [
+    0,
+    0,
+    0
+   ],
+   "verify": "position",
+   "uv2": "modules_uv2.bin",
+   "uv2Unit": "float",
+   "parts": {
+    "projEntry:mat:floorOak": {
+     "hash": "c17d5f5ca6ceb911044f9ca1b5722baa88300cec",
+     "vertexCount": 48,
+     "uv2Offset": 0
+    },
+    "projEntry:mat:floorRoom": {
+     "hash": "11d11765c01d88c8586ce14d5997205608fb96bb",
+     "vertexCount": 24,
+     "uv2Offset": 96
+    },
+    "projEntry:mat:blackMetal": {
+     "hash": "877d8e616764d18ded5355e94435bc41b4e1b19f",
+     "vertexCount": 3362,
+     "uv2Offset": 144
+    },
+    "projEntry:mat:ceiling": {
+     "hash": "3520e907b61dc3fc02a63dc5b16657c47a176171",
+     "vertexCount": 72,
+     "uv2Offset": 6868
+    },
+    "projEntry:mat:shadowGap": {
+     "hash": "228ccb8681a658453de7ccf9ab7665aa0e355505",
+     "vertexCount": 48,
+     "uv2Offset": 7012
+    },
+    "projEntry:mat:wallFeature": {
+     "hash": "e3ef50da17a81408b56b4298ebb2c8195c7daa53",
+     "vertexCount": 120,
+     "uv2Offset": 7108
+    },
+    "projEntry:mat:skirting": {
+     "hash": "6a71f5e934228db44e5cf7d2f382a649a1cc6d3d",
+     "vertexCount": 24,
+     "uv2Offset": 7348
+    },
+    "projEntry:mat:rug": {
+     "hash": "f7c78ab2136d9392ac1fbfe48de784b55b71f08f",
+     "vertexCount": 96,
+     "uv2Offset": 7396
+    },
+    "projEntry:mat:fabricWarm": {
+     "hash": "5c168670c8f0c8462fc6dabdd4bbd2bcd1d0e150",
+     "vertexCount": 2904,
+     "uv2Offset": 7588
+    },
+    "projEntry:mat:fabricAccent": {
+     "hash": "d77e7ec06614c130f4f0845d9fac24d6fd12916c",
+     "vertexCount": 384,
+     "uv2Offset": 13396
+    },
+    "projEntry:mat:oak": {
+     "hash": "b6229fa2c88568db2324f1efe9b37f23b728a2d7",
+     "vertexCount": 1740,
+     "uv2Offset": 14164
+    },
+    "projEntry:mat:paint": {
+     "hash": "9571b572df621b9b074c96b7bfc0de18184da8a7",
+     "vertexCount": 1062,
+     "uv2Offset": 17644
+    },
+    "projEntry:mat:fabricDark": {
+     "hash": "bdf3d70460f9122839c46fe9c492f14a9431e9dd",
+     "vertexCount": 2280,
+     "uv2Offset": 19768
+    },
+    "projEntry:mat:quartz": {
+     "hash": "8a044e1cf1c9d9c8b08a95cf68eed75fa5962c6c",
+     "vertexCount": 96,
+     "uv2Offset": 24328
+    },
+    "projEntry:mat:aluminium": {
+     "hash": "3b8f7a931ecf153974581292e590ffb8d3c29a3b",
+     "vertexCount": 294,
+     "uv2Offset": 24520
+    },
+    "projEntry:mat:planter": {
+     "hash": "be84a1dd420b1e1543aa65d5c650a47def62780a",
+     "vertexCount": 1400,
+     "uv2Offset": 25108
+    },
+    "projEntry:mat:soil": {
+     "hash": "b307bd68a848e5e34426107380528fd3e157720d",
+     "vertexCount": 268,
+     "uv2Offset": 27908
+    },
+    "projBay:mat:floorOak": {
+     "hash": "c17d5f5ca6ceb911044f9ca1b5722baa88300cec",
+     "vertexCount": 48,
+     "uv2Offset": 28444
+    },
+    "projBay:mat:floorRoom": {
+     "hash": "11d11765c01d88c8586ce14d5997205608fb96bb",
+     "vertexCount": 24,
+     "uv2Offset": 28540
+    },
+    "projBay:mat:blackMetal": {
+     "hash": "c73892b613f35942f72498fd232407eea280cd02",
+     "vertexCount": 1724,
+     "uv2Offset": 28588
+    },
+    "projBay:mat:ceiling": {
+     "hash": "3520e907b61dc3fc02a63dc5b16657c47a176171",
+     "vertexCount": 72,
+     "uv2Offset": 32036
+    },
+    "projBay:mat:shadowGap": {
+     "hash": "6fd51fbb7eeda793b26a14e2c7f99f36edfffe05",
+     "vertexCount": 24,
+     "uv2Offset": 32180
+    },
+    "projEnd:mat:wall": {
+     "hash": "9c354d9e2e7e370a7b24bf2c02a84616647b44fa",
+     "vertexCount": 24,
+     "uv2Offset": 32228
+    },
+    "projEnd:mat:skirting": {
+     "hash": "874e861a6951bb9884435790575e2bc550556628",
+     "vertexCount": 192,
+     "uv2Offset": 32276
+    },
+    "projEnd:mat:wallFeature": {
+     "hash": "b1df55e2afe2e6150cb3e0d945647df9f6b1718f",
+     "vertexCount": 96,
+     "uv2Offset": 32660
+    },
+    "projEnd:mat:blackMetal": {
+     "hash": "dd6bb1891b012dbe0cd12c3c02f412ebe8b46efb",
+     "vertexCount": 192,
+     "uv2Offset": 32852
+    },
+    "projDivider:mat:wallFelt": {
+     "hash": "1554b11d28ab63217f0942e8ea571dedef09cbad",
+     "vertexCount": 216,
+     "uv2Offset": 33236
+    },
+    "projDivider:mat:blackMetal": {
+     "hash": "5d267b4277d6056d81bf8bec1d9eb97666a14135",
+     "vertexCount": 384,
+     "uv2Offset": 33668
+    },
+    "podZone:mat:rug": {
+     "hash": "dfae7f0bc56bc6bdd6dba23b979ca29d29f081a6",
+     "vertexCount": 96,
+     "uv2Offset": 34436
+    },
+    "podZone:mat:blackMetal": {
+     "hash": "064d1da6ab2eb3c8d43b4f27fd5a674ee966ca78",
+     "vertexCount": 44293,
+     "uv2Offset": 34628
+    },
+    "podZone:mat:aluminium": {
+     "hash": "a1ce1d785219d799ed3236c185e889d7d9a15b54",
+     "vertexCount": 384,
+     "uv2Offset": 123214
+    },
+    "podZone:mat:oak": {
+     "hash": "35f4fe38a25bec69b2700016b172e2d45aad6859",
+     "vertexCount": 768,
+     "uv2Offset": 123982
+    },
+    "podZone:mat:fabric": {
+     "hash": "f86812e5358328f27d3b036a40ee35369ab27116",
+     "vertexCount": 1728,
+     "uv2Offset": 125518
+    },
+    "podZone:mat:paint": {
+     "hash": "4f6563e142f82bf1eb8d8bcec2124695ba6ae4bd",
+     "vertexCount": 6102,
+     "uv2Offset": 128974
+    },
+    "podZone:mat:fabricDark": {
+     "hash": "81711012bdc36e1c61aac0ba6f313efde74805ad",
+     "vertexCount": 3888,
+     "uv2Offset": 141178
+    },
+    "podZone:mat:mesh": {
+     "hash": "4f742b02a774c9c13390f6e71b5d1b454697a5f3",
+     "vertexCount": 1944,
+     "uv2Offset": 148954
+    },
+    "podZone:mat:oakDark": {
+     "hash": "d02655ba0356f74f54e3a144f2e11e797b61a26d",
+     "vertexCount": 192,
+     "uv2Offset": 152842
+    },
+    "podZone:mat:quartz": {
+     "hash": "5c62462775e608c63981a0f946b2dda14963ff53",
+     "vertexCount": 96,
+     "uv2Offset": 153226
+    }
+   },
+   "bake": {
+    "samples": 512,
+    "device": "OPTIX",
+    "seconds": 70.0,
+    "denoised": true,
+    "layout": "demo n=6",
+    "date": "2026-11-09"
+   }
+  }
+ }
+}
