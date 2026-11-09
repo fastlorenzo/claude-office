@@ -350,7 +350,9 @@ export const CallRow = memo(function CallRow({
             title={sum.target}
           >
             {target}
-            {sum.suffix && <span className="ml-2 text-slate-500">{sum.suffix}</span>}
+            {sum.suffix && (
+              <span className="ml-2 text-slate-500">{sum.suffix}</span>
+            )}
           </span>
         )}
         {showAgentChip && v.kind !== "main" && compact && (

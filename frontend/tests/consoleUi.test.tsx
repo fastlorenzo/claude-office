@@ -561,7 +561,8 @@ describe("connected console", () => {
       />,
     );
     const el = Array.from(document.querySelectorAll("span")).find(
-      (e) => e.textContent === "general-purpose" && e.className.includes("ml-2"),
+      (e) =>
+        e.textContent === "general-purpose" && e.className.includes("ml-2"),
     );
     expect(el).toBeTruthy();
   });
