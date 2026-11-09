@@ -427,6 +427,12 @@ def map_event(
     if task_list_id:
         data["task_list_id"] = task_list_id
 
+    # Claude Code running inside WSL: lets a Windows-side backend map Linux
+    # transcript paths to \\wsl.localhost\<distro>\... (desktop WSL bridge).
+    wsl_distro = os.environ.get("WSL_DISTRO_NAME")
+    if wsl_distro:
+        data["wsl_distro"] = wsl_distro
+
     payload: dict[str, Any] = {
         "event_type": event_type,
         "session_id": actual_session_id,

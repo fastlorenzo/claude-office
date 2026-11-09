@@ -139,8 +139,27 @@ try:
 
         return run_statusline(command, read_stdin(), post, write)
 
+    _MANAGE_ACTIONS = frozenset(
+        {
+            "install",
+            "uninstall",
+            "status",
+            "wrap-statusline",
+            "unwrap-statusline",
+            "verify-statusline",
+        }
+    )
+
     def main() -> None:
         """Parse arguments, read stdin, map the event, and POST to backend."""
+        if len(sys.argv) > 1 and sys.argv[1] in _MANAGE_ACTIONS:
+            # Management commands are run by a person or the desktop app, never
+            # by Claude Code: restore real stdio and return a real exit code.
+            sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
+            from claude_office_hooks.manage import cli
+
+            sys.exit(cli(sys.argv[1:]))
+
         if len(sys.argv) > 1 and sys.argv[1] == "statusline":
             try:
                 code = _statusline_main(sys.argv[2:])

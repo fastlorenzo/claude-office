@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import manage_hooks
+from claude_office_hooks import manage as manage_hooks
 from claude_office_hooks.statusline import run_statusline, telemetry_url
 
 HOOK = "claude-office-hook"

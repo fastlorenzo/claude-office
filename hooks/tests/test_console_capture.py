@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import manage_hooks
+from claude_office_hooks import manage as manage_hooks
 from claude_office_hooks.event_mapper import map_event
 from claude_office_hooks.tool_output import build_tool_output
 

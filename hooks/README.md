@@ -84,6 +84,24 @@ cd hooks
 uv tool install -p 3.13 .
 ```
 
+### Management CLI
+
+`install.sh`/`uninstall.sh` are thin wrappers around subcommands of the hook
+binary itself (`claude_office_hooks/manage.py`), which the desktop app also uses
+with the absolute path of its bundled hook:
+
+```bash
+claude-office-hook install [--hook-cmd PATH] [--api-url URL] [--api-key KEY] \
+                           [--strip-prefixes P] [--statusline] [--force] [--json]
+claude-office-hook status        # integration state as JSON (never prints the key)
+claude-office-hook uninstall [--keep-config] [--json]
+```
+
+`--hook-cmd` defaults to the running binary when frozen, else `claude-office-hook`
+on PATH. Paths with spaces are double-quoted and Windows paths use forward
+slashes. An existing API key is never replaced. `--api-key` only applies when
+none is configured yet.
+
 ### Verify Installation
 
 ```bash
@@ -286,7 +304,9 @@ make hooks-uninstall
 ./uninstall.sh
 ```
 
-This removes hooks from Claude Code settings but preserves the config file.
+This restores the original `statusLine`, removes the hooks from Claude Code settings,
+and deletes the config file and debug log (`claude-office-hook uninstall --keep-config`
+keeps them).
 
 ## Related Documentation
 

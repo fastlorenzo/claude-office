@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import manage_hooks
+from claude_office_hooks import manage as manage_hooks
 
 
 def _settings_path(tmp_path: Path) -> Path:
