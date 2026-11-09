@@ -205,6 +205,9 @@ export class BakedLighting implements BakeApplier {
   private warned = false;
   private disposed = false;
   private restoreObs: Observer<unknown> | null = null;
+  /** Some part took a lightmap (latched: see `onActiveChange`). */
+  private anyApplied = false;
+  private activeListener: ((active: boolean) => void) | null = null;
 
   private constructor(
     private readonly scene: Scene,
@@ -243,6 +246,17 @@ export class BakedLighting implements BakeApplier {
       parts,
       ...(this.fixture ? { fixture: true } : {}),
     };
+  }
+
+  /**
+   * Called with `true` once the first part takes a lightmap (at once when one
+   * already has). The graphics controller then drops SSAO and shrinks the
+   * fixture budget (fx/GraphicsController.setBakesActive). Never called on a
+   * full fallback (no manifest, every part mismatched): the realtime default.
+   */
+  onActiveChange(cb: ((active: boolean) => void) | null): void {
+    this.activeListener = cb;
+    if (cb && this.anyApplied) cb(true);
   }
 
   /** Sets whose files loaded (candidates; `stats().active` = applied). */
@@ -472,6 +486,10 @@ export class BakedLighting implements BakeApplier {
       mesh,
       ok: true,
     });
+    if (!this.anyApplied) {
+      this.anyApplied = true;
+      this.activeListener?.(true);
+    }
     return true;
   }
 
@@ -525,6 +543,7 @@ export class BakedLighting implements BakeApplier {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.activeListener = null;
     if (bakeApplier(this.scene) === this) setBakeApplier(this.scene, null);
     if (registry.get(this.scene) === this) registry.delete(this.scene);
     if (this.restoreObs)

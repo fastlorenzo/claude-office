@@ -306,6 +306,21 @@ describe("realtime fallback", () => {
     expect(bl.stats().mismatched).toHaveLength(2);
   });
 
+  it("all parts mismatched: the bakes-active listener never fires", async () => {
+    const { manifest, uv2 } = referenceBake();
+    for (const p of Object.values(manifest.sets.lobby!.parts))
+      p.hash = "f".repeat(40);
+    const w = world();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const bl = await BakedLighting.load(w.scene, w.materials, w.lighting, {
+      io: io(manifest, uv2),
+    });
+    const seen: boolean[] = [];
+    bl.onActiveChange((a) => seen.push(a));
+    buildLobby(w);
+    expect(seen).toEqual([]);
+  });
+
   it("missing uv2.bin: set dropped, realtime, missing flagged", async () => {
     const { manifest } = referenceBake();
     const w = world();
@@ -361,6 +376,23 @@ describe("applied bake", () => {
       missing: false,
       parts: 2,
     });
+  });
+
+  it("bakes-active listener: once on the first applied part, at once when late", async () => {
+    const { manifest, uv2 } = referenceBake(true);
+    const w = world();
+    const bl = await BakedLighting.load(w.scene, w.materials, w.lighting, {
+      io: io(manifest, uv2),
+    });
+    const seen: boolean[] = [];
+    bl.onActiveChange((a) => seen.push(a));
+    expect(seen).toEqual([]);
+    buildLobby(w);
+    buildLobby(w);
+    expect(seen).toEqual([true]);
+    const late: boolean[] = [];
+    bl.onActiveChange((a) => late.push(a));
+    expect(late).toEqual([true]);
   });
 
   it("sun:false sets keep the realtime sun", async () => {

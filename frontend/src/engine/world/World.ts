@@ -416,7 +416,10 @@ class World implements IWorld {
     this.factoryLayout = buildFactoryLayout(this.layout);
     this.sceneInstr = new SceneInstrumentation(scene);
     this.engineInstr = new EngineInstrumentation(this.engine);
-    this.engineInstr.captureGPUFrameTime = false;
+    // GPU frame time (timer queries) only while __worldStats is published:
+    // `gpuMs` for real-GPU checks (0 where EXT_disjoint_timer_query is
+    // missing; under SwiftShader it is the CPU raster time).
+    this.engineInstr.captureGPUFrameTime = this.statsOn;
 
     if (this.debug.drawBreakdown) this.hookDrawBreakdown();
 
@@ -538,6 +541,8 @@ class World implements IWorld {
           bakeQueryOptions(),
         ).then((b) => {
           this.bakes = b;
+          // Lightmaps carry the AO / bounce: no SSAO, smaller fixture pool.
+          b.onActiveChange((a) => this.gfx.setBakesActive(a));
         }),
         this.assets.preload(),
         // Don't hold the world hostage to large avatar downloads.
@@ -1481,6 +1486,10 @@ class World implements IWorld {
         /** DynamicTexture uploads per second (screens / wall / signs). */
         screenUploads,
         postProcesses: this.fx?.postProcessCount ?? 0,
+        /** GPU frame time, ms (last-second average; 0 without timer queries). */
+        gpuMs: this.gpuMs(),
+        /** Skin scattering (ultra): prepass on, diffusion profiles. */
+        sss: this.sssStats(),
         tier: this.gfx.effective,
         actors: this.actorHub.stats(),
         zone: zone.kind,
@@ -1526,6 +1535,24 @@ class World implements IWorld {
           : {}),
       };
     }
+  }
+
+  private sssStats(): { prepass: boolean; profiles: number } {
+    const sc = this.scene as unknown as {
+      prePassRenderer?: { enabled: boolean } | null;
+      subSurfaceConfiguration?: { ssDiffusionProfileColors: unknown[] } | null;
+    };
+    return {
+      prepass: !!sc.prePassRenderer?.enabled,
+      profiles:
+        sc.subSurfaceConfiguration?.ssDiffusionProfileColors.length ?? 0,
+    };
+  }
+
+  private gpuMs(): number {
+    const c = this.engineInstr.gpuFrameTimeCounter;
+    const ns = c ? c.lastSecAverage || c.current : 0;
+    return Number.isFinite(ns) ? Math.round(ns / 1e4) / 100 : 0;
   }
 
   /** Scratch for updateLod (no per-frame allocation). */
