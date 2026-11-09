@@ -37,8 +37,8 @@ SETS="lobby" SAMPLES=256 make bake-lightmaps
 1. **Export** (`frontend/scripts/export-bake.ts`, bun, NullEngine): builds the
    6-session demo office headless (`engine/bake/bakeScene.ts`: Building,
    project rooms, pods, control room; stubbed 2D canvas and asset library),
-   then `engine/bake/exportParts.ts` writes `frontend/public/lightmaps/src/<set>.json`
-   (git-ignored): the set's parts (geometry, hash, the world matrix of one
+   then `engine/bake/exportParts.ts` writes `frontend/.bake/src/<set>.json`
+   (git-ignored, outside `public/` so it is never shipped): the set's parts (geometry, hash, the world matrix of one
    representative "hero" copy), every static mesh within 14 m as context
    (with all its instance matrices), the lights that reach the set, sun and
    world. Fixture lights are read back from the live `Lighting` (its KIND

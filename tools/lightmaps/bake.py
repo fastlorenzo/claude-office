@@ -1,7 +1,7 @@
 """
 Bake one Claude Office lightmap set with Blender Cycles (tools/lightmaps).
 
-Input: frontend/public/lightmaps/src/<set>.json written by
+Input: frontend/.bake/src/<set>.json written by
 `frontend/scripts/export-bake.ts` (engine/bake/exportParts.ts):
 
   { set, frame, size, origin, sun, world, meshes{name: {...}},
@@ -30,7 +30,7 @@ Usage (WSL -> Windows Blender with GPU; one Blender at a time):
   flock ~/.local/share/claude-office-shot/.heavy.lock \
     "/mnt/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" \
     --background --factory-startup --python "$(wslpath -w tools/lightmaps/bake.py)" -- \
-    --in "$(wslpath -w frontend/public/lightmaps/src/modules.json)" \
+    --in "$(wslpath -w frontend/.bake/src/modules.json)" \
     --out "$(wslpath -w frontend/public/lightmaps)" \
     --public "$(wslpath -w frontend/public)" --samples 512
 
