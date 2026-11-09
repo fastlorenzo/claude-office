@@ -80,12 +80,18 @@ import {
 export { GROUND_Y };
 
 const HAZE = new Color3(0.86, 0.92, 1.0);
-/** Live exterior fog (linear). The camera far plane is 220 m (Player). */
-const FOG_START = 70;
-const FOG_END = 520;
-/** Haze fraction the baked ground veil holds beyond the clipped near ground. */
-const FOG_CAP = 0.45;
+/**
+ * Live exterior fog: EXP2, clear air to ~100 m and ~8% haze at the camera far
+ * plane (Player maxZ 220), so the clipped near ground meets the baked cube
+ * (whose ground carries a matching veil) without a colour jump.
+ */
+const FOG_DENSITY = 0.0013;
+/** Haze fraction the live fog reaches at distance d (what the veil matches). */
+const fogAt = (d: number): number =>
+  1 - Math.exp(-(FOG_DENSITY * d) * (FOG_DENSITY * d));
 const TERRAIN_SEED = 5;
+/** Baked sky cube face size (half-float RGBA: 6 faces x 8 B/px). */
+const CUBE_SIZE = 1536;
 /** Same direction as the interior sun (fx/Lighting.ts SUN_DIR). */
 const SUN = new Vector3(-0.5, -0.62, 0.6).normalize();
 const SUN_XZ = Math.hypot(SUN.x, SUN.z);
@@ -469,8 +475,8 @@ function toMesh(scene: Scene, name: string, b: Buf, mat: PBRMaterial): Mesh {
 /** Radial heightfield ring (TERRAIN_R0..R1) with relief-lit vertex colours. */
 function buildTerrain(cx: number, cz: number, g: number, r: () => number): Buf {
   const b = newBuf();
-  const SEG = 720;
-  const K = 200;
+  const SEG = 1440;
+  const K = 160;
   const W = SEG + 1;
   const hs = new Float32Array((K + 1) * W);
   const rad: number[] = [];
@@ -546,10 +552,55 @@ function buildTerrain(cx: number, cz: number, g: number, r: () => number): Buf {
       );
       const lit =
         0.5 + 0.62 * Math.max(0, -(nx * SUN.x + ny * SUN.y + nz * SUN.z));
-      b.col.push(col[0] * lit, col[1] * lit, col[2] * lit, 1);
+      b.col.push(col[0] * lit * 1.5, col[1] * lit * 1.5, col[2] * lit * 1.5, 1);
       if (k > 0 && s > 0) {
         const i = k * W + s;
         const j = i - W;
+        b.idx.push(j - 1, i, j, j - 1, i - 1, i);
+      }
+    }
+  return b;
+}
+
+/** Out-to-horizon ground: log-spaced polar grid, field / woodland tints. */
+function buildGround(cx: number, cz: number, g: number, R: number): Buf {
+  const b = newBuf();
+  const SEG = 288;
+  const K = 140;
+  const rad: number[] = [0];
+  for (let k = 1; k <= K; k++) rad.push(6 * Math.pow(R / 6, (k - 1) / (K - 1)));
+  const tints: RGB[] = [
+    [0.8, 0.88, 0.8], // woodland
+    [1.0, 1.0, 1.0], // meadow
+    [1.16, 1.12, 0.92], // crop
+    [1.12, 0.98, 0.8], // stubble
+    [1.0, 0.88, 0.76], // ploughed
+  ];
+  for (let k = 0; k <= K; k++)
+    for (let s = 0; s <= SEG; s++) {
+      const a = (s / SEG) * Math.PI * 2;
+      const x = cx + Math.sin(a) * rad[k];
+      const z = cz + Math.cos(a) * rad[k];
+      b.pos.push(x, g - 0.2, z);
+      b.uv.push(x / 600, z / 600);
+      const u = vnoise(x, z, 420, 11) * 0.7 + vnoise(x, z, 130, 12) * 0.3;
+      const band = Math.min(tints.length - 1, Math.floor(u * u * 5.4));
+      const nb = Math.min(tints.length - 1, band + 1);
+      const f = smoothstep(0.0, 1.0, u * u * 5.4 - band);
+      const t = lerp(tints[band], tints[nb], f);
+      const w = smoothstep(250, 1000, rad[k]);
+      const lum = 0.92 + 0.16 * vnoise(x, z, 45, 13);
+      // Gain matches the cube's far ground to the near lawn's brightness
+      // (the cube is read through the sky exposure; measured off screenshots).
+      b.col.push(
+        (1 + (t[0] - 1) * w) * lum * 2.7,
+        (1 + (t[1] - 1) * w) * lum * 2.2,
+        (1 + (t[2] - 1) * w) * lum * 2.2,
+        1,
+      );
+      if (k > 0 && s > 0) {
+        const i = k * (SEG + 1) + s;
+        const j = i - (SEG + 1);
         b.idx.push(j - 1, i, j, j - 1, i - 1, i);
       }
     }
@@ -605,7 +656,7 @@ function settlements(
       rMax: 1300,
       n: 5,
       rad: [80, 220],
-      blocks: [8, 22],
+      blocks: [6, 14],
       industrial: true,
     },
     {
@@ -621,7 +672,7 @@ function settlements(
       rMax: 5200,
       n: 3,
       rad: [350, 800],
-      blocks: [90, 220],
+      blocks: [60, 140],
       industrial: false,
     },
   ];
@@ -657,13 +708,13 @@ function settlements(
         const bx = x + Math.sin(aa) * rr;
         const bz = z + Math.cos(aa) * rr;
         const core = 1 - rr / rad;
-        const w = sp.industrial ? 18 + r() * 40 : 7 + r() * 16;
-        const dd = sp.industrial ? 16 + r() * 34 : 7 + r() * 14;
+        const w = sp.industrial ? 14 + r() * 26 : 7 + r() * 16;
+        const dd = sp.industrial ? 12 + r() * 20 : 7 + r() * 14;
         const hgt = sp.industrial
           ? 6 + r() * 7
           : 5 +
             r() * 7 +
-            (sp.rad[1] > 500 ? core * core * r() * 40 : core * r() * 10);
+            (sp.rad[1] > 500 ? core * core * r() * 18 : core * r() * 10);
         const base = g + heightAt(bx, bz) - 3;
         const wc = mul(
           sp.industrial ? SHED_TINTS[Math.floor(r() * 6)] : wall,
@@ -715,7 +766,7 @@ function farGroundTexture(scene: Scene, seed: number): RawTexture {
         ? [0.58, 0.56, 0.5] // yards / lots
         : q < 0.2
           ? [0.52, 0.48, 0.3] // stubble
-          : q < 0.42
+          : q < 0.3
             ? mul([0.2, 0.34, 0.17], 0.85 + r() * 0.3) // woodland
             : mul(GRASS_A, 0.85 + r() * 0.25),
     );
@@ -828,9 +879,8 @@ export class Exterior {
     this.owned.push({
       dispose: () => scene.onNewMaterialAddedObservable.remove(obs),
     });
-    scene.fogMode = Scene.FOGMODE_LINEAR;
-    scene.fogStart = FOG_START;
-    scene.fogEnd = FOG_END;
+    scene.fogMode = Scene.FOGMODE_EXP2;
+    scene.fogDensity = FOG_DENSITY;
     scene.fogColor = HAZE.clone();
   }
 
@@ -1590,32 +1640,22 @@ export class Exterior {
       `[exterior] terrain+settlements ${Math.round(performance.now() - tTerrain)} ms, ` +
         `${hills.pos.length / 3} terrain verts`,
     );
-    // Ground disc (fan) under everything, field-patched.
-    const ground = newBuf();
+    // Ground out to 9 km: polar grid with field / woodland tints so the
+    // horizon band reads as distant farmland, not a flat disc.
     const R = 9000;
-    const seg = 48;
-    ground.pos.push(c.x, g, c.z);
-    ground.col.push(1, 1, 1, 1);
-    ground.uv.push(c.x / 600, c.z / 600);
-    for (let k = 0; k <= seg; k++) {
-      const a = (k / seg) * Math.PI * 2;
-      const x = c.x + Math.sin(a) * R;
-      const z = c.z + Math.cos(a) * R;
-      ground.pos.push(x, g - 0.2, z);
-      ground.col.push(1, 1, 1, 1);
-      ground.uv.push(x / 600, z / 600);
-      if (k > 0) ground.idx.push(0, k + 1, k);
-    }
+    const ground = buildGround(c.x, c.z, g, R);
     // Haze veil over the near disc of the baked ground, matching the live
-    // linear fog (so the clipped near ground meets the cube without a seam).
+    // fog (so the clipped near ground meets the cube without a seam), easing
+    // back to the bake's own aerial perspective further out.
     const veil = newBuf();
     const VEIL: [number, number][] = [
       [0, 0],
-      [FOG_START, 0],
-      [150, 0.18],
-      [220, 0.33],
-      [300, FOG_CAP],
-      [R, FOG_CAP],
+      [100, fogAt(100)],
+      [160, fogAt(160)],
+      [220, fogAt(220)],
+      [420, fogAt(220) * 0.85],
+      [1000, 0.04],
+      [R, 0],
     ];
     const VSEG = 64;
     for (const [rad, al] of VEIL)
@@ -1635,10 +1675,51 @@ export class Exterior {
         const j = i - (VSEG + 1);
         veil.idx.push(j - 1, i, j, j - 1, i - 1, i);
       }
+    // Horizon haze dome: the sky near the horizon fades into the same haze
+    // colour the distant terrain fades into (one atmosphere), a little haze
+    // lifts the zenith.
+    const dome = newBuf();
+    const ELEV: [number, number][] = [
+      [-6, 1],
+      [0, 1],
+      [2, 0.92],
+      [5, 0.8],
+      [9, 0.62],
+      [14, 0.44],
+      [20, 0.3],
+      [30, 0.2],
+      [45, 0.14],
+      [65, 0.1],
+      [90, 0.1],
+    ];
+    const DSEG = 96;
+    const DR = 9600;
+    for (const [deg, al] of ELEV)
+      for (let k = 0; k <= DSEG; k++) {
+        const a = (k / DSEG) * Math.PI * 2;
+        const e = (deg * Math.PI) / 180;
+        dome.pos.push(
+          c.x + Math.sin(a) * Math.cos(e) * DR,
+          g + 7.6 + Math.sin(e) * DR,
+          c.z + Math.cos(a) * Math.cos(e) * DR,
+        );
+        dome.col.push(HAZE.r, HAZE.g, HAZE.b, al);
+        dome.uv.push(0, 0);
+      }
+    for (let ring = 1; ring < ELEV.length; ring++)
+      for (let k = 1; k <= DSEG; k++) {
+        const i = ring * (DSEG + 1) + k;
+        const j = i - (DSEG + 1);
+        dome.idx.push(j - 1, i, j, j - 1, i - 1, i);
+      }
     const vmat = unlit(scene, "exterior:farVeil", null);
     vmat.backFaceCulling = false;
     vmat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
     vmat.disableDepthWrite = true;
+    const dmat = unlit(scene, "exterior:farDome", null);
+    dmat.backFaceCulling = false;
+    dmat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHABLEND;
+    dmat.disableDepthWrite = true;
     const gtex = farGroundTexture(scene, 99);
     const fmat = unlit(scene, "exterior:farFacade", null);
     const rmat = unlit(scene, "exterior:farRoof", null);
@@ -1652,12 +1733,14 @@ export class Exterior {
       toMesh(scene, "exterior:hills", hills, hmat),
       toMesh(scene, "exterior:farGround", ground, gmat),
       toMesh(scene, "exterior:farVeil", veil, vmat),
+      toMesh(scene, "exterior:farDome", dome, dmat),
     ];
-    meshes[meshes.length - 1].hasVertexAlpha = true;
-    meshes[meshes.length - 1].alphaIndex = 10;
+    for (const m of meshes.slice(-2)) m.hasVertexAlpha = true;
+    meshes[meshes.length - 2].alphaIndex = 10;
+    meshes[meshes.length - 1].alphaIndex = 5;
     const cleanup = () => {
       for (const m of meshes) m.dispose(false, false);
-      for (const o of [gtex, fmat, rmat, hmat, gmat, vmat]) o.dispose();
+      for (const o of [gtex, fmat, rmat, hmat, gmat, vmat, dmat]) o.dispose();
     };
 
     const sky = this.lighting.sky;
@@ -1680,7 +1763,7 @@ export class Exterior {
     }
     const probe = new ReflectionProbe(
       "exterior:bake",
-      1024,
+      CUBE_SIZE,
       scene,
       false,
       true,
@@ -1715,7 +1798,7 @@ export class Exterior {
         minZ: cam?.minZ ?? 0.05,
       };
       scene.fogMode = Scene.FOGMODE_EXP2;
-      scene.fogDensity = 0.00021;
+      scene.fogDensity = 0.00016;
       scene.fogColor = HAZE.clone();
       if (cam) {
         cam.maxZ = 12000;

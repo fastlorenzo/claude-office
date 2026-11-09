@@ -51,11 +51,10 @@ function ridged(x: number, z: number, seed: number, oct: number): number {
   let norm = 0;
   let w = 1;
   for (let o = 0; o < oct; o++) {
-    let r =
-      1 -
-      Math.abs(
-        valueNoise(x * f + o * 5.7, z * f + o * 3.3, seed + o * 3) * 2 - 1,
-      );
+    // Soft crease (no razor ridges on the skyline).
+    const t =
+      valueNoise(x * f + o * 5.7, z * f + o * 3.3, seed + o * 3) * 2 - 1;
+    let r = Math.max(0, (1 - Math.sqrt(t * t + 0.03)) / (1 - Math.sqrt(0.03)));
     r *= r;
     r *= w;
     w = Math.min(1, r * 1.6);
@@ -87,7 +86,7 @@ export function terrainHeight(dx: number, dz: number, seed = 5): number {
     (fbm(dx * k * 1.7 + 40, dz * k * 1.7 - 25, seed + 200, 3) - 0.5) * 1.6;
   const px = dx * k + wx;
   const pz = dz * k + wz;
-  const ridge = ridged(px * 1.3, pz * 1.3, seed, 6);
+  const ridge = ridged(px * 1.3, pz * 1.3, seed, 4);
   const rolling = fbm(px * 2.2, pz * 2.2, seed + 300, 5);
   // Large-scale mask: some bearings stay low plains, others are mountainous.
   const mask = smooth(
