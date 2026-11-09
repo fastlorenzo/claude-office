@@ -49,4 +49,8 @@ for set in $SETS; do
     exit 1
   fi
 done
+# GPU-compressed copies (UASTC KTX2) of the fresh PNGs; the PNG stays the
+# fallback. Skipped (PNG only) when the ktx CLI cannot be fetched.
+# shellcheck disable=SC2086
+(cd "$ROOT/frontend" && bun scripts/encode-lightmaps.ts $SETS)
 ls -la "$OUT"

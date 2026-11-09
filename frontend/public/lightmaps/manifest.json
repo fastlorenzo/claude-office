@@ -303,11 +303,12 @@
    "bake": {
     "samples": 512,
     "device": "OPTIX",
-    "seconds": 35.6,
+    "seconds": 31.9,
     "denoised": true,
     "layout": "demo n=6",
     "date": "2026-11-09"
-   }
+   },
+   "ktx2": "control.ktx2"
   },
   "entrance": {
    "image": "entrance.png",
@@ -375,7 +376,8 @@
     "denoised": true,
     "layout": "demo n=6",
     "date": "2026-11-09"
-   }
+   },
+   "ktx2": "entrance.ktx2"
   },
   "lobby": {
    "image": "lobby.png",
@@ -468,7 +470,8 @@
     "denoised": true,
     "layout": "demo n=6",
     "date": "2026-11-09"
-   }
+   },
+   "ktx2": "lobby.ktx2"
   },
   "modules": {
    "image": "modules.png",
@@ -682,11 +685,12 @@
    "bake": {
     "samples": 512,
     "device": "OPTIX",
-    "seconds": 70.0,
+    "seconds": 70,
     "denoised": true,
     "layout": "demo n=6",
     "date": "2026-11-09"
-   }
+   },
+   "ktx2": "modules.ktx2"
   }
  }
 }

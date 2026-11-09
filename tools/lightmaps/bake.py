@@ -244,6 +244,10 @@ def add_object(name, me, m16):
     return ob
 
 
+# Radius (m) of the control-room zone lights in the bake (see add_light).
+ZONE_SOFT_SIZE = 0.75
+
+
 def add_light(i, L):
     pos = P3 @ np.asarray(L["pos"], dtype=float)
     col = L["color"]
@@ -253,6 +257,12 @@ def add_light(i, L):
     size = L.get("size")
     if L["kind"] == "window":
         ld.shadow_soft_size = 0.3
+    elif L["kind"] == "zone":
+        # Control-room zone lights are virtual fills (no luminaire, no
+        # realtime shadow): a point source cast the ops halo housing, 0.65 m
+        # above the key light, as a hard dark band across the ceiling coffer.
+        # Bake them as broad soft sources (luminous-ceiling-like penumbrae).
+        ld.shadow_soft_size = ZONE_SOFT_SIZE
     elif size:
         ld.shadow_soft_size = min(0.25, max(size["w"], size["d"]) / 4.0)
     else:

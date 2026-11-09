@@ -71,7 +71,18 @@ SETS="lobby" SAMPLES=256 make bake-lightmaps
      clamped at 8 to drop its sun disc — the sun lamp carries the sun) for
      lobby / entrance, where the window portal fixtures (a fake sky) are left
      out. The HDRI orientation is approximate (only seen through windows).
+   - Control-room zone lights (virtual fills with no luminaire, unshadowed
+     at runtime) bake as 0.75 m soft sources: as points, the key light 0.65 m
+     under the ops halo housing cast the ring as a hard band across the
+     ceiling coffer.
 3. **Output** (merged per set into `manifest.json`): `<set>.png`, `<set>_uv2.bin`.
+4. **KTX2** (`frontend/scripts/encode-lightmaps.ts`, run by `bake.sh`; or
+   `cd frontend && bun scripts/encode-lightmaps.ts [set ...]` after a manual
+   bake): `<set>.ktx2`, UASTC quality 4 + zstd, linear, no mips, rows flipped
+   (a KTX2 upload keeps the file's row order), recorded as `sets.<set>.ktx2`.
+   GPU-compressed (8 bpp) instead of RGBA8: 16 → 4 MB resident per 2048² set.
+   The runtime prefers it when KTX2 loads (`?lmktx2=0` forces the PNG) and
+   falls back to the PNG on any transcoder / upload failure.
 
 Re-bake whenever geometry of a set changes (hash mismatch → that part is
 realtime again; `__worldStats.bakes` lists mismatches).
@@ -83,7 +94,7 @@ realtime again; `__worldStats.bakes` lists mismatches).
 ```json
 { "version": 1,
   "sets": { "<set>": {
-    "image": "<set>.png", "encoding": "rgbd", "rgbdGamma": 2.2,
+    "image": "<set>.png", "ktx2": "<set>.ktx2", "encoding": "rgbd", "rgbdGamma": 2.2,
     "size": 2048, "gain": 1.0, "sun": false,
     "frame": "module-local | world | control-local", "origin": [x, y, z],
     "verify": "position | topology",
@@ -108,6 +119,7 @@ realtime again; `__worldStats.bakes` lists mismatches).
 - **uv2.bin**: float32 LE, per part in manifest order, original vertex order,
   `(u, v)` per vertex; `uv2Offset` counts floats. Blender convention: v = 0 is
   the bottom row of the PNG.
+- **ktx2** (optional): the same pixels as UASTC KTX2, rows flipped.
 - **Image**: RGBA8 PNG, not premultiplied, Babylon RGBD with gamma 2.2:
   `linear = pow(rgb, 2.2) / a`. Encode: `m = max(r,g,b)`,
   `D = clamp(floor(max(255/m, 1))/255, 0, 1)`, `rgb = pow(c·D, 1/2.2)`, `a = D`.
