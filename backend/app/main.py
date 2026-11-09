@@ -28,11 +28,17 @@ from app.db.migrate import migrate_schema
 from app.db.models import EventRecord, SessionRecord
 from app.services.git_service import git_service
 
-STATIC_DIR = Path(__file__).parent.parent / "static"
+settings = get_settings()
+
+# CLAUDE_OFFICE_STATIC_DIR points at the frontend export when it does not sit
+# next to the package (the desktop app ships it as an Electron resource).
+STATIC_DIR = (
+    Path(settings.CLAUDE_OFFICE_STATIC_DIR)
+    if settings.CLAUDE_OFFICE_STATIC_DIR
+    else Path(__file__).parent.parent / "static"
+)
 
 _SERVE_STATIC = os.environ.get("SERVE_STATIC", "").lower() in ("1", "true", "yes")
-
-settings = get_settings()
 
 logging.basicConfig(
     level=logging.INFO,

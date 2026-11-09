@@ -90,6 +90,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         ):
             return await call_next(request)
 
+        # The static frontend (``SERVE_STATIC``: ``/``, ``/_next/*``, assets) is
+        # public build output, and a browser cannot attach ``X-API-Key`` to page
+        # or asset loads. Only the API surface is ever gated, so an explicit key
+        # (the desktop app's mode) still serves the UI.
+        if not request.url.path.startswith(settings.API_V1_STR + "/"):
+            return await call_next(request)
+
         # Determine whether auth is required for this request
         requires_auth = settings.has_explicit_key or _is_state_changing(
             request.url.path, request.method

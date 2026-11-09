@@ -2,7 +2,9 @@ import importlib.metadata
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, cast
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_DIR = Path(__file__).parent.parent.resolve()
@@ -154,6 +156,31 @@ class Settings(BaseSettings):
     # (compose: LOCALHOST_ONLY=0): every request arrives from the bridge gateway,
     # so the loopback boundary moves to the host port binding (127.0.0.1:8050).
     LOCALHOST_ONLY: bool = True
+
+    # Writable state directory. When set (the desktop app points it at the
+    # per-user app-data folder), the SQLite DB and the telemetry rollups live
+    # there instead of next to the source tree. An explicit DATABASE_URL or
+    # TELEMETRY_STATE_PATH still wins.
+    CLAUDE_OFFICE_DATA_DIR: str = ""
+    # Directory holding the frontend static export, served when SERVE_STATIC=1.
+    # Empty means ``<backend>/static`` (the ``make build-static`` target).
+    CLAUDE_OFFICE_STATIC_DIR: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_data_dir(cls, data: Any) -> Any:
+        """Default the DB and telemetry paths into CLAUDE_OFFICE_DATA_DIR when set."""
+        if not isinstance(data, dict):
+            return data
+        values = cast(dict[str, Any], data)
+        raw_dir = values.get("CLAUDE_OFFICE_DATA_DIR")
+        if not raw_dir:
+            return values
+        data_dir = Path(str(raw_dir)).expanduser()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        values.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{data_dir / 'visualizer.db'}")
+        values.setdefault("TELEMETRY_STATE_PATH", str(data_dir / "telemetry_state.json"))
+        return values
 
     @property
     def effective_api_key(self) -> str:

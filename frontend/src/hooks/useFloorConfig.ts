@@ -1,6 +1,6 @@
 "use client";
 
-import { API_BASE } from "@/utils/api";
+import { apiFetch } from "@/utils/api";
 import { useEffect } from "react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { usePreferencesStore } from "@/stores/preferencesStore";
@@ -22,8 +22,6 @@ function whenPrefsLoaded(): Promise<void> {
   });
 }
 
-const API_URL = `${API_BASE}/api/v1`;
-
 /**
  * Fetches building configuration from the backend and stores it
  * in the navigation store. Runs once on mount.
@@ -37,7 +35,7 @@ export function useFloorConfig(): void {
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API_URL}/floors`)
+    apiFetch("/api/v1/floors")
       .then((res) => res.json())
       .then(async (data) => {
         await whenPrefsLoaded();
