@@ -35,7 +35,9 @@
  *   setShadowQuality(q)      "off" | "low" | "medium" | "high" | "ultra"
  *                            off: no shadows, daylight patches disabled
  *                            low: CSM 1024 ×2, sun 2048 · medium: 2048 ×2, 2048
- *                            high: 2048 ×3, 4096 · ultra: 4096 ×3 PCSS, 4096
+ *                            high: 2048 ×2, 4096 · ultra: 4096 ×3 PCSS, 4096
+ *                            lightmaps active (bakeExclude): high takes
+ *                            CSM 1024 ×2 + sun 2048 (shadowPresetFor)
  *   setAreaLights(on)        2 RectAreaLights follow the nearest linear
  *                            luminaires (true rectangular highlights on glossy
  *                            floors / desks). LTC tables load from the Babylon
@@ -150,6 +152,27 @@ const SHADOW_PRESET: Record<
   high: { csm: 2048, cascades: 2, sun: 4096, pcss: false },
   ultra: { csm: 4096, cascades: 3, sun: 4096, pcss: true },
 };
+
+/**
+ * Shadow maps for a tier. With the lightmaps active (WS-J), the baked sets
+ * carry their own occlusion and the realtime sun only lights the room
+ * modules' daylight patches, the hall and the exterior: high drops to the
+ * medium-size sun map (2048: -72 MB of depth + colour) and 1024 cascades
+ * (-36 MB; the first cascade still covers the desks and characters near the
+ * player at ~1 cm/texel). Ultra keeps its maps.
+ */
+export function shadowPresetFor(
+  q: Exclude<ShadowQuality, "off">,
+  baked: boolean,
+): { csm: number; cascades: number; sun: number; pcss: boolean } {
+  const p = SHADOW_PRESET[q];
+  if (!baked || q !== "high") return p;
+  return { ...p, csm: BAKED_HIGH_CSM, sun: BAKED_HIGH_SUN };
+}
+
+/** High-tier map sizes with the lightmaps active (see shadowPresetFor). */
+const BAKED_HIGH_SUN = 2048;
+const BAKED_HIGH_CSM = 1024;
 
 const SUN_DIR = new Vector3(-0.5, -0.62, 0.6).normalize();
 
@@ -560,7 +583,7 @@ export class Lighting {
     }
     if (!this.configured) return;
     this.sun.setEnabled(true);
-    const p = SHADOW_PRESET[q];
+    const p = shadowPresetFor(q, this.baked.size > 0);
     // Dynamic cascades (characters + furniture contact shadows).
     if (this.camera) {
       const want = `${p.csm}:${p.cascades}:${p.pcss}`;
@@ -852,6 +875,8 @@ export class Lighting {
       // Smaller fixture pool and the baked-aware ambient (see poolSize).
       this.resizePool();
       this.compensateAmbient();
+      // Bake-aware shadow map sizes (shadowPresetFor).
+      if (this.configured) this.applyShadows();
     }
   }
 

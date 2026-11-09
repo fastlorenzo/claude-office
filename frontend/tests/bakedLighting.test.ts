@@ -8,6 +8,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CreateBox,
   NullEngine,
   PBRMaterial,
   Scene,
@@ -25,7 +26,7 @@ import {
   type LightmapManifest,
   type RawImage,
 } from "@/engine/fx/BakedLighting";
-import { Lighting } from "@/engine/fx/Lighting";
+import { Lighting, shadowPresetFor } from "@/engine/fx/Lighting";
 import {
   LightmapPlugin,
   lightmapPluginOf,
@@ -574,5 +575,97 @@ describe("LightmapPlugin defines never change", () => {
     expect(await settle(floor, mat)).toBe(true);
     expect(floor.subMeshes[0].effect).toBe(effect);
     m.dispose();
+  });
+});
+
+describe("KTX2 lightmaps (WS-J)", () => {
+  it("parseManifest keeps a string ktx2 and drops anything else", () => {
+    const { manifest } = referenceBake();
+    const raw = JSON.parse(JSON.stringify(manifest));
+    raw.sets.lobby.ktx2 = "lobby.ktx2";
+    expect(parseManifest(raw)!.sets.lobby!.ktx2).toBe("lobby.ktx2");
+    raw.sets.lobby.ktx2 = 7;
+    expect(parseManifest(raw)!.sets.lobby!.ktx2).toBeUndefined();
+  });
+
+  it("KTX2 not usable here (io.ktx2 null / rejecting): the PNG loads", async () => {
+    for (const ktx2 of [
+      async () => null,
+      async () => {
+        throw new Error("no transcoder");
+      },
+    ]) {
+      const { manifest, uv2 } = referenceBake();
+      (manifest.sets.lobby as { ktx2?: string }).ktx2 = "lobby.ktx2";
+      const w = world();
+      const feed = Object.assign(io(manifest, uv2), { ktx2: vi.fn(ktx2) });
+      const bl = await BakedLighting.load(w.scene, w.materials, w.lighting, {
+        io: feed,
+      });
+      expect(feed.ktx2).toHaveBeenCalledWith("/lightmaps/lobby.ktx2");
+      expect(feed.images).toBe(1);
+      buildLobby(w);
+      expect(bl.stats().active).toEqual(["lobby"]);
+    }
+  });
+
+  it("no ktx2 key: the KTX2 path is never tried", async () => {
+    const { manifest, uv2 } = referenceBake();
+    const w = world();
+    const feed = Object.assign(io(manifest, uv2), {
+      ktx2: vi.fn(async () => null),
+    });
+    await BakedLighting.load(w.scene, w.materials, w.lighting, { io: feed });
+    expect(feed.ktx2).not.toHaveBeenCalled();
+    expect(feed.images).toBe(1);
+  });
+
+  it("sets option: only the listed sets load (?bakeSets= diagnostics)", async () => {
+    const { manifest, uv2 } = referenceBake();
+    const w = world();
+    const feed = io(manifest, uv2);
+    const bl = await BakedLighting.load(w.scene, w.materials, w.lighting, {
+      io: feed,
+      sets: ["modules"],
+    });
+    expect(bl.loadedSets).toEqual([]);
+    expect(feed.images).toBe(0);
+    expect(bakeApplier(w.scene)).toBeNull();
+  });
+});
+
+describe("bake-aware shadow maps (WS-J)", () => {
+  it("high drops to a 2048 sun map and 1024 cascades with lightmaps; other tiers keep theirs", () => {
+    expect(shadowPresetFor("high", false)).toMatchObject({ csm: 2048, sun: 4096 });
+    expect(shadowPresetFor("high", true)).toMatchObject({
+      csm: 1024,
+      cascades: 2,
+      sun: 2048,
+      pcss: false,
+    });
+    for (const q of ["low", "medium", "ultra"] as const)
+      expect(shadowPresetFor(q, true)).toEqual(shadowPresetFor(q, false));
+  });
+
+  it("the first baked mesh rebuilds a high-tier sun map at the bake-aware size", () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const lighting = new Lighting(scene);
+    const sunMap = () =>
+      (lighting as unknown as { sunShadow: { mapSize: number } | null })
+        .sunShadow?.mapSize;
+    lighting.setShadowQuality("high");
+    expect(sunMap()).toBe(4096);
+    lighting.bakeExclude([CreateBox("floor", { size: 1 }, scene)], {
+      sun: false,
+    });
+    expect(sunMap()).toBe(2048);
+    lighting.setShadowQuality("ultra");
+    expect(sunMap()).toBe(4096);
+    lighting.setShadowQuality("high");
+    expect(sunMap()).toBe(2048);
+    lighting.dispose();
+    scene.dispose();
+    engine.dispose();
   });
 });

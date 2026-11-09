@@ -7,6 +7,9 @@
  *                   size, gain, sun, frame, uv2, parts: { <part>: { hash,
  *                   vertexCount, uv2Offset } } } } }
  *   <set>.png       RGBD irradiance (no albedo), Babylon encoding
+ *   <set>.ktx2      the same, UASTC (GPU-compressed, 8 bpp; optional
+ *                   `ktx2` key): preferred when KTX2 loads here, the PNG
+ *                   is the fallback (scripts/encode-lightmaps.ts)
  *   <set>_uv2.bin   float32 LE UV2 per part (uv2Offset = float index)
  *
  * `BakedLighting.load` runs BEFORE the world is built (all material / light
@@ -22,11 +25,15 @@
  * glass part) keeps the realtime path untouched; problems are reported once
  * on the console and in `__worldStats.bakes`.
  *
+ * Dev switches: `?bakeSets=modules,control` applies only those sets,
+ * `?lmktx2=0` forces the PNG lightmaps (see also World.bakeQueryOptions).
+ *
  * Dev fixture (`?bakeFixture=1`): every bakeable part of every set takes a
  * synthetic lightmap (UV2 from normal / height, procedural irradiance) to
  * exercise the runtime path without a real bake.
  */
 import {
+  configureKtx2,
   Constants,
   Texture,
   VertexBuffer,
@@ -37,6 +44,7 @@ import {
   type Scene,
 } from "@/engine/babylon";
 import { partHash, topologyHash } from "@/engine/bake/hash";
+
 import {
   BAKE_SETS,
   setBakeApplier,
@@ -62,6 +70,8 @@ export interface ManifestPart {
 
 export interface ManifestSet {
   image: string;
+  /** UASTC KTX2 copy of `image` (rows flipped: KTX2 upload order). */
+  ktx2?: string;
   encoding: "rgbd";
   size: number;
   gain?: number;
@@ -93,13 +103,23 @@ export interface RawImage {
   height: number;
 }
 
-export type LightmapImage = ImageBitmap | RawImage;
+/** A KTX2 file's bytes (Babylon transcodes + uploads it). */
+export interface Ktx2Image {
+  ktx2: ArrayBuffer;
+}
+
+export type LightmapImage = ImageBitmap | RawImage | Ktx2Image;
 
 /** I/O (tests inject their own). Null = definitely missing (HTTP 404). */
 export interface BakeIO {
   json(url: string): Promise<unknown>;
   binary(url: string): Promise<ArrayBuffer | null>;
   image(url: string): Promise<LightmapImage>;
+  /**
+   * A KTX2 lightmap's bytes, or null when KTX2 is not usable here (no
+   * transcoder, `?lmktx2=0`) or the file is missing: the PNG is used.
+   */
+  ktx2?(url: string): Promise<ArrayBuffer | null>;
 }
 
 export interface BakeStats {
@@ -125,6 +145,8 @@ export interface BakeLoadOptions {
   gainScale?: number;
   /** Override of every set's iblScale (tuning, `?bakeIbl=`). */
   iblScale?: number;
+  /** Only these sets (diagnostics; default: `?bakeSets=a,b`, else all). */
+  sets?: readonly BakeSetId[];
   io?: Partial<BakeIO>;
   /** Give up on the manifest / files after this long (ms). */
   timeoutMs?: number;
@@ -142,6 +164,8 @@ interface LiveSet {
   gain: number;
   iblScale: number;
   image: string;
+  /** KTX2 URL (null: PNG only, or the KTX2 failed once). */
+  ktx2: string | null;
 }
 
 const registry = new WeakMap<Scene, BakedLighting>();
@@ -282,22 +306,25 @@ export class BakedLighting implements BakeApplier {
       console.info("[bake] no lightmap manifest: realtime lighting");
       return;
     }
+    const only = this.opts.sets ?? querySets();
     const entries = BAKE_SETS.flatMap((id) => {
       const spec = manifest.sets[id];
-      return spec ? [[id, spec] as const] : [];
+      return spec && (!only || only.includes(id)) ? [[id, spec] as const] : [];
     });
     await Promise.all(
       entries.map(async ([id, spec]) => {
         const imgUrl = `${this.base}/${spec.image}`;
+        const ktxUrl = spec.ktx2 ? `${this.base}/${spec.ktx2}` : null;
         try {
           const [bin, img] = await Promise.all([
             this.io.binary(`${this.base}/${spec.uv2}`),
-            this.io.image(imgUrl),
+            this.fetchImage(imgUrl, ktxUrl),
           ]);
           if (!bin) throw new Error(`${spec.uv2} missing`);
           if (this.disposed) return;
           const live = this.makeSet(id, spec, new Float32Array(bin), imgUrl);
-          this.install(live.texture, img, imgUrl);
+          live.ktx2 = ktxUrl;
+          this.install(live, img);
           this.sets.set(id, live);
         } catch (err) {
           this.missing = true;
@@ -309,6 +336,18 @@ export class BakedLighting implements BakeApplier {
         }
       }),
     );
+  }
+
+  /** The set's KTX2 bytes when usable, else its PNG (never throws for KTX2). */
+  private async fetchImage(
+    png: string,
+    ktx2: string | null,
+  ): Promise<LightmapImage> {
+    if (ktx2 && this.io.ktx2) {
+      const bytes = await this.io.ktx2(ktx2).catch(() => null);
+      if (bytes) return { ktx2: bytes };
+    }
+    return this.io.image(png);
   }
 
   private makeSet(
@@ -335,6 +374,7 @@ export class BakedLighting implements BakeApplier {
       gain: (spec.gain ?? 1) * (this.opts.gainScale ?? 1),
       iblScale: this.opts.iblScale ?? spec.iblScale ?? DEFAULT_IBL_SCALE,
       image,
+      ktx2: null,
     };
   }
 
@@ -360,12 +400,15 @@ export class BakedLighting implements BakeApplier {
   }
 
   /** Swap a loaded lightmap into the set's texture (same object: no recompiles). */
-  private install(tex: Texture, img: LightmapImage, url: string): void {
+  private install(set: LiveSet, img: LightmapImage): void {
     if (this.disposed) return;
+    const tex = set.texture;
     if (isRaw(img)) {
       this.swap(tex, this.rawInternal(img.data, img.width, img.height));
       return;
     }
+    const ktx = isKtx2(img);
+    const url = ktx && set.ktx2 ? set.ktx2 : set.image;
     let probe: Texture | null = null;
     const done = () => {
       const p = probe;
@@ -383,16 +426,33 @@ export class BakedLighting implements BakeApplier {
     let loaded = false;
     probe = new Texture(`${url}#lm`, this.scene, {
       noMipmap: true,
-      invertY: true,
+      // A KTX2 upload keeps the file's rows (stored flipped); the bitmap
+      // was flipped at decode (WebGL ignores UNPACK_FLIP_Y for bitmaps).
+      invertY: !ktx,
       samplingMode: Texture.BILINEAR_SAMPLINGMODE,
       gammaSpace: false,
-      buffer: img,
+      buffer: ktx ? img.ktx2 : img,
+      forcedExtension: ktx ? ".ktx2" : undefined,
       onLoad: () => {
         loaded = true;
         if (probe) done();
       },
-      onError: (message?: string) =>
-        this.warn(`lightmap ${url} upload failed: ${message ?? "error"}`),
+      onError: (message?: string) => {
+        if (!ktx) {
+          this.warn(`lightmap ${url} upload failed: ${message ?? "error"}`);
+          return;
+        }
+        // Transcoder / upload failure: the PNG from now on (also on restore).
+        probe?.dispose();
+        probe = null;
+        set.ktx2 = null;
+        console.warn(`[bake] lightmap ${url} (KTX2) failed: PNG fallback`);
+        void this.io.image(set.image).then(
+          (png) => this.install(set, png),
+          (err: unknown) =>
+            this.warn(`lightmap ${set.image} failed: ${String(err)}`),
+        );
+      },
     });
     // Babylon may call onLoad synchronously from the constructor.
     if (loaded) done();
@@ -424,8 +484,8 @@ export class BakedLighting implements BakeApplier {
   private reloadImages(): void {
     if (this.disposed || this.fixture) return;
     for (const set of this.sets.values())
-      void this.io.image(set.image).then(
-        (img) => this.install(set.texture, img, set.image),
+      void this.fetchImage(set.image, set.ktx2).then(
+        (img) => this.install(set, img),
         (err: unknown) =>
           this.warn(`lightmap ${set.image} reload failed: ${String(err)}`),
       );
@@ -534,7 +594,7 @@ export class BakedLighting implements BakeApplier {
         parts: {},
       };
       const live = this.makeSet(id, spec, null, "fixture");
-      this.install(live.texture, img, "fixture");
+      this.install(live, img);
       this.sets.set(id, live);
     }
     setBakeApplier(this.scene, this);
@@ -590,6 +650,19 @@ function geometryMismatch(
   return err > BBOX_TOL ? `bounds moved ${err.toFixed(3)} m` : null;
 }
 
+/** `?bakeSets=modules,control` (dev: isolate a set's contribution). */
+function querySets(): BakeSetId[] | null {
+  if (typeof location === "undefined") return null;
+  const raw = new URLSearchParams(location.search).get("bakeSets");
+  if (raw === null) return null;
+  const want = raw.split(",").map((s) => s.trim());
+  return BAKE_SETS.filter((s) => want.includes(s));
+}
+
+function isKtx2(img: LightmapImage): img is Ktx2Image {
+  return (img as Ktx2Image).ktx2 instanceof ArrayBuffer;
+}
+
 function isRaw(img: LightmapImage): img is RawImage {
   return (img as RawImage).data instanceof Uint8Array;
 }
@@ -619,6 +692,7 @@ export function parseManifest(raw: unknown): LightmapManifest | null {
     )
       sets[id] = {
         ...s,
+        ktx2: typeof s.ktx2 === "string" ? s.ktx2 : undefined,
         sun: !!s.sun,
         verify: s.verify === "topology" ? "topology" : "position",
       };
@@ -672,6 +746,20 @@ function defaultIO(): BakeIO {
     async binary(url) {
       const r = await get(url);
       return r ? r.arrayBuffer() : null;
+    },
+    async ktx2(url) {
+      if (!configureKtx2()) return null;
+      if (
+        typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("lmktx2") === "0"
+      )
+        return null;
+      // No retries: a failure falls back to the (retrying) PNG.
+      const r = await fetch(url).catch(() => null);
+      if (!r || !r.ok) return null;
+      // A dev server may answer an absent file with the app's HTML.
+      if ((r.headers.get("content-type") ?? "").includes("html")) return null;
+      return r.arrayBuffer();
     },
     async image(url) {
       return retry(async () => {
@@ -735,3 +823,4 @@ function fixtureUV2(mesh: BakePart["mesh"]): Float32Array | null {
   }
   return uv;
 }
+

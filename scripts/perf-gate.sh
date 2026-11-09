@@ -8,10 +8,13 @@
 # Budgets: the WS4 targets in docs/design/review-plan.md, tightened after the
 # photoreal pass (WS-E: lightmaps on, SSAO / its G-buffer gone) to the measured
 # draws + ~5 %. The gate exits 1 when any budget or post-process limit is
-# exceeded, or when the lightmaps are not active (__worldStats.bakes.active
-# empty: every budget assumes them). textureMB > TEX_MB_WARN at high only
-# warns for now (KTX2 runtime pending). Reads __worldStats (draws,
-# postProcesses, screenUploads, textureMB, bakes, gpuMs; "-" when absent).
+# exceeded, when the lightmaps are not active (__worldStats.bakes.active
+# empty: every budget assumes them), or when resident texture memory at high
+# exceeds TEX_MB_MAX (WS-J: the lowest measured figure + ~5 %, after the
+# bake-aware shadow maps and the KTX2 lightmaps; the WS5 target is
+# TEX_MB_TARGET, printed as a note until the generated canvases shrink).
+# Reads __worldStats (draws, postProcesses, screenUploads, textureMB, bakes,
+# gpuMs; "-" when absent).
 # Always runs under the machine-wide heavy lock and only ever calls shot.sh.
 set -euo pipefail
 
@@ -26,9 +29,11 @@ FRAMES="${FRAMES:-40}"
 OUT="${OUT:-$SHOT_DIR/out/perf-gate}"
 mkdir -p "$OUT"
 COMMON="n=6&demoFactory=1&shot=1"
-# post-process limit at high; textureMB warning level at high (WS5 budget 300)
+# post-process limit at high; resident texture MB limit at high (hard) and
+# the WS5 target (note only)
 PP_HIGH="${PP_HIGH:-8}"
-TEX_MB_WARN="${TEX_MB_WARN:-300}"
+TEX_MB_MAX="${TEX_MB_MAX:-575}"
+TEX_MB_TARGET="${TEX_MB_TARGET:-300}"
 
 # name | budget | extra query
 CASES=(
@@ -115,7 +120,7 @@ done
 
 printf '\n%-16s %7s %7s  %-18s %6s %12s %9s  %s\n' camera draws budget result passes screenUploads textureMB bakes
 nobakes=0
-texwarn=""
+texover=""
 while IFS=$'\t' read -r name draws budget pp su tm bk gpu; do
   if [ "$draws" = "-" ] || [ "$budget" = "-" ]; then res="NODATA"; fail=1
   elif [ "$draws" -le "$budget" ]; then res=ok
@@ -127,10 +132,11 @@ while IFS=$'\t' read -r name draws budget pp su tm bk gpu; do
   if [ -n "$limit" ] && [ "$pp" != "-" ] && [ "$pp" -gt "$limit" ]; then res="FAIL(passes>$limit)"; fail=1; fi
   # every budget assumes the lightmaps (bakes.active non-empty)
   if [ "$bk" = "none" ] || [ "$bk" = "-" ]; then res="FAIL(no bakes)"; fail=1; nobakes=1; fi
-  # resident texture memory: warning only until the KTX2 budget is enforced
+  # resident texture memory at high (the tier checks run other texture tiers)
   case "$name" in spawn_medium|spawn_low) ;; *)
-    if [ "$tm" != "-" ] && python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > float(sys.argv[2]) else 1)' "$tm" "$TEX_MB_WARN"; then
-      tm="$tm!"; texwarn=1; fi ;;
+    if [ "$tm" = "-" ]; then res="NODATA(textureMB)"; fail=1
+    elif python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) > float(sys.argv[2]) else 1)' "$tm" "$TEX_MB_MAX"; then
+      tm="$tm!"; texover=1; res="FAIL(textureMB>$TEX_MB_MAX)"; fail=1; fi ;;
   esac
   printf '%-16s %7s %7s  %-18s %6s %12s %9s  %s\n' "$name" "$draws" "$budget" "$res" "$pp" "$su" "$tm" "$bk"
 done <"$RESULTS"
@@ -140,10 +146,14 @@ if [ "$nobakes" = 1 ]; then
   echo "  the baked sets. Check frontend/public/lightmaps/manifest.json exists, the browser console"
   echo "  '[bake]' warning (hash mismatch -> re-run 'make bake-lightmaps'), and that ?bakes=0 is not set."
 fi
-if [ -n "$texwarn" ]; then
-  echo
-  echo "perf-gate: WARNING textureMB above $TEX_MB_WARN at high (marked '!'); not gated yet (KTX2 runtime)."
+echo
+if [ -n "$texover" ]; then
+  echo "perf-gate: textureMB above $TEX_MB_MAX at high (marked '!'): a texture / render target grew."
+  echo "  ?drawdbg=1 lists the largest textures (__worldStats.texTop / texBy)."
 fi
+echo "perf-gate: note: textureMB is gated at $TEX_MB_MAX MB (high); the WS5 target is $TEX_MB_TARGET MB, not met"
+echo "  yet (generated canvases / screens and post-process targets dominate: ?drawdbg=1 texBy)."
+
 echo
 echo "screenshots + logs: $OUT"
 [ "$fail" -eq 0 ] && echo "perf-gate: PASS" || echo "perf-gate: FAIL"
