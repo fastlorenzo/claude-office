@@ -261,8 +261,34 @@ describe("realtime fallback", () => {
     expect(oak.isVerticesDataPresent(VertexBuffer.UV2Kind)).toBe(false);
     expect(w.lighting.fill.excludedMeshes).not.toContain(oak);
     expect(bl.stats().mismatched).toEqual(["lobby:lobby:mat:oak"]);
+    expect(warn).not.toHaveBeenCalled(); // deferred to the next frame
+    frame(w);
+    frame(w);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0][0])).toMatch(/geometry hash/);
+  });
+
+  it("a rebuilt part replaces the stale mismatch (no warning for it)", async () => {
+    const { manifest, uv2 } = referenceBake();
+    const w = world();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const bl = await BakedLighting.load(w.scene, w.materials, w.lighting, {
+      io: io(manifest, uv2),
+    });
+    // First build at another layout: geometry differs → mismatches.
+    const b = new ArtBatcher(w.scene, w.materials, "lobby", 3);
+    b.box("oak", v3(0.3, 0.4, -2), v3(2, 0.8, 0.8));
+    const stale = b.build({
+      bake: { set: "lobby", origin: { x: 0, y: 0, z: 0 } },
+    });
+    expect(bl.stats().mismatched).toEqual(["lobby:lobby:mat:oak"]);
+    // Replaced before the first frame by the real build.
+    for (const m of stale) m.dispose();
+    buildLobby(w);
+    frame(w);
+    expect(bl.stats().mismatched).toEqual([]);
+    expect(bl.stats().active).toEqual(["lobby"]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("all parts mismatched: bakes.active is empty", async () => {
@@ -384,6 +410,11 @@ describe("applied bake", () => {
     expect(probes.get(w.materials.get("floorLobby"))).toEqual([floor.material]);
   });
 });
+
+/** One rendered frame's after-render notification (no camera needed). */
+function frame(w: World): void {
+  w.scene.onAfterRenderObservable.notifyObservers(w.scene);
+}
 
 describe("control set: topology verification", () => {
   /** A control-room-like part at a hall-length dependent position. */

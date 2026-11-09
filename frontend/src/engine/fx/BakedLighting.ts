@@ -191,8 +191,17 @@ export class BakedLighting implements BakeApplier {
   private readonly base: string;
   private missing = false;
   private fixture = false;
-  private readonly mismatched: string[] = [];
-  private readonly applied = new Map<BakeSetId, Set<string>>();
+  /**
+   * Latest result per `set:part` key. A rebuild (World builds once at the
+   * empty layout, then at the real one) replaces the entry; disposed meshes
+   * are skipped by `stats()`.
+   */
+  private readonly results = new Map<
+    string,
+    { set: BakeSetId; mesh: BakePart["mesh"]; ok: boolean }
+  >();
+  /** Mismatches waiting for the next frame (warned only if still alive). */
+  private pendingWarn: Array<{ mesh: BakePart["mesh"]; msg: string }> = [];
   private warned = false;
   private disposed = false;
   private restoreObs: Observer<unknown> | null = null;
@@ -217,14 +226,19 @@ export class BakedLighting implements BakeApplier {
 
   /** `__worldStats.bakes`. */
   stats(): BakeStats {
-    const active = BAKE_SETS.filter(
-      (s) => (this.applied.get(s)?.size ?? 0) > 0,
-    );
+    const live = new Set<BakeSetId>();
+    const mismatched: string[] = [];
     let parts = 0;
-    for (const s of this.applied.values()) parts += s.size;
+    for (const [key, r] of this.results) {
+      if (r.mesh.isDisposed()) continue;
+      if (r.ok) {
+        live.add(r.set);
+        parts++;
+      } else mismatched.push(key);
+    }
     return {
-      active,
-      mismatched: [...this.mismatched],
+      active: BAKE_SETS.filter((s) => live.has(s)),
+      mismatched,
       missing: this.missing,
       parts,
       ...(this.fixture ? { fixture: true } : {}),
@@ -434,9 +448,7 @@ export class BakedLighting implements BakeApplier {
                 entry.uv2Offset < 0 ||
                 entry.uv2Offset + nv * 2 > set.uv2.length
               ? "uv2 out of range"
-              : !geometryMatches(set.spec, entry, pos, idx, part.origin)
-                ? "geometry hash"
-                : null;
+              : geometryMismatch(set.spec, entry!, pos, idx, part.origin);
       if (why) {
         this.mismatch(part, why);
         return false;
@@ -455,21 +467,30 @@ export class BakedLighting implements BakeApplier {
     mesh.material = variant;
     this.lighting.addMaterialVariant(mat as PBRMaterial, variant);
     this.lighting.bakeExclude([mesh], { sun: set.spec.sun });
-    let names = this.applied.get(set.id);
-    if (!names) {
-      names = new Set();
-      this.applied.set(set.id, names);
-    }
-    names.add(part.name);
+    this.results.set(`${part.set}:${part.name}`, {
+      set: set.id,
+      mesh,
+      ok: true,
+    });
     return true;
   }
 
   private mismatch(part: BakePart, why: string): void {
     const key = `${part.set}:${part.name}`;
-    if (!this.mismatched.includes(key)) this.mismatched.push(key);
-    this.warn(
-      `lightmap part "${key}" does not match the bake (${why}): realtime lighting for it (re-run make bake-lightmaps)`,
-    );
+    this.results.set(key, { set: part.set, mesh: part.mesh, ok: false });
+    if (this.warned) return;
+    // Warn on the next frame, and only for a mesh that survived: the empty-
+    // layout build World makes first is replaced before anything renders.
+    if (!this.pendingWarn.length)
+      this.scene.onAfterRenderObservable.addOnce(() => {
+        const first = this.pendingWarn.find((p) => !p.mesh.isDisposed());
+        this.pendingWarn = [];
+        if (first) this.warn(first.msg);
+      });
+    this.pendingWarn.push({
+      mesh: part.mesh,
+      msg: `lightmap part "${key}" does not match the bake (${why}): realtime lighting for it (re-run make bake-lightmaps)`,
+    });
   }
 
   private warn(msg: string): void {
@@ -519,19 +540,21 @@ export class BakedLighting implements BakeApplier {
 /** Bounds tolerance (m) of the topology check. */
 const BBOX_TOL = 2e-3;
 
-function geometryMatches(
+/** Why the part's geometry differs from the baked one (null: it matches). */
+function geometryMismatch(
   set: ManifestSet,
   entry: ManifestPart,
   pos: ArrayLike<number>,
   idx: ArrayLike<number>,
   origin: BakePart["origin"],
-): boolean {
+): string | null {
   if (set.verify !== "topology")
-    return partHash(pos, idx, origin) === entry.hash;
-  if (!entry.topoHash || topologyHash(pos.length / 3, idx) !== entry.topoHash)
-    return false;
+    return partHash(pos, idx, origin) === entry.hash ? null : "geometry hash";
+  if (!entry.topoHash) return "no topoHash";
+  if (topologyHash(pos.length / 3, idx) !== entry.topoHash)
+    return "topology (index order)";
   const b = entry.bbox;
-  if (!b || b.length !== 6) return true;
+  if (!b || b.length !== 6) return null;
   const lo = [Infinity, Infinity, Infinity];
   const hi = [-Infinity, -Infinity, -Infinity];
   const o = [origin.x, origin.y, origin.z];
@@ -540,13 +563,12 @@ function geometryMatches(
     if (v < lo[i % 3]) lo[i % 3] = v;
     if (v > hi[i % 3]) hi[i % 3] = v;
   }
-  for (let k = 0; k < 3; k++)
-    if (
-      Math.abs(lo[k] - b[k]) > BBOX_TOL ||
-      Math.abs(hi[k] - b[k + 3]) > BBOX_TOL
-    )
-      return false;
-  return true;
+  const err = Math.max(
+    ...[0, 1, 2].map((k) =>
+      Math.max(Math.abs(lo[k] - b[k]), Math.abs(hi[k] - b[k + 3])),
+    ),
+  );
+  return err > BBOX_TOL ? `bounds moved ${err.toFixed(3)} m` : null;
 }
 
 function isRaw(img: LightmapImage): img is RawImage {
