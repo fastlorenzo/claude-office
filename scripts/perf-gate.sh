@@ -38,7 +38,9 @@ TEX_MB_TARGET="${TEX_MB_TARGET:-300}"
 # name | budget | extra query
 CASES=(
   "spawn|270|quality=high&gfx=high"
-  "hall_end|250|quality=high&gfx=high&cam=0,1.65,24,0,0"
+  # z=24.05, not 24: z=24 sits exactly on a bay boundary plane and SwiftShader
+  # mis-orders depth there (a hidden roof upstand pokes through the hall ceiling).
+  "hall_end|250|quality=high&gfx=high&cam=0,1.65,24.05,0,0"
   "room_interior|285|quality=high&gfx=high&cam=5.5,1.65,8,90,3"
   "factory_floor|250|quality=high&gfx=high&cam=0,-4.35,-3,0,5"
 )
