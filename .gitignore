@@ -121,6 +121,8 @@ docs/superpowers
 # --- Downloaded 3D assets (bun run assets) ---
 frontend/public/assets/*
 !frontend/public/assets/NOTICE.md
+# Lightmap bake sources (tools/lightmaps; the baked outputs are committed)
+frontend/public/lightmaps/src/
 frontend/public/havok/
 frontend/public/ktx2/
 

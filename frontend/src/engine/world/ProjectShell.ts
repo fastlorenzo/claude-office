@@ -452,12 +452,6 @@ export class ShellModule {
     if (!m || m.parts.some((p) => p.isDisposed())) {
       m = new ShellModule(scene, materials, lighting, kind);
       byKind.set(kind, m);
-      if (kind === "pod") {
-        const mod = m;
-        (
-          globalThis as { __claudeOfficeExportRoom?: () => string }
-        ).__claudeOfficeExportRoom = () => exportModuleJson(mod);
-      }
     }
     return m;
   }
@@ -577,24 +571,8 @@ export function frameMatrix(f: {
   return Matrix.RotationY(f.yaw).multiply(Matrix.Translation(f.ox, 0, f.oz));
 }
 
-/**
- * Lightmap tooling hook (tools/lightmaps): serialise the pod prefab's merged
- * parts (local space) as JSON. Exposed on `globalThis.__claudeOfficeExportRoom()`.
- */
-export function exportModuleJson(m: ShellModule): string {
-  const parts = m.parts.map((p) => ({
-    name: p.name,
-    material: p.material?.name ?? "",
-    emissive:
-      (p.material as { disableLighting?: boolean } | null)?.disableLighting ??
-      false,
-    transparent: p.material?.needAlphaBlending() ?? false,
-    positions: Array.from(p.getVerticesData("position") ?? []),
-    normals: Array.from(p.getVerticesData("normal") ?? []),
-    indices: Array.from(p.getIndices() ?? []),
-  }));
-  return JSON.stringify({ module: m.kind, version: 2, parts });
-}
+// Lightmap export: the prefabs are serialised headless by engine/bake
+// (exportParts.ts, `make bake-lightmaps`), not from a running page.
 
 function hexToLinear(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", ""), 16);

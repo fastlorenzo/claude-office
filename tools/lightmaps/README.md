@@ -1,53 +1,112 @@
-# Lightmaps (Blender Cycles) — scaffold
+# Lightmaps (Blender Cycles)
 
-Baked GI for the static building modules. **Status: partial.** Export and the
-Blender bake script exist; the runtime loader (UV2 + `lightmapTexture` on the
-module materials) is not wired yet, so the engine stays fully realtime:
+Baked static lighting for the layout-invariant parts of the office: Cycles
+bakes direct + indirect diffuse irradiance offline, the runtime multiplies it
+by the surface albedo. The baked files are committed in
+`frontend/public/lightmaps/`; the runtime consumer is
+`frontend/src/engine/fx/BakedLighting.ts` + `materials/LightmapPlugin.ts`
+(a `MaterialPluginBase`; Babylon's built-in `lightmapTexture` is not used: it
+adds the lightmap without the albedo and double-counts lights).
 
-- clustered spot lights, one per luminaire (`Lighting`, ClusteredLightContainer)
-- a static, render-once whole-building daylight shadow map (ceilings occlude
-  the sun, windows cast patches)
-- cool daylight "portal" lights at every window, warm fixtures inside
-- box-projected reflection probes on the hall / lobby / control-room floors
+Without `manifest.json`, or when a part's geometry no longer matches its hash,
+the runtime keeps the realtime path for that part (clustered fixture lights,
+static sun shadow map, IBL).
 
-## Why modules
+## Sets
 
-Rooms are one prefab (`frontend/src/engine/world/RoomShell.ts`): the shell and
-its furniture are merged per material and drawn for every room with thin
-instances. One bake of that module serves every room; the lobby, a hall
-segment and the control room would be three more modules.
+| set        | parts (batchers, see `engine/bake/parts.ts`)                    | frame          | light baked in |
+|------------|-----------------------------------------------------------------|----------------|----------------|
+| `modules`  | the 5 ShellModule prefabs (`projEntry`, `projBay`, `projEnd`, `projDivider`, `podZone`), one atlas | module-local (thin-instance vertex data) | fixtures (incl. window portals), interior HDRI through the glazing, bounce; **no sun** (west rooms are the east ones rotated 180°, daylight differs per side: the realtime sun stays on them) |
+| `lobby`    | Building `lobby`                                                | world          | fixtures, **sun**, exterior sky through the glazing, bounce |
+| `entrance` | EntranceHall `entrance` (static batcher; not the lift car / doors) | world (frame-local vertex data, frame at origin) | as lobby |
+| `control`  | Building `control` floor, ControlRoomShell `controlDrum`, ControlRoom `controlInt` | control-local (world vertex data minus the drum centre) | the room's own zone lights only (it is isolated from sun and fixtures at runtime) + interior HDRI + screens / LED emitters |
 
-## Steps
+The hall, outer walls, empty bays and the factory change with the session
+count: they stay realtime (they are only *context* in the bake: occluders,
+bounce, emitters). Only non-emissive, non-alpha-blended parts get a lightmap;
+glass lets light through in the bake (transparent BSDF), emissive materials
+emit (`emissiveColor × emissiveIntensity`; screen canvases at 30 %).
 
-1. Export the room module from a running `/world-debug` page (devtools):
+## Pipeline
 
-   ```js
-   copy(__claudeOfficeExportRoom())
-   ```
+```bash
+make bake-lightmaps                         # export + all sets, SAMPLES=512
+SETS="lobby" SAMPLES=256 make bake-lightmaps
+```
 
-   Save it as `frontend/public/assets/lightmaps/room.json` (git-ignored).
+1. **Export** (`frontend/scripts/export-bake.ts`, bun, NullEngine): builds the
+   6-session demo office headless (`engine/bake/bakeScene.ts`: Building,
+   project rooms, pods, control room; stubbed 2D canvas and asset library),
+   then `engine/bake/exportParts.ts` writes `frontend/public/lightmaps/src/<set>.json`
+   (git-ignored): the set's parts (geometry, hash, the world matrix of one
+   representative "hero" copy), every static mesh within 14 m as context
+   (with all its instance matrices), the lights that reach the set, sun and
+   world. Fixture lights are read back from the live `Lighting` (its KIND
+   table and `configure()`), so colour / intensity / direction match runtime.
+   The script rebuilds with 2 and 11 sessions and fails if a modules / lobby /
+   entrance hash changes (control: warns, see below).
+2. **Bake** (`tools/lightmaps/bake.py`, Blender 5.2 on the Windows host with
+   OptiX via WSL interop, else a Linux Blender; always under
+   `~/.local/share/claude-office-shot/.heavy.lock`):
+   - Babylon (left-handed, Y up) → Blender: `(x, y, z) → (x, z, y)`; winding
+     fixed per triangle against the exported normals.
+   - UV2: one island per connected component (so every original vertex keeps
+     exactly one UV — the vertex order and count are the runtime's). Components
+     that are height fields over their mean normal (box faces, rounded-box
+     faces) are planar-projected; others (cylinders, spheres) get Blender's
+     conformal unwrap. Equal texel density, packed axis-aligned with a 6 px
+     gap.
+   - Units: Babylon PBR is radiometric, so Cycles uses point power
+     `4π·I`, sun strength `I`, world strength = `environmentIntensity`; the
+     spot falloff is Babylon's physical one, `2^(6.644·(cosθ−1))`, as a light
+     node. A test plane matched the analytic value within 0.3 %.
+   - `DIFFUSE` bake, direct + indirect, no colour pass (irradiance, no albedo),
+     8 px dilation, OIDN through the compositor's Denoise node, values capped
+     at 64 (texels touching a luminaire).
+   - World: interior HDRI (`blender_institute`, 0.42, rotationY 0.35π) for
+     modules / control; exterior HDRI (`kloofendal…puresky`, strength 1,
+     clamped at 8 to drop its sun disc — the sun lamp carries the sun) for
+     lobby / entrance, where the window portal fixtures (a fake sky) are left
+     out. The HDRI orientation is approximate (only seen through windows).
+3. **Output** (merged per set into `manifest.json`): `<set>.png`, `<set>_uv2.bin`.
 
-2. Bake on the Windows GPU (one Blender at a time, via the heavy lock):
+Re-bake whenever geometry of a set changes (hash mismatch → that part is
+realtime again; `__worldStats.bakes` lists mismatches).
 
-   ```bash
-   flock ~/.local/share/claude-office-shot/.heavy.lock \
-     "/mnt/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" \
-     --background --python "$(wslpath -w tools/lightmaps/bake.py)" -- \
-     --in  "$(wslpath -w frontend/public/assets/lightmaps/room.json)" \
-     --out "$(wslpath -w frontend/public/assets/lightmaps)" \
-     --size 1024 --samples 256
-   ```
+## Lightmap contract
 
-   Output: `room_lightmap.png` (irradiance, no albedo) and `room_uv2.json`
-   (per-vertex UV2 per part, original vertex order).
+`frontend/public/lightmaps/manifest.json`:
 
-## Runtime integration (to do)
+```json
+{ "version": 1,
+  "sets": { "<set>": {
+    "image": "<set>.png", "encoding": "rgbd", "rgbdGamma": 2.2,
+    "size": 2048, "gain": 1.0, "sun": false,
+    "frame": "module-local | world | control-local", "origin": [x, y, z],
+    "verify": "position | topology",
+    "uv2": "<set>_uv2.bin", "uv2Unit": "float",
+    "parts": { "<partName>": { "hash": "…", "vertexCount": 1234, "uv2Offset": 0,
+                               "topoHash": "… (topology sets)", "bbox": [6 numbers] } },
+    "bake": { "samples": 512, "device": "OPTIX", "seconds": 0, "denoised": true,
+              "layout": "demo n=6", "date": "…" } } } }
+```
 
-- `RoomShellModule`: if `/assets/lightmaps/room_uv2.json` exists, set
-  `VertexBuffer.UV2Kind` on each part by name, clone the module materials once
-  (`room:*`) with `lightmapTexture = room_lightmap.png`,
-  `lightmapTexture.coordinatesIndex = 1`, `useLightmapAsShadowmap = false`.
-- Put the fixture spot lights in `Light.LIGHTMAP_SHADOWSONLY` mode for those
-  materials (or exclude them) so baked light is not counted twice; keep the
-  key light's cascades for characters.
-- Fall back to realtime when the files are missing (current behaviour).
+- **partName** = merged mesh name (`<batcher>:<material name>`, `#n` suffix on
+  duplicates), as registered by `MeshBatcher.build({ bake })`.
+- **hash** (`engine/bake/hash.ts` `partHash`): SHA-1 over int32LE
+  `round((p − origin)·1e4)` per x, y, z, then uint32LE indices. Colours, UVs and
+  normals are not hashed.
+- **verify: "topology"** (control only): the control room moves with the hall,
+  and its world-space float32 vertices differ by ~1 ulp between layouts, which
+  flips the 0.1 mm quantisation — so it is checked with `topoHash`
+  (`topologyHash(vertexCount, indices)`) plus `bbox` (set frame, ±2 mm). For
+  very small campuses (2 sessions) the floor and soffit really change: those
+  two parts fall back to realtime there.
+- **uv2.bin**: float32 LE, per part in manifest order, original vertex order,
+  `(u, v)` per vertex; `uv2Offset` counts floats. Blender convention: v = 0 is
+  the bottom row of the PNG.
+- **Image**: RGBA8 PNG, not premultiplied, Babylon RGBD with gamma 2.2:
+  `linear = pow(rgb, 2.2) / a`. Encode: `m = max(r,g,b)`,
+  `D = clamp(floor(max(255/m, 1))/255, 0, 1)`, `rgb = pow(c·D, 1/2.2)`, `a = D`.
+  Linear irradiance factor (what the runtime multiplies by albedo × `gain`).
+  Sample without mipmaps (islands are 6 px apart).
