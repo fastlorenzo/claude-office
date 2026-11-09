@@ -392,6 +392,7 @@ export class ArtBatcher extends MeshBatcher {
     const b = p ? p[2] * (1 + l) : 1 + l - hshift;
     const cols = new Float32Array(nv * 4);
     const ao = this.vertexAO ? vertexAO(mesh) : null;
+    if (ao) this.aoFactors.set(mesh, ao);
     for (let i = 0; i < nv; i++) {
       const k = ao ? ao[i] : 1;
       cols[i * 4] = r * k;
@@ -405,6 +406,13 @@ export class ArtBatcher extends MeshBatcher {
 
   /** Bake contact / underside occlusion into the vertex colours. */
   vertexAO = true;
+
+  /** AO factors per piece (a lightmapped part divides them back out). */
+  private readonly aoFactors = new WeakMap<Mesh, Float32Array>();
+
+  protected override aoOf(mesh: Mesh): Float32Array | null {
+    return this.aoFactors.get(mesh) ?? null;
+  }
 
   /** Cylinders get world-metre UVs too (true texture scale on round tops). */
   override cylinder(

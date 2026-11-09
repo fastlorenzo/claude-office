@@ -155,7 +155,11 @@ export class EntranceHall {
     this.frame = new TransformNode("entrance:frame", scene);
     this.frame.position.y = e.floorY;
     this.frame.computeWorldMatrix(true);
-    const built = b.build({ receiveShadows: true, parent: this.frame });
+    const built = b.build({
+      receiveShadows: true,
+      parent: this.frame,
+      bake: { set: "entrance" },
+    });
     for (const m of built) {
       m.computeWorldMatrix(true);
       m.metadata = { ...(m.metadata ?? {}), probe: true };

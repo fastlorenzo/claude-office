@@ -1143,7 +1143,10 @@ export class ControlRoom {
     // Walkable decks: tier riser + supervisor platform (slabs and ramps).
     addDeckColliders(colliders, GROUP, p);
 
-    const built = b.build({ receiveShadows: true });
+    const built = b.build({
+      receiveShadows: true,
+      bake: { set: "control", origin: { x: cx, y: 0, z: cz } },
+    });
     for (const m of built) {
       m.metadata = { ...(m.metadata ?? {}), probe: true };
       m.isPickable = false;

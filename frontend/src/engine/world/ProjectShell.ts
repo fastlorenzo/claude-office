@@ -477,14 +477,20 @@ export class ShellModule {
     });
     this.plants = built.plants;
     this.localFixtures = built.fixtures;
-    const arch = built.arch.build({ receiveShadows: true });
-    const furn = built.furn ? built.furn.build({ receiveShadows: true }) : [];
+    // Module-local geometry, identical in every room: one lightmap for all
+    // the thin instances (fx/BakedLighting, set "modules").
+    const bake = { set: "modules" } as const;
+    const arch = built.arch.build({ receiveShadows: true, bake });
+    const furn = built.furn
+      ? built.furn.build({ receiveShadows: true, bake })
+      : [];
     for (const p of furn)
       p.metadata = { ...(p.metadata ?? {}), staticCaster: true };
     this.parts = [...arch, ...furn];
     const felt = materials.get("wallFelt");
+    // The felt part may carry its lightmapped variant (same albedo / tint).
     this.tintPart = built.tinted
-      ? (arch.find((p) => p.material === felt) ?? null)
+      ? (arch.find((p) => materials.baseOf(p.material) === felt) ?? null)
       : null;
     for (const p of this.parts) {
       p.metadata = { ...(p.metadata ?? {}), probe: true };

@@ -436,7 +436,10 @@ export function buildControlShell(
     );
   }
 
-  const meshes = b.build({ receiveShadows: true });
+  const meshes = b.build({
+    receiveShadows: true,
+    bake: { set: "control", origin: { x: cx, y: 0, z: cz } },
+  });
   for (const m of meshes) {
     m.isPickable = false;
     if (m.material?.needAlphaBlending()) m.alphaIndex = 0;

@@ -11,8 +11,14 @@ import {
   Mesh,
   Scene,
   TransformNode,
+  VertexBuffer,
   type Material,
 } from "@/engine/babylon";
+import {
+  bakeApplier,
+  registerBakePart,
+  type BakeOption,
+} from "@/engine/bake/parts";
 import {
   applyWorldUVs,
   type Materials,
@@ -129,26 +135,57 @@ export class MeshBatcher {
   }
 
   /**
+   * Per-vertex occlusion factors already multiplied into a piece's vertex
+   * colours (ArtBatcher's vertex AO), or null. A baked part divides them back
+   * out: the lightmap carries the occlusion (no double AO).
+   */
+  protected aoOf(_mesh: Mesh): Float32Array | null {
+    return null;
+  }
+
+  /**
    * Merge per material. Returns the merged meshes (world matrices frozen).
    * `parent` (optional) re-parents the result; positions are already world/model space.
+   * `bake` registers the merged meshes as parts of a lightmap set (see
+   * engine/bake/parts.ts); when the scene's BakedLighting matched a part it
+   * takes the baked material + UV2 (else nothing changes).
    */
   build(
     opts: {
       parent?: TransformNode | null;
       receiveShadows?: boolean;
       pickable?: boolean;
+      bake?: BakeOption;
     } = {},
   ): Mesh[] {
     const out: Mesh[] = [];
+    const names = new Map<string, number>();
+    const bake = opts.bake ?? null;
+    const applier = bake ? bakeApplier(this.scene) : null;
     for (const [material, list] of this.buckets) {
       for (const mesh of list) mesh.bakeCurrentTransformIntoVertices();
+      const ao = applier ? this.concatAO(list) : null;
       const merged =
         list.length === 1 ? list[0] : Mesh.MergeMeshes(list, true, true);
       if (!merged) continue;
-      merged.name = `${this.name}:${material.name}`;
+      // Deterministic, unique part names (the lightmap manifest's keys).
+      const base = `${this.name}:${material.name}`;
+      const seen = (names.get(base) ?? 0) + 1;
+      names.set(base, seen);
+      merged.name = seen > 1 ? `${base}#${seen}` : base;
       merged.material = material;
       merged.isPickable = opts.pickable ?? false;
       merged.receiveShadows = opts.receiveShadows ?? true;
+      if (bake) {
+        const part = {
+          set: bake.set,
+          name: merged.name,
+          mesh: merged,
+          origin: bake.origin ?? { x: 0, y: 0, z: 0 },
+        };
+        registerBakePart(this.scene, part);
+        if (applier?.apply(part) && ao) divideAO(merged, ao);
+      }
       if (opts.parent) merged.parent = opts.parent;
       merged.computeWorldMatrix(true);
       merged.freezeWorldMatrix();
@@ -159,6 +196,41 @@ export class MeshBatcher {
     this.count = 0;
     return out;
   }
+
+  /** The bucket's AO factors in merge order (null when none is occluded). */
+  private concatAO(list: Mesh[]): Float32Array | null {
+    let any = false;
+    let n = 0;
+    for (const m of list) {
+      n += m.getTotalVertices();
+      if (this.aoOf(m)) any = true;
+    }
+    if (!any) return null;
+    const out = new Float32Array(n).fill(1);
+    let o = 0;
+    for (const m of list) {
+      const a = this.aoOf(m);
+      const nv = m.getTotalVertices();
+      if (a && a.length === nv) out.set(a, o);
+      o += nv;
+    }
+    return out;
+  }
+}
+
+/** Undo vertex AO on a baked part's colours (the lightmap has the occlusion). */
+function divideAO(mesh: Mesh, ao: Float32Array): void {
+  const cols = mesh.getVerticesData(VertexBuffer.ColorKind);
+  if (!cols || cols.length !== ao.length * 4) return;
+  const out = new Float32Array(cols);
+  for (let i = 0; i < ao.length; i++) {
+    const k = ao[i];
+    if (k === 1 || k <= 0) continue;
+    out[i * 4] /= k;
+    out[i * 4 + 1] /= k;
+    out[i * 4 + 2] /= k;
+  }
+  mesh.setVerticesData(VertexBuffer.ColorKind, out, false);
 }
 
 export function v3(x: number, y: number, z: number): V3 {
