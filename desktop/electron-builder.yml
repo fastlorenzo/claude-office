@@ -1,0 +1,68 @@
+# Desktop packaging (electron-builder). Inputs, built beforehand:
+#   ../packaging/dist/claude-office-server   frozen backend  (make -C packaging server)
+#   ../packaging/dist/claude-office-hook     frozen hook     (make -C packaging hook)
+#   ../frontend/out                          static export   (bun run assets && bun run build)
+#   ../packaging/dist-linux/claude-office-hook   Windows builds only: the Linux hook for
+#                                                WSL distros, produced by the Linux CI job
+appId: io.github.fastlorenzo.claudeoffice
+productName: Claude Office
+executableName: claude-office
+copyright: Copyright (c) 2026 Paul Robello and Claude Office contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - setup/**/*
+  - build/icon.png
+  - package.json
+asar: true
+# Large static assets and native sidecars stay outside the asar archive.
+extraResources:
+  - from: ../packaging/dist/claude-office-server
+    to: server
+  - from: ../packaging/dist/claude-office-hook
+    to: hook
+  - from: ../frontend/out
+    to: static
+    filter:
+      - "**/*"
+      # Intermediate Blender exports (tools/mpfb), ~190 MB; the runtime only
+      # loads the optimised GLBs + manifest.json next to raw/.
+      - "!assets/characters-mpfb/raw/**"
+  - from: ../THIRD_PARTY_NOTICES.md
+    to: THIRD_PARTY_NOTICES.md
+linux:
+  syncDesktopName: true
+  target:
+    - AppImage
+    - deb
+  category: Development
+  icon: build/icon.png
+  synopsis: Live office visualization of your Claude Code sessions
+  description: >-
+    Claude Office turns Claude Code sessions into a live 3D office. Includes its
+    local backend and the Claude Code hooks; everything stays on this computer.
+deb:
+  # The bundled hook/server are self-contained PyInstaller builds (glibc only).
+  depends: []
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+  extraResources:
+    - from: ../packaging/dist-linux/claude-office-hook
+      to: hook-linux
+nsis:
+  oneClick: true
+  perMachine: false
+  include: build/installer.nsh
+  artifactName: Claude-Office-Setup-${version}.${ext}
+appImage:
+  artifactName: Claude-Office-${version}-${arch}.${ext}
+publish:
+  provider: github
+  owner: fastlorenzo
+  repo: claude-office
+  releaseType: draft

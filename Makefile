@@ -6,7 +6,7 @@
 	build-static frontend-build-static \
 	docker-build docker-up docker-down docker-logs docker-shell docker-config \
 	pre-commit pre-commit-update depsupdate depsshow uv-lock uv-sync setup resetup remove-venv \
-	bump-version version-check perf-gate walk-gate help
+	bump-version version-check perf-gate walk-gate help desktop desktop-dist sidecars build-static-out
 
 # Detect package manager: prefer bun if available, otherwise use npm
 PKG_MGR := $(shell command -v bun >/dev/null 2>&1 && echo "bun" || echo "npm")
@@ -17,6 +17,7 @@ install:			# Install all component dependencies
 	cd frontend && $(PKG_INSTALL)
 	cd hooks && uv sync
 	cd opencode-plugin && $(PKG_INSTALL)
+	cd desktop && $(PKG_INSTALL)
 	$(MAKE) assets
 
 assets:			# Download CC0 3D assets (Poly Haven, ambientCG) + Havok wasm into frontend/public
@@ -40,6 +41,18 @@ build-static frontend-build-static:
 	@echo "Frontend built and copied to backend/static"
 	@echo "Start backend with 'make backend' to serve at http://localhost:8000"
 
+sidecars:			# Frozen backend + hook (PyInstaller) into packaging/dist
+	$(MAKE) -C packaging all
+
+desktop: build-static-out	# Run the Electron desktop shell against local builds
+	$(MAKE) -C desktop dev
+
+desktop-dist: build-static-out sidecars	# Linux AppImage + .deb into desktop/release/
+	$(MAKE) -C desktop dist-linux
+
+build-static-out:
+	@test -f frontend/out/index.html || (cd frontend && $(PKG_MGR) run build)
+
 perf-gate:			# Draw-call budgets at the reference cameras (shot.sh, heavy lock; ALL=1 for every camera)
 	scripts/perf-gate.sh
 
@@ -57,6 +70,7 @@ lint:			# Run lint on all components
 	make -C frontend lint
 	make -C hooks lint
 	make -C opencode-plugin lint
+	make -C desktop lint
 	cd backend && uv run ruff check ../scripts
 
 fmt:			# Reformat code
@@ -69,12 +83,14 @@ test:			# Run all tests
 	make -C frontend test
 	make -C hooks test
 	make -C opencode-plugin test
+	make -C desktop test
 
 typecheck:			# Run static type checks
 	make -C backend typecheck
 	make -C frontend typecheck
 	make -C hooks typecheck
 	make -C opencode-plugin typecheck
+	make -C desktop typecheck
 
 checkall: fmt lint typecheck test		# Run all checks including tests
 

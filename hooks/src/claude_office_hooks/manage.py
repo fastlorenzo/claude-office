@@ -158,6 +158,20 @@ def install_hooks(hook_cmd: str, dry_run: bool = False):
 
         current_list = hooks_config.get(hook_type, [])
 
+        # Re-point our own entries that use a different command (a previous
+        # desktop version's path, or switching between the dev tool and the
+        # desktop binary) instead of stacking a second hook next to them.
+        kept: list[Any] = []
+        for existing in current_list:
+            cmd = _entry_command(existing)
+            if cmd is not None and _is_our_command(cmd) and not is_same_hook(existing, new_entry):
+                print(f"  [Replace] {hook_type}: {cmd}")
+                changes_made = True
+                continue
+            kept.append(existing)
+        current_list = kept
+        hooks_config[hook_type] = current_list
+
         # Check for duplicates
         if any(is_same_hook(existing, new_entry) for existing in current_list):
             print(f"  [Skip] {hook_type}: Hook already exists.")
@@ -283,8 +297,21 @@ def wrap_statusline(hook_cmd: str, dry_run: bool = False) -> bool:
         print("  [Skip] statusLine: no command configured.")
         return False
     if is_wrapped(sl["command"]):
-        print("  [Skip] statusLine: already wrapped.")
-        return False
+        if sl["command"].startswith(f"{hook_cmd} statusline --"):
+            print("  [Skip] statusLine: already wrapped.")
+            return False
+        # Wrapped by another hook path (older desktop version / dev tool):
+        # re-point the wrapper, keeping the original command and its backup.
+        original = _unwrap_command(sl["command"])
+        if original is None:
+            print("  [Warn] statusLine: wrapped by another hook path; cannot re-point it.")
+            return False
+        new_sl: dict[str, Any] = {**sl, "command": wrap_command(hook_cmd, original)}
+        settings["statusLine"] = new_sl
+        print(f"  [Rewrap] statusLine: {new_sl['command']}")
+        if not dry_run:
+            save_settings(settings_path, settings)
+        return True
     if not dry_run:
         backup = _statusline_backup_path()
         backup.parent.mkdir(parents=True, exist_ok=True)
@@ -464,12 +491,15 @@ def write_config(
     api_url: str | None = None,
     strip_prefixes: str | None = None,
     force: bool = False,
+    replace_key: bool = False,
 ) -> dict[str, str]:
     """Write the hook config file; returns the effective managed values.
 
     Mirrors the rules install.sh always had:
-    * an existing API key is NEVER replaced, not even by ``force`` or an
-      explicit ``api_key`` (callers adopt the returned key instead);
+    * an existing API key is never replaced, not even by ``force`` or an
+      explicit ``api_key`` (callers adopt the returned key instead), unless
+      ``replace_key``: the desktop app runs the backend itself and must make
+      every producer (e.g. each WSL distro) send the key it enforces;
     * strip prefixes / debug: explicit arg > existing value > default, and
       ``force`` resets them to defaults;
     * ``api_url``: explicit arg > existing value; empty string removes it;
@@ -478,7 +508,10 @@ def write_config(
     existing, extra = _read_env_file(path)
     kept = {} if force else existing
 
-    key = existing.get("CLAUDE_OFFICE_API_KEY") or api_key or secrets.token_urlsafe(32)
+    if replace_key and api_key:
+        key = api_key  # the caller IS the backend (desktop app): it owns the key
+    else:
+        key = existing.get("CLAUDE_OFFICE_API_KEY") or api_key or secrets.token_urlsafe(32)
     values = {
         "CLAUDE_OFFICE_STRIP_PREFIXES": (
             strip_prefixes
@@ -529,6 +562,15 @@ def _is_our_command(cmd: str) -> bool:
     return BARE_HOOK_CMD in cmd or "claude-office/hooks/" in cmd
 
 
+def _entry_command(entry: Any) -> str | None:
+    """The first hook command of a settings entry, or None when malformed."""
+    try:
+        cmd: Any = cast(dict[str, Any], entry).get("hooks", [])[0].get("command", "")
+    except (IndexError, AttributeError, TypeError):
+        return None
+    return cmd if isinstance(cmd, str) else None
+
+
 def get_status(config_file: Path) -> dict[str, Any]:
     """Describe the current integration state. Never includes the API key."""
     settings_path = get_settings_path()
@@ -539,11 +581,8 @@ def get_status(config_file: Path) -> dict[str, Any]:
     if isinstance(hooks_config, dict):
         for hook_type, entries in cast(dict[str, Any], hooks_config).items():
             for entry in cast(list[Any], entries) if isinstance(entries, list) else []:
-                try:
-                    cmd: Any = cast(dict[str, Any], entry).get("hooks", [])[0].get("command", "")
-                except (IndexError, AttributeError, TypeError):
-                    continue
-                if isinstance(cmd, str) and _is_our_command(cmd):
+                cmd = _entry_command(entry)
+                if cmd is not None and _is_our_command(cmd):
                     installed.append(hook_type)
                     commands.add(cmd.rsplit(" ", 1)[0])
     values, _ = _read_env_file(config_file)
@@ -605,6 +644,11 @@ def cli(argv: list[str]) -> int:
     p_install.add_argument("--hook-cmd", help="Command/path to register (default: this binary)")
     p_install.add_argument("--api-url", help="Backend events URL ('' to reset to default)")
     p_install.add_argument("--api-key", help="Key to use only if none is configured yet")
+    p_install.add_argument(
+        "--replace-api-key",
+        action="store_true",
+        help="Overwrite an existing key with --api-key (the caller runs the backend)",
+    )
     p_install.add_argument("--strip-prefixes", help="Comma-separated project-name prefixes")
     p_install.add_argument("--statusline", action="store_true", help="Also wrap statusLine")
     p_install.add_argument("--force", action="store_true", help="Reset managed config keys")
@@ -640,6 +684,7 @@ def cli(argv: list[str]) -> int:
                 api_url=args.api_url,
                 strip_prefixes=args.strip_prefixes,
                 force=args.force,
+                replace_key=args.replace_api_key,
             )
             print(f"Configuration saved to {CONFIG_FILE}")
         install_hooks(hook_cmd, args.dry_run)

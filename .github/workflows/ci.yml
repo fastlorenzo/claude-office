@@ -46,3 +46,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: cd opencode-plugin && bun install
       - run: make -C opencode-plugin checkall
+
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: cd desktop && bun install
+      - run: make -C desktop checkall

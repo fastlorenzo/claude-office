@@ -72,6 +72,7 @@ See `.claude/skills/*/SKILL.md` for details.
 | Frontend package | `frontend/package.json` |
 | Frontend display | `frontend/src/app/page.tsx` (header badge) |
 | OpenCode plugin | `opencode-plugin/package.json` |
+| Desktop app | `desktop/package.json` |
 
 To bump all manual locations at once: `make bump-version VERSION=x.y.z` (rewrites the
 manual rows above; the two derived rows — backend `VERSION` and hooks `__version__` —

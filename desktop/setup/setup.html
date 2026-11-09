@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+<title>Claude Office — Integrations</title>
+<link rel="stylesheet" href="setup.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Connect Claude Code</h1>
+    <p class="lede">Claude Office shows your Claude Code sessions as a live office. It needs
+      small hooks in Claude Code's settings that report what each session is doing to this
+      app, on this computer only.</p>
+  </header>
+
+  <section id="detect" class="card">
+    <h2>This computer</h2>
+    <ul class="checks">
+      <li id="chk-claude">Looking for Claude Code…</li>
+      <li id="chk-hooks">Checking hooks…</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>Options</h2>
+    <label class="opt"><input type="checkbox" id="opt-statusline">
+      <span><b>Status line telemetry</b> — also show model, cost and rate limits. Wraps your
+      existing status line command; disconnecting restores it exactly.</span></label>
+    <div id="wsl" hidden>
+      <h3>WSL distributions</h3>
+      <p class="hint">Connect Claude Code running inside these distributions too.</p>
+      <div id="wsl-list"></div>
+      <p id="wsl-net" class="hint"></p>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="btn-connect" class="primary">Connect</button>
+    <button id="btn-disconnect">Disconnect</button>
+    <span id="msg" role="status"></span>
+  </div>
+
+  <section class="card">
+    <h2>App</h2>
+    <label class="opt"><input type="checkbox" id="opt-login"><span>Open at login</span></label>
+    <label class="opt"><input type="checkbox" id="opt-tray">
+      <span>Keep running in the tray when the window is closed</span></label>
+  </section>
+
+  <footer>
+    <span id="meta"></span>
+    <button id="btn-logs" class="link">Open logs</button>
+    <button id="btn-office" class="primary">Open the office</button>
+  </footer>
+</main>
+<script src="setup.js"></script>
+</body>
+</html>

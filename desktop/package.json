@@ -1,0 +1,46 @@
+{
+  "name": "claude-office-desktop",
+  "productName": "Claude Office",
+  "version": "0.25.1",
+  "description": "Claude Office Visualizer desktop app: the office, its backend and Claude Code hooks in one install",
+  "author": "Claude Office contributors",
+  "homepage": "https://github.com/fastlorenzo/claude-office",
+  "license": "MIT",
+  "private": true,
+  "main": "dist/main.js",
+  "//": [
+    "Electron pinned to 44.9.3 (mature patch on a stable line, >= 2 weeks old at",
+    "adoption 2026-11-09); electron-builder/updater likewise. `typescript` held",
+    "at ^6.0.3 to match the other packages (typescript-eslint has no TS 7 yet).",
+    "Runtime code is plain Node + Electron APIs: no runtime npm dependencies",
+    "besides electron-updater."
+  ],
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "tsc -p . && electron .",
+    "dist": "tsc -p . && electron-builder --publish never",
+    "lint": "eslint src tests --max-warnings=0",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tests",
+    "test": "bun test",
+    "icon": "bun scripts/render-icon.ts"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "bun-types": "^1.4.4",
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0",
+    "eslint": "^10.14.0",
+    "sharp": "0.35.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1"
+  },
+  "trustedDependencies": [
+    "electron",
+    "sharp"
+  ],
+  "desktopName": "claude-office.desktop"
+}

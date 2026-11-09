@@ -1,0 +1,39 @@
+:root {
+  --bg: #f6f4ef; --fg: #1d1b18; --muted: #6b665e; --card: #ffffff; --line: #e3ded4;
+  --accent: #c2410c; --accent-fg: #ffffff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111215; --fg: #ece9e3; --muted: #9a958c; --card: #1a1c20; --line: #2b2e34;
+    --accent: #f97316; --accent-fg: #111215; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; }
+main { max-width: 580px; margin: 0 auto; padding: 24px 20px 20px; }
+h1 { font-size: 22px; margin: 0 0 6px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+h3 { font-size: 14px; margin: 14px 0 4px; }
+.lede { color: var(--muted); margin: 0 0 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { padding: 3px 0 3px 22px; position: relative; }
+.checks li::before { content: "•"; position: absolute; left: 6px; color: var(--muted); }
+.checks li.ok::before { content: "✓"; color: var(--ok); left: 4px; }
+.checks li.warn::before { content: "!"; color: var(--warn); left: 7px; font-weight: 700; }
+.opt { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
+.opt input { margin-top: 3px; }
+.hint { color: var(--muted); margin: 2px 0 6px; font-size: 13px; }
+.actions { display: flex; gap: 10px; align-items: center; margin: 4px 0 18px; flex-wrap: wrap; }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+button.link { border: none; background: none; color: var(--muted); text-decoration: underline; padding: 0; }
+#msg { color: var(--muted); }
+#msg.err { color: var(--err); }
+#msg.ok { color: var(--ok); }
+footer { display: flex; gap: 14px; align-items: center; justify-content: flex-end; color: var(--muted); font-size: 12px; }
+footer #meta { margin-right: auto; }
+code { font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 12px; }
