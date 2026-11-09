@@ -947,6 +947,25 @@ Each `CampusSession` also carries an at-a-glance summary (all optional/nullable 
 
 `GET /api/v1/sessions` additionally returns `sessionName` (live sessions only) and a `displayName` that prefers the user label, then `sessionName`, then the stored display name, then the project folder basename, then the short id.
 
+## Desktop App
+
+`desktop/` packages everything as one install per OS (details: [desktop/README.md](../../desktop/README.md)):
+
+```mermaid
+graph LR
+    Electron[Electron main] -->|spawn, stdin pipe| Server[claude-office-server<br/>frozen FastAPI]
+    Electron -->|loads ?token=| Office[Office window<br/>static export]
+    Office -->|HTTP + WS, same origin| Server
+    Electron -->|install / status| Hook[claude-office-hook<br/>frozen, versioned dir]
+    CC[Claude Code] -->|hook events| Hook
+    Hook -->|POST /api/v1/events| Server
+```
+
+- `packaging/` freezes the backend and the hook with PyInstaller (onedir) and smoke-tests them (`make -C packaging all smoke`).
+- The backend runs with an explicit `CLAUDE_OFFICE_API_KEY`. Only `/api/v1` is gated, so the static UI still loads, and the key reaches the UI through the `?token=` intake. `--exit-on-stdin-close` stops the server when the shell dies.
+- Hooks are managed by the hook binary itself: `claude-office-hook install|uninstall|status`. The desktop app registers an absolute path in a versioned per-user directory and re-points it on update.
+- **WSL bridge** (Windows): Linux hooks inside WSL distros tag `data.wsl_distro`. `core/wsl_bridge.py` maps their transcript paths to `\\wsl.localhost\<distro>\…` at intake, before persistence. These sessions' liveness uses staleness instead of the Windows pid registry.
+
 ## Configuration Reference
 
 All configuration is managed via environment variables or a `.env` file in the `backend/` directory.
@@ -967,6 +986,9 @@ All configuration is managed via environment variables or a `.env` file in the `
 | `CLAUDE_OFFICE_API_KEY` | (empty — auto-generated per launch) | Explicit API key; when set, gates all state-changing endpoints via `X-API-Key` (see [Authentication](#authentication)) |
 | `SERVE_STATIC` | (unset) | Set to `1`/`true`/`yes` to serve the built frontend from `backend/static/` |
 | `BACKEND_CORS_ORIGINS` | localhost origins | Allowed CORS origins (localhost only by default) |
+| `CLAUDE_OFFICE_DATA_DIR` | (empty) | Writable state dir; the DB and `telemetry_state.json` default into it (explicit `DATABASE_URL`/`TELEMETRY_STATE_PATH` win). Set by the desktop app |
+| `CLAUDE_OFFICE_STATIC_DIR` | (empty → `backend/static/`) | Frontend export served when `SERVE_STATIC` is on. Set by the desktop app |
+| `CLAUDE_OFFICE_WSL_BRIDGE` | (auto: on for Windows) | Translate `data.wsl_distro` events' transcript paths to `\\wsl.localhost\…`; override for tests |
 
 **Docker path translation:** When running in Docker, set both `CLAUDE_PATH_HOST` and `CLAUDE_PATH_CONTAINER` so the backend can translate transcript file paths from the host to the container filesystem. For example, `CLAUDE_PATH_HOST=/Users/username/.claude` and `CLAUDE_PATH_CONTAINER=/claude-data`.
 

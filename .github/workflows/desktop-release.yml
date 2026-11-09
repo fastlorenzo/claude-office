@@ -1,0 +1,169 @@
+name: Desktop release
+
+# Builds the desktop app for Windows (NSIS .exe) and Linux (AppImage + .deb).
+# - workflow_dispatch: build only (artifacts on the run, nothing published)
+# - push of a v* tag: build, then publish a DRAFT GitHub release with the
+#   installers and the electron-updater feeds (latest.yml / latest-linux.yml)
+#
+# The frontend export is platform independent: built once and shared. The
+# Linux job also hands its frozen hook to the Windows job, which bundles it as
+# resources/hook-linux for WSL distros.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - name: Install, fetch CC0/MIT assets, build static export
+        working-directory: frontend
+        # characters: Microsoft Rocketbox cast (MIT, pinned commit). The MPFB
+        # cast needs Blender (tools/mpfb) and is not built here; the app
+        # detects its absence at runtime and uses Rocketbox.
+        run: |
+          bun install --frozen-lockfile
+          bun run assets
+          bun run characters
+          bun run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: frontend-out
+          path: frontend/out
+          if-no-files-found: error
+          retention-days: 3
+
+  linux:
+    needs: frontend
+    # Oldest supported runner: the frozen Python and Electron then run on
+    # distributions with glibc >= 2.35.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.13"
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-out
+          path: frontend/out
+      - name: Freeze backend + hook (PyInstaller)
+        run: make -C packaging all
+      - name: Smoke-test the frozen sidecars
+        run: make -C packaging smoke
+      - name: Package (AppImage + deb)
+        working-directory: desktop
+        run: |
+          bun install --frozen-lockfile
+          node node_modules/electron/install.js
+          bun run build
+          npx electron-builder --linux --publish never
+      - name: Archive the Linux hook for the Windows job (keeps exec bits)
+        run: tar -C packaging/dist -czf hook-linux.tgz claude-office-hook
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hook-linux
+          path: hook-linux.tgz
+          retention-days: 3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux
+          path: |
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/latest-linux.yml
+          if-no-files-found: error
+
+  windows:
+    needs: [frontend, linux]
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: "3.13"
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v8
+        with:
+          name: frontend-out
+          path: frontend/out
+      - uses: actions/download-artifact@v8
+        with:
+          name: hook-linux
+      - name: Unpack the Linux hook (resources/hook-linux)
+        run: mkdir -p packaging/dist-linux && tar -C packaging/dist-linux -xzf hook-linux.tgz
+      - name: Freeze backend + hook (PyInstaller)
+        # Same steps as packaging/Makefile (GNU make is not guaranteed on Windows runners).
+        # Native Windows paths (cygpath -w): MSYS does not translate env vars.
+        run: |
+          PKG=$(cygpath -w "$PWD/packaging")
+          PYI="--with pyinstaller pyinstaller --noconfirm --distpath $PKG\\dist --workpath $PKG\\build"
+          (cd backend && UV_PROJECT_ENVIRONMENT="$PKG\\build\\venv-server" uv run --no-dev --frozen $PYI "$PKG\\server.spec")
+          (cd hooks && UV_PROJECT_ENVIRONMENT="$PKG\\build\\venv-hook" uv run --no-dev --frozen $PYI "$PKG\\hook.spec")
+      - name: Smoke-test the frozen sidecars
+        env:
+          # Recorded, not tuned yet: Defender scanning makes cold starts slower here.
+          HOOK_P95_BUDGET_MS: "1000"
+        run: uv run --no-project python packaging/smoke.py
+      - name: Package (NSIS)
+        working-directory: desktop
+        run: |
+          bun install --frozen-lockfile
+          node node_modules/electron/install.js
+          bun run build
+          npx electron-builder --win --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-windows
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.exe.blockmap
+            desktop/release/latest.yml
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches the app version
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          got=$(python3 -c "import json;print(json.load(open('desktop/package.json'))['version'])")
+          test "$want" = "$got" || { echo "tag $GITHUB_REF_NAME != desktop/package.json $got"; exit 1; }
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft \
+            --title "Claude Office $GITHUB_REF_NAME" \
+            --notes "Desktop builds for Windows (installer .exe) and Linux (AppImage, .deb). Unsigned: Windows SmartScreen will ask for confirmation (More info → Run anyway)."

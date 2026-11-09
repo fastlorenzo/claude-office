@@ -14,6 +14,7 @@
 * [About](#about)
 * [What's New](#whats-new)
 * [Features](#features)
+* [Desktop App](#desktop-app)
 * [Quick Start](#quick-start)
 * [Prerequisites](#prerequisites)
 * [Installation](#installation)
@@ -131,9 +132,29 @@ For the full release history, see [CHANGELOG.md](CHANGELOG.md).
 - **Cross-Platform**: Runs on Windows, macOS, and Linux
 
 
+## Desktop App
+
+The simplest way to run Claude Office: one download, no Python, Node or `uv`.
+
+| OS | Download | |
+| --- | --- | --- |
+| Windows 10/11 | `Claude-Office-Setup-<version>.exe` | Per-user installer, no admin rights. Unsigned for now: SmartScreen asks once (*More info → Run anyway*). |
+| Linux (x64) | `Claude-Office-<version>-x86_64.AppImage` or `.deb` | AppImage: `chmod +x` and run (needs `libfuse2` on Ubuntu 22.04+). |
+
+Builds are attached to the [GitHub releases](https://github.com/fastlorenzo/claude-office/releases).
+
+1. Launch **Claude Office**. The office opens and the *Integrations* window appears.
+2. Click **Connect**. This adds the Claude Office hooks to `~/.claude/settings.json`
+   (your other settings are kept, and a `.bak` copy is made first).
+3. Restart running Claude Code sessions. They appear in the office.
+
+On Windows, Claude Code running inside **WSL** can be connected from the same
+window (needs `networkingMode=mirrored` in `%UserProfile%\.wslconfig`).
+**Disconnect** removes the hooks again. Details: [desktop/README.md](desktop/README.md).
+
 ## Quick Start
 
-For the fastest setup, see the [Quick Start Guide](docs/guides/quickstart.md).
+For a development setup, see the [Quick Start Guide](docs/guides/quickstart.md).
 
 ```bash
 git clone https://github.com/paulrobello/claude-office.git
