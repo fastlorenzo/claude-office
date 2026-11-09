@@ -261,6 +261,30 @@ export interface ArtOpts extends BoxOpts {
   seg?: number;
 }
 
+/** `box()` options with the opt-in bevel (metres, a request, not a promise). */
+export interface ArtBoxOpts extends BoxOpts {
+  /** Requested edge radius; capped by `bevelRadius` against the piece size. */
+  bevel?: number;
+  /** Quads per half-arc for the bevel (default 1). */
+  seg?: number;
+}
+
+/** Pieces thinner than this keep sharp edges (a bevel would be invisible). */
+export const BEVEL_MIN_DIM = 0.004;
+/** A bevel never eats more than this fraction of the smallest dimension. */
+export const BEVEL_MAX_FRAC = 0.25;
+
+/**
+ * Edge radius actually used for a requested `want` on a box of size `s`:
+ * min(want, 25 % of the smallest side); 0 when the smallest side is under
+ * 4 mm (or `want` is not positive). Pure (exported for tests).
+ */
+export function bevelRadius(s: V3, want: number): number {
+  const m = Math.min(s.x, s.y, s.z);
+  if (!(want > 0) || m < BEVEL_MIN_DIM) return 0;
+  return Math.min(want, BEVEL_MAX_FRAC * m);
+}
+
 /** sRGB hex → linear multipliers for `ArtBatcher.paint`. */
 export function paintOf(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", ""), 16);
@@ -411,6 +435,21 @@ export class ArtBatcher extends MeshBatcher {
     return super.add(m, mesh, true);
   }
 
+  /**
+   * Sharp box unless `opts.bevel` is given (then a size-capped rounded box).
+   * Opt-in only: abutting architecture must keep sharp `box()` edges.
+   */
+  override box(
+    m: SurfaceKey | Material,
+    c: V3,
+    s: V3,
+    opts: ArtBoxOpts = {},
+  ): Mesh {
+    const r = opts.bevel ? bevelRadius(s, opts.bevel) : 0;
+    if (r <= 0) return super.box(m, c, s, opts);
+    return this.rbox(m, c, s, { ...opts, r });
+  }
+
   /** Rounded box (centre, size, edge radius). */
   rbox(m: SurfaceKey | Material, c: V3, s: V3, opts: ArtOpts = {}): Mesh {
     const r = opts.r ?? 0.006;
@@ -464,4 +503,22 @@ export class ArtBatcher extends MeshBatcher {
     }
     return n;
   }
+}
+
+/**
+ * Bevelled box on any batcher: a size-capped rounded box on an ArtBatcher,
+ * a plain sharp box on a bare MeshBatcher (so shared architecture helpers
+ * typed against MeshBatcher can opt in without changing their signature).
+ */
+export function softBox(
+  b: MeshBatcher,
+  m: SurfaceKey | Material,
+  c: V3,
+  s: V3,
+  bevel: number,
+  opts: ArtBoxOpts = {},
+): Mesh {
+  return b instanceof ArtBatcher
+    ? b.box(m, c, s, { ...opts, bevel })
+    : b.box(m, c, s, opts);
 }

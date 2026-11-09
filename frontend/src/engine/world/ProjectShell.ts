@@ -266,7 +266,9 @@ function buildEndWall(scene: Scene, materials: Materials): Built {
   const arch = new ArtBatcher(scene, materials, "projEnd", 17);
   arch.box("wall", v3(d / 2, H / 2, 0), v3(d, H, 0.1));
   for (const s of [-1, 1])
-    arch.box("skirting", v3(d / 2, 0.035, s * 0.055), v3(d, 0.07, 0.01));
+    arch.box("skirting", v3(d / 2, 0.035, s * 0.055), v3(d, 0.07, 0.01), {
+      bevel: 0.002,
+    });
   // Graphite pier facing the hall.
   arch.rbox("wallFeature", v3(-0.03, H / 2, 0), v3(0.14, H, 0.16), {
     r: 0.006,

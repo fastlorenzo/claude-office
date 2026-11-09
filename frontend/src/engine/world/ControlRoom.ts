@@ -1041,13 +1041,13 @@ export class ControlRoom {
           "aluminium",
           v3((x0 + x1) / 2, railY, (z0 + z1) / 2),
           v3(0.05, 0.03, len),
-          { yaw },
+          { yaw, bevel: 0.006 },
         );
         b.box(
           "aluminium",
           v3((x0 + x1) / 2, railY - 0.42, (z0 + z1) / 2),
           v3(0.02, 0.02, len),
-          { yaw },
+          { yaw, bevel: 0.004 },
         );
         const n = Math.max(1, Math.round(len / 1.1));
         for (let i = 0; i <= n; i++) {
@@ -1248,7 +1248,10 @@ export class ControlRoom {
         { yaw: ma, r: 0.005 },
       );
       const k = onArc(ccx, ccz, rm + 0.06, ma);
-      b.box("blackMetal", v3(k.x, yC, k.z), v3(0.08, 0.08, 0.05), { yaw: ma });
+      b.box("blackMetal", v3(k.x, yC, k.z), v3(0.08, 0.08, 0.05), {
+        yaw: ma,
+        bevel: 0.01,
+      });
     }
   }
 
