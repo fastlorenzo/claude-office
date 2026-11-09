@@ -39,6 +39,8 @@ extraResources:
     to: THIRD_PARTY_NOTICES.md
 linux:
   syncDesktopName: true
+  # Required by the .deb target ("Name <email>"); GitHub noreply address.
+  maintainer: fastlorenzo <fastlorenzo@users.noreply.github.com>
   target:
     - AppImage
     - deb
@@ -48,9 +50,6 @@ linux:
   description: >-
     Claude Office turns Claude Code sessions into a live 3D office. Includes its
     local backend and the Claude Code hooks; everything stays on this computer.
-deb:
-  # The bundled hook/server are self-contained PyInstaller builds (glibc only).
-  depends: []
 win:
   target:
     - nsis
