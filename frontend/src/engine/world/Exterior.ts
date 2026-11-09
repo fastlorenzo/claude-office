@@ -88,15 +88,23 @@ export { GROUND_Y };
 
 const HAZE = new Color3(0.86, 0.92, 1.0);
 /**
- * Live exterior fog: EXP2, clear air to ~100 m and ~8% haze at the camera far
- * plane (Player maxZ 220), so the clipped near ground meets the baked cube
- * (whose ground carries a matching veil) without a colour jump.
+ * Live exterior fog: EXP2, clear air to ~100 m, ~4% haze at the live ground's
+ * edge (200 m) and ~72% where the far-ground ring ends (1.4 km); the baked
+ * veil beyond the ring continues the same curve.
  */
-const FOG_DENSITY = 0.0013;
+const FOG_DENSITY = 0.0009;
 /** Haze fraction the live fog reaches at distance d (what the veil matches). */
 const fogAt = (d: number): number =>
   1 - Math.exp(-(FOG_DENSITY * d) * (FOG_DENSITY * d));
 const TERRAIN_SEED = 5;
+/** Live ground half extent (buildNear) and the far-ground ring around it. */
+const NEAR_HALF = 200;
+const RING_OVERLAP = 6; // ring starts this far inside the live ground
+const RING_R = 1400; // ring outer radius from the park centre
+/** Camera far plane the ring needs (Player's 220 would clip it at 220 m). */
+const RING_FAR = 1900;
+/** Vertex-colour gain of the ring against the live lawn (calibrated). */
+const RING_GAIN: RGB = [0.55, 0.6, 0.5];
 /**
  * Mean colour (bake units, same gain as the far ground vertex colours) and
  * opacity of the baked ground just beyond the live near ground; tuned so the
@@ -104,6 +112,12 @@ const TERRAIN_SEED = 5;
  */
 const NEAR_FLAT: RGB = [0.9, 1.04, 0.66];
 const NEAR_FLAT_A = 0.9;
+/**
+ * The cube is read through the sky exposure, the live fog colour is not: this
+ * gain makes the baked haze just beyond the ring display as the live fog
+ * colour the ring ends in (measured off screenshots).
+ */
+const RING_HAZE_GAIN = 2;
 /** Bake render size per face (transient half-float RGBA: 6 faces x 8 B/px). */
 const CUBE_SIZE = 1536;
 /**
@@ -626,6 +640,70 @@ function buildGround(cx: number, cz: number, g: number, R: number): Buf {
   return b;
 }
 
+/**
+ * Live far-ground ring: the real geometry a skybox cannot be (no parallax).
+ * Runs from just inside the live ground's square edge out to RING_R, denser
+ * at the inner edge, following the distant terrain's height; vertex colours
+ * continue the live lawn and drift into gentle field tints (smooth blobs, not
+ * cells). One unlit exterior material (live fog), one draw.
+ */
+function buildRing(
+  cx: number,
+  cz: number,
+  g: number,
+  tcx: number,
+  tcz: number,
+): Buf {
+  const b = newBuf();
+  const SEG = 256;
+  const K = 28;
+  const half = NEAR_HALF - RING_OVERLAP;
+  const tints: RGB[] = [
+    [0.66, 0.82, 0.66], // woodland
+    [1.0, 1.0, 1.0], // meadow
+    [1.25, 1.18, 0.86], // crop
+    [1.22, 1.02, 0.72], // stubble
+    [1.02, 0.82, 0.66], // ploughed
+  ];
+  const W = SEG + 1;
+  for (let k = 0; k <= K; k++)
+    for (let s = 0; s <= SEG; s++) {
+      const a = (s / SEG) * Math.PI * 2;
+      const sa = Math.sin(a);
+      const ca = Math.cos(a);
+      const inner = half / Math.max(Math.abs(sa), Math.abs(ca));
+      const t = Math.pow(k / K, 1.7);
+      const rad = inner + (RING_R - inner) * t;
+      const x = cx + sa * rad;
+      const z = cz + ca * rad;
+      const h = terrainHeight(x - tcx, z - tcz, TERRAIN_SEED);
+      b.pos.push(x, g - 0.06 + h, z);
+      b.uv.push(0, 0);
+      const t1 = vnoise(x, z, 38, 1) * 0.6 + vnoise(x, z, 11, 2) * 0.4;
+      let c = lerp(GRASS_A, GRASS_B, t1);
+      const u = vnoise(x, z, 420, 11) * 0.7 + vnoise(x, z, 130, 12) * 0.3;
+      const band = Math.min(tints.length - 1, Math.floor(u * u * 5.4));
+      const nb = Math.min(tints.length - 1, band + 1);
+      const f = smoothstep(0.0, 1.0, u * u * 5.4 - band);
+      const tt = lerp(tints[band], tints[nb], f);
+      const w = smoothstep(40, 600, rad - inner);
+      const lum = 0.88 + 0.24 * vnoise(x, z, 45, 13);
+      c = mul(c, lum);
+      b.col.push(
+        c[0] * (1 + (tt[0] - 1) * w) * RING_GAIN[0],
+        c[1] * (1 + (tt[1] - 1) * w) * RING_GAIN[1],
+        c[2] * (1 + (tt[2] - 1) * w) * RING_GAIN[2],
+        1,
+      );
+      if (k > 0 && s > 0) {
+        const i = k * W + s;
+        const j = i - W;
+        b.idx.push(j - 1, i, j, j - 1, i - 1, i);
+      }
+    }
+  return b;
+}
+
 const smoothstep = (a: number, b: number, x: number): number => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -826,6 +904,7 @@ type Mats = {
   props: PBRMaterial;
   trees: PBRMaterial;
   shadow: PBRMaterial;
+  ring: PBRMaterial;
 };
 
 export class Exterior {
@@ -858,6 +937,7 @@ export class Exterior {
       props: unlit(scene, "exterior:propsMat", null),
       trees: unlit(scene, "exterior:treesMat", ttex),
       shadow: unlit(scene, "exterior:shadowMat", null),
+      ring: unlit(scene, "exterior:farRingMat", null),
     };
     this.owned.push(gtex, ctex, ttex, ...Object.values(this.mats));
     const car = carMaterial(scene);
@@ -866,6 +946,9 @@ export class Exterior {
     if (lighting.skyReflection)
       setCarReflection(this.carMat, lighting.skyReflection);
     this.mats.ground.backFaceCulling = false;
+    this.mats.ring.backFaceCulling = false;
+    // Push the ring back a hair so the live ground wins in the overlap strip.
+    this.mats.ring.zOffset = 4;
     const t = this.mats.trees;
     t.backFaceCulling = false;
     t.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
@@ -901,6 +984,16 @@ export class Exterior {
     scene.fogMode = Scene.FOGMODE_EXP2;
     scene.fogDensity = FOG_DENSITY;
     scene.fogColor = HAZE.clone();
+    // Player's far plane (220) would clip the far-ground ring: widen it for
+    // whatever camera is active (depth precision is set by minZ, not maxZ).
+    const widen = scene.onBeforeRenderObservable.add(() => {
+      const cam = scene.activeCamera;
+      if (cam && cam.maxZ > 0 && cam.maxZ < RING_FAR && cam.maxZ >= 200)
+        cam.maxZ = RING_FAR;
+    });
+    this.owned.push({
+      dispose: () => scene.onBeforeRenderObservable.remove(widen),
+    });
   }
 
   /**
@@ -1627,8 +1720,14 @@ export class Exterior {
     const sh = m("exterior:shadows", shadow, this.mats.shadow);
     sh.hasVertexAlpha = true;
     sh.renderingGroupId = 0;
+    const ring = m(
+      "exterior:farRing",
+      buildRing(0, cz, g, this.center.x, this.center.z),
+      this.mats.ring,
+    );
     this.near.push(
       m("exterior:ground", ground, this.mats.ground),
+      ring,
       m("exterior:buildings", build, this.mats.build),
       m("exterior:props", props, this.mats.props),
       m("exterior:trees", trees, this.mats.trees),
@@ -1663,26 +1762,19 @@ export class Exterior {
     // horizon band reads as distant farmland, not a flat disc.
     const R = 9000;
     const ground = buildGround(c.x, c.z, g, R);
-    // Near-field veil. The bake is one cube seen from 1.6 m but read from any
-    // eye height (2..60 m flying): a skybox has no parallax, so from altitude
-    // the cube's ground at 6..400 m radius (which the live ground covers at
-    // eye level) is what shows between the live ground's edge (200 m) and the
-    // horizon, magnified into the 0..15 degree band below it. Nothing of the
-    // cube below ~0.4 degrees is ever seen at eye level, so that band is free
-    // to be authored as "the landscape just beyond the live ground":
-    //  - a flat mean lawn colour (the 75 m field cells of the far texture
-    //    become huge slabs and stripes at the band's scale otherwise),
-    //  - hazed by exactly the live fog at the live edge (fogAt(200), held
-    //    constant inside it) and by the same EXP2 curve beyond, so colour and
-    //    fog density agree across the edge at every height,
-    //  - fading back to the true far ground by ~1.1 km (sub-pixel at eye
-    //    level, a sliver at the horizon from altitude).
+    // Veil beyond the live far-ground ring (RING_R). A skybox has no
+    // parallax, so the cube's ground cannot stand in for nearby land; the
+    // ring is real geometry out to RING_R and the cube only has to continue
+    // it. Where the ring ends it is ~72% live fog; the veil is the same flat
+    // lawn mixed with the same EXP2 fog curve (colour gained to display as the
+    // live fog colour), fading into the true far ground and hills by ~3.5-9 km
+    // (a few pixels at 15 m eye height, sub-pixel at eye level).
     const veil = newBuf();
     const VEIL_EDGE = 200; // live near-ground half extent
     const VEIL: [number, number][] = [
       [0, NEAR_FLAT_A],
-      [400, NEAR_FLAT_A],
-      [1100, 0.04],
+      [RING_R + 600, NEAR_FLAT_A],
+      [3500, 0.5],
       [R, 0],
     ];
     const VSEG = 64;
@@ -1696,9 +1788,9 @@ export class Exterior {
           c.z + Math.cos(a) * rad,
         );
         veil.col.push(
-          NEAR_FLAT[0] + (HAZE.r - NEAR_FLAT[0]) * f,
-          NEAR_FLAT[1] + (HAZE.g - NEAR_FLAT[1]) * f,
-          NEAR_FLAT[2] + (HAZE.b - NEAR_FLAT[2]) * f,
+          NEAR_FLAT[0] + (HAZE.r * RING_HAZE_GAIN - NEAR_FLAT[0]) * f,
+          NEAR_FLAT[1] + (HAZE.g * RING_HAZE_GAIN - NEAR_FLAT[1]) * f,
+          NEAR_FLAT[2] + (HAZE.b * RING_HAZE_GAIN - NEAR_FLAT[2]) * f,
           al,
         );
         veil.uv.push(0, 0);
