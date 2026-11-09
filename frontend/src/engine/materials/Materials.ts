@@ -56,6 +56,7 @@ import {
   VertexBuffer,
   type BaseTexture,
   type InternalTexture,
+  type Material,
   type Observer,
 } from "@/engine/babylon";
 import {
@@ -824,6 +825,50 @@ export class Materials {
     return mat;
   }
 
+  /**
+   * The lightmapped variant of a material (fx/BakedLighting): same spec and
+   * textures (a derived material: reloads, quality tiers, freezing and
+   * context restore apply as for `tinted`), own material so the realtime
+   * original stays untouched for unbaked meshes. `attach` installs the
+   * lightmap plugin before the material is cached (and frozen). Cached per
+   * (original, set). Null when the material cannot take a bake: unknown to
+   * this factory, emissive / unlit, alpha-blended, or procedurally textured.
+   */
+  baked(
+    m: SurfaceKey | Material,
+    set: string,
+    attach: (mat: PBRMaterial) => void,
+  ): PBRMaterial | null {
+    const orig = typeof m === "string" ? this.get(m) : m;
+    const src = this.specOf.get(orig as PBRMaterial);
+    if (!src) return null;
+    const { key, spec } = src;
+    if (spec.emissive || spec.alpha !== undefined || key === "moss")
+      return null;
+    const k = `b:${set}:${key}`;
+    const hit = this.cache.get(k);
+    if (hit) return hit;
+    const mat = this.build(k, spec);
+    this.derived.set(k, spec);
+    if (this.available) this.applyTextures(mat, spec);
+    this.bakedBase.set(mat, orig as PBRMaterial);
+    attach(mat);
+    this.remember(k, mat);
+    return mat;
+  }
+
+  /** The realtime original of a baked variant (else the material itself). */
+  baseOf(mat: Material | null | undefined): Material | null | undefined {
+    return (mat && this.bakedBase.get(mat as PBRMaterial)) ?? mat;
+  }
+
+  /** Spec + cache key of every material this factory built (`baked`). */
+  private readonly specOf = new WeakMap<
+    PBRMaterial,
+    { key: string; spec: SurfaceSpec }
+  >();
+  private readonly bakedBase = new WeakMap<PBRMaterial, PBRMaterial>();
+
   /** Acoustic felt in a given colour. */
   felt(hex: string): PBRMaterial {
     return this.tinted("wallFelt", hex);
@@ -894,11 +939,14 @@ export class Materials {
 
   private build(name: string, spec: SurfaceSpec): PBRMaterial {
     const mat = new PBRMaterial(`mat:${name}`, this.scene);
+    this.specOf.set(mat, { key: name, spec });
     mat.albedoColor = lin(spec.color);
     mat.metallic = spec.metallic ?? 0;
     mat.roughness = spec.roughness;
     mat.environmentIntensity = spec.env ?? 1;
     mat.maxSimultaneousLights = 6;
+    // Scene fog is exterior-only (opt-in, see Exterior.enableFog).
+    mat.fogEnabled = false;
     // Stops glossy normal-mapped surfaces from shimmering.
     mat.enableSpecularAntiAliasing = true;
     mat.useHorizonOcclusion = true;

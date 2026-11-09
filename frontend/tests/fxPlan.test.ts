@@ -201,3 +201,23 @@ describe("gbufferReach", () => {
     expect(gbufferReach(5, 16)).toBe(16);
   });
 });
+
+describe("bakesActive plan input", () => {
+  const high = applyPreset("high", base);
+  it("is a no-op when false/omitted", () => {
+    expect(planFx(high, { bakesActive: false })).toEqual(planFx(high));
+    expect(planFx(high).gbufferRangeM).toBeGreaterThan(0);
+  });
+  it("forces AO off so the G-buffer range drops to 0 (unless SSR)", () => {
+    const p = planFx(high, { bakesActive: true });
+    expect(p.ssao).toBeNull();
+    const noSsr = { ...high, screenSpaceReflections: "off" } as typeof high;
+    expect(planFx(noSsr, { bakesActive: true }).gbufferRangeM).toBe(0);
+    const ssr = { ...high, screenSpaceReflections: "medium" } as typeof high;
+    expect(planFx(ssr, { bakesActive: true }).gbufferRangeM).toBeGreaterThan(0);
+  });
+  it("medium preset has no G-buffer at all, high does", () => {
+    expect(of("medium").gbufferRangeM).toBe(0);
+    expect(of("high").gbufferRangeM).toBeGreaterThan(0);
+  });
+});

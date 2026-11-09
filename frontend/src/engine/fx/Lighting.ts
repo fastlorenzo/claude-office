@@ -759,10 +759,55 @@ export class Lighting {
       l.specular = lin(spec.color).scale(0.6);
       l.intensity = spec.intensity;
       l.range = spec.range;
-      l.includedOnlyMeshes = [...meshes];
       this.zoneLights.push(l);
+      this.includeZone(l);
     });
     // Excluded / included lists changed the zone meshes' light sources.
+    this.lightsChanged = true;
+  }
+
+  /** Meshes lit by a baked lightmap (see bakeExclude). */
+  private readonly baked = new Set<AbstractMesh>();
+
+  /**
+   * A zone light lights the zone's unbaked meshes (the bake has its light).
+   * All baked: the light is off (an empty include list would mean "all").
+   */
+  private includeZone(l: Light): void {
+    if (this.baked.size === 0) {
+      l.includedOnlyMeshes = [...this.zoneMeshes];
+      return;
+    }
+    const live = this.zoneMeshes.filter(
+      (m) => !this.baked.has(m) && !m.isDisposed(),
+    );
+    l.includedOnlyMeshes = live;
+    l.setEnabled(live.length > 0);
+  }
+
+  /**
+   * Meshes lit by a baked lightmap (fx/BakedLighting): the bake carries the
+   * bounce (`fill`), the luminaires (fixture container / forward pool, zone
+   * lights) and, for sets baked with daylight (`sun: true`), the sun. The
+   * `key` stays (its cascades draw character / prop contact shadows on baked
+   * floors) and so do the RectAreaLights (glossy highlights). Static sun
+   * casters are never removed (else daylight leaks through the ceilings onto
+   * the realtime hall). Thaws stale frozen materials (`lightsChanged`).
+   */
+  bakeExclude(meshes: AbstractMesh[], opts: { sun: boolean }): void {
+    if (meshes.length === 0) return;
+    for (const m of meshes) this.baked.add(m);
+    const exclude = (l: Light) => {
+      const list = l.excludedMeshes.filter((m) => !m.isDisposed());
+      for (const m of meshes) if (!list.includes(m)) list.push(m);
+      l.excludedMeshes = list;
+    };
+    exclude(this.fill);
+    if (this.container) exclude(this.container);
+    for (const s of this.slots) if (!this.clustered) exclude(s.light);
+    if (opts.sun) exclude(this.sun);
+    for (const l of this.zoneLights) this.includeZone(l);
+    for (const m of [...this.baked]) if (m.isDisposed()) this.baked.delete(m);
     this.lightsChanged = true;
   }
 
@@ -815,7 +860,7 @@ export class Lighting {
       light.radius = 0.45;
       light.shadowEnabled = false;
       if (this.clustered && this.container) this.container.addLight(light);
-      else light.excludedMeshes.push(...this.zoneMeshes);
+      else light.excludedMeshes.push(...this.zoneMeshes, ...this.baked);
       this.slots.push({ light, target: null, level: 0 });
     }
     this.assignedKey = "";
@@ -1049,10 +1094,12 @@ export class Lighting {
     renderList: () => AbstractMesh[],
   ): void {
     this.disposeProbe(name);
+    const base = [...materials, ...(this.probeExtras.get(name) ?? [])];
+    const all = [...base, ...base.flatMap((m) => this.variants.get(m) ?? [])];
     const spec: ProbeSpec = {
       center,
       size,
-      materials: [...materials, ...(this.probeExtras.get(name) ?? [])],
+      materials: [...new Set(all)],
       renderList,
       probe: null,
     };
@@ -1075,6 +1122,33 @@ export class Lighting {
       for (const m of materials)
         if (!spec.materials.includes(m)) spec.materials.push(m);
       if (this.probesOn) this.buildProbe(name, spec);
+    }
+  }
+
+  /** Baked (lightmapped) variants per realtime material (Materials.baked). */
+  private readonly variants = new Map<PBRMaterial, PBRMaterial[]>();
+
+  /**
+   * A baked variant takes the probes (and probe extras) of its realtime
+   * original: same reflection, never drawn into the probe it samples.
+   */
+  addMaterialVariant(orig: PBRMaterial, variant: PBRMaterial): void {
+    const list = this.variants.get(orig) ?? [];
+    if (!list.includes(variant)) list.push(variant);
+    this.variants.set(orig, list);
+    for (const extra of this.probeExtras.values())
+      if (extra.includes(orig) && !extra.includes(variant)) extra.push(variant);
+    for (const spec of this.probes.values()) {
+      if (!spec.materials.includes(orig) || spec.materials.includes(variant))
+        continue;
+      spec.materials.push(variant);
+      if (spec.probe) {
+        const frozen = variant.isFrozen;
+        if (frozen) variant.unfreeze();
+        variant.reflectionTexture = spec.probe.cubeTexture;
+        if (frozen) variant.freeze();
+        this.fillProbeList(spec, spec.probe.renderList!);
+      }
     }
   }
 

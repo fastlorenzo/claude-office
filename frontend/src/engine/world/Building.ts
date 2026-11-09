@@ -668,7 +668,10 @@ export class Building {
     // ---- Lounge rug
     b.rbox("rug", v3(lx, 0.006, lz), v3(3.8, 0.012, 3.0), { r: 0.004 });
 
-    this.finish(part, b.build({ receiveShadows: true }));
+    this.finish(
+      part,
+      b.build({ receiveShadows: true, bake: { set: "lobby" } }),
+    );
 
     // ---- Brand: neon sign (BrandSign) on the graphite wall.
     this.brand = new BrandSign(
@@ -958,7 +961,10 @@ export class Building {
       new Vector3(p.cx, -0.1, (p.z0 + zn) / 2),
       new Vector3(2 * p.neckHW, 0.2, zn - p.z0),
     );
-    const controlMeshes = cb.build({ receiveShadows: true });
+    const controlMeshes = cb.build({
+      receiveShadows: true,
+      bake: { set: "control", origin: { x: p.cx, y: 0, z: p.cz } },
+    });
     tagStatic(controlMeshes);
     part.meshes.push(...controlMeshes);
     this.controlShell = controlMeshes;

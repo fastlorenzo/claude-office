@@ -382,6 +382,10 @@ export class PostFx {
         const h = this.build(st, plan);
         if (h) this.handles.set(st, h);
       }
+      // Nothing reads the geometry buffer any more: drop it so the scene stops
+      // re-rendering into it. A later step-up re-creates it (leanGBuffer).
+      if (!this.handles.has("ssao") && !this.handles.has("ssr"))
+        this.scene.disableGeometryBufferRenderer();
       this.keys = next;
       this.applySamples(plan);
       this.stageNames = this.chain().map((x) => x.name);
@@ -733,6 +737,7 @@ export class PostFx {
     for (let i = STAGES.length - 1; i >= 0; i--)
       this.handles.get(STAGES[i])?.dispose();
     this.handles.clear();
+    this.scene.disableGeometryBufferRenderer();
     this.glow?.dispose();
     this.glow = null;
     this.highlight.dispose();
