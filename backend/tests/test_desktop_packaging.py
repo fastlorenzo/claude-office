@@ -102,3 +102,55 @@ def test_server_exits_when_stdin_closes(tmp_path: Path) -> None:
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+class TestSimulationLaunch:
+    """POST /sessions/simulate must work without uv or scripts/ on disk (desktop)."""
+
+    def test_launches_own_interpreter_with_server_url_and_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.api.routes import sessions
+        from app.main import app
+
+        captured: dict[str, object] = {}
+
+        class _FakeProc:
+            def poll(self) -> int:
+                return 0
+
+        def fake_popen(cmd: list[str], **kwargs: object) -> _FakeProc:
+            captured["cmd"] = cmd
+            captured["env"] = kwargs["env"]
+            return _FakeProc()
+
+        monkeypatch.setattr(sessions.subprocess, "Popen", fake_popen)
+        settings = get_settings()
+        resp = TestClient(app, base_url="http://127.0.0.1:8765").post(
+            f"{settings.API_V1_STR}/sessions/simulate",
+            headers={"X-API-Key": settings.effective_api_key},
+        )
+        assert resp.status_code == 200
+        assert captured["cmd"] == [sys.executable, "-m", "app", "simulate"]
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["CLAUDE_OFFICE_API_URL"] == "http://127.0.0.1:8765/api/v1/events"
+        assert env["CLAUDE_OFFICE_API_KEY"] == settings.effective_api_key
+
+    def test_frozen_uses_server_executable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.api.routes import sessions
+
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        assert sessions.simulation_command() == [sys.executable, "simulate"]
+
+    def test_simulate_subcommand_resolves_scenarios(self) -> None:
+        proc = subprocess.run(
+            [sys.executable, "-m", "app", "simulate", "--help"],
+            cwd=Path(__file__).parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "quick" in proc.stdout and "complex" in proc.stdout

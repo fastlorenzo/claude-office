@@ -18,10 +18,7 @@ from pathlib import Path
 import pytest
 
 # The simulation scripts live outside the backend package and post with
-# ``requests``, which is a backend dev dependency precisely so this module runs
-# in the backend gate. The importorskip stays as a guard for environments that
-# sync only the runtime dependencies.
-pytest.importorskip("requests")
+# ``httpx``, a backend runtime dependency (the frozen desktop backend runs them).
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -31,7 +28,7 @@ from scripts.scenarios import _base  # noqa: E402
 
 
 class _FakeResponse:
-    """Minimal stand-in for ``requests.Response``."""
+    """Minimal stand-in for ``httpx.Response``."""
 
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
@@ -54,7 +51,7 @@ def _capture_post(monkeypatch: pytest.MonkeyPatch, status_code: int) -> list[dic
         calls.append({"url": url, "json": json, "headers": headers or {}, "kwargs": kwargs})
         return _FakeResponse(status_code)
 
-    monkeypatch.setattr(_base.requests, "post", fake_post)
+    monkeypatch.setattr(_base.httpx, "post", fake_post)
     return calls
 
 
@@ -91,7 +88,7 @@ def test_network_errors_are_counted(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args, **_kwargs):
         raise ConnectionError("connection refused")
 
-    monkeypatch.setattr(_base.requests, "post", boom)
+    monkeypatch.setattr(_base.httpx, "post", boom)
     ctx = _base.SimulationContext(session_id="t", verbose=False)
     ctx.send_event("session_start", {})
     assert ctx.failures == 1
@@ -102,7 +99,7 @@ def test_redirects_are_not_followed(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _capture_post(monkeypatch, 200)
     ctx = _base.SimulationContext(session_id="t", verbose=False, api_key="secret")
     ctx.send_event("session_start", {})
-    assert calls[0]["kwargs"] == {"allow_redirects": False}
+    assert calls[0]["kwargs"] == {"follow_redirects": False}
     assert calls[0]["headers"] == {"X-API-Key": "secret"}
     assert ctx.failures == 0
 

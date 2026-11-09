@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-import requests
+import httpx
 
 API_URL = os.environ.get("CLAUDE_OFFICE_API_URL", "http://localhost:8000/api/v1/events")
 
@@ -111,7 +111,7 @@ class SimulationContext:
     def send_event(self, event_type: str, data: dict | None = None) -> None:
         """POST an event to the backend API.
 
-        Redirects are refused on purpose: ``requests`` re-sends custom headers
+        Redirects are refused on purpose: HTTP clients re-send custom headers
         (including ``X-API-Key``) to the redirect target, so an unexpected
         ``CLAUDE_OFFICE_API_URL`` could hand the key to another host. The
         configured URL must therefore be the exact canonical endpoint — no
@@ -132,14 +132,16 @@ class SimulationContext:
         key = self.api_key or API_KEY
         headers = {"X-API-Key": key} if key else {}
         try:
-            response = requests.post(
-                API_URL, json=payload, headers=headers, timeout=10, allow_redirects=False
+            # httpx (a backend runtime dependency) rather than requests, so the
+            # frozen desktop backend can run scenarios (`claude-office-server
+            # simulate`) without bundling anything extra.
+            response = httpx.post(
+                API_URL, json=payload, headers=headers, timeout=10, follow_redirects=False
             )
             if 300 <= response.status_code < 400:
-                raise requests.HTTPError(
+                raise httpx.HTTPError(
                     f"refused redirect ({response.status_code}) - following it would "
-                    "send X-API-Key to another host; check CLAUDE_OFFICE_API_URL",
-                    response=response,
+                    "send X-API-Key to another host; check CLAUDE_OFFICE_API_URL"
                 )
             response.raise_for_status()
         except Exception as e:

@@ -6,11 +6,12 @@ import sys
 from datetime import UTC
 from typing import Annotated, Any, TypedDict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.core.connection_manager import get_manager
 from app.core.event_processor import get_event_processor
 from app.db.database import get_db
@@ -539,9 +540,21 @@ async def get_session_replay(
     return replay_data
 
 
+def simulation_command() -> list[str]:
+    """Command that runs a scenario with this backend's own interpreter.
+
+    Frozen (desktop app): the server executable's ``simulate`` subcommand, since
+    neither ``uv`` nor ``scripts/`` exist there. Source checkout: ``python -m
+    app simulate`` with the running interpreter (no ``uv`` on PATH needed).
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "simulate"]
+    return [sys.executable, "-m", "app", "simulate"]
+
+
 @router.post("/simulate")
-async def trigger_simulation() -> dict[str, str]:
-    """Start the event simulation script in the background."""
+async def trigger_simulation(request: Request) -> dict[str, str]:
+    """Start the event simulation in the background."""
     global _simulation_process
 
     if _simulation_process is not None and _simulation_process.poll() is None:
@@ -549,14 +562,24 @@ async def trigger_simulation() -> dict[str, str]:
         # so the event loop is not stalled for up to 5 seconds (ARC-003).
         await asyncio.to_thread(kill_simulation)
 
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../"))
-    script_path = os.path.join(project_root, "scripts/simulate_events.py")
-
+    settings = get_settings()
+    backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+    # Post back to this very server (the desktop app may not be on :8000) with
+    # the key it enforces; both via the environment, never argv.
+    env = {
+        **os.environ,
+        "CLAUDE_OFFICE_API_URL": f"{str(request.base_url).rstrip('/')}{settings.API_V1_STR}/events",
+        "CLAUDE_OFFICE_API_KEY": settings.effective_api_key,
+    }
     _simulation_process = subprocess.Popen(
-        ["uv", "run", "python", script_path],
-        cwd=project_root,
+        simulation_command(),
+        cwd=backend_dir,
+        env=env,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        # No console window flashing up from the desktop app on Windows.
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
     return {"status": "success", "message": "Simulation started in background"}
