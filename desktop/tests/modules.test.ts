@@ -118,6 +118,9 @@ describe("hookctl", () => {
     expect(installArgs("/h", { apiKey: "k", apiUrl: "", statusline: true, replaceKey: true })).toEqual([
       "install", "--hook-cmd", "/h", "--api-key", "k", "--api-url=", "--replace-api-key", "--statusline", "--json",
     ]);
+    expect(installArgs("/h", { apiKey: "k", apiUrl: "", statusline: false, relay: "/mnt/c/A B/h.exe" })).toEqual([
+      "install", "--hook-cmd", "/h", "--api-key", "k", "--api-url=", "--relay=/mnt/c/A B/h.exe", "--json",
+    ]);
     const out = `  [Add] Stop\nSettings saved.\n${JSON.stringify(status(), null, 2)}\n`;
     expect(parseStatus(out)?.hook_commands).toEqual(["/h/claude-office-hook"]);
     expect(parseStatus("garbage")).toBeNull();

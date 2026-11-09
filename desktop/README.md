@@ -51,10 +51,14 @@ transcript paths to `\\wsl.localhost\<distro>\…` at intake
 (`backend/app/core/wsl_bridge.py`) and judges these sessions' liveness by
 staleness, because Windows cannot see Linux pids.
 
-**Networking:** this needs `networkingMode=mirrored` in `%UserProfile%\.wslconfig`
-(Windows 11 22H2+), so WSL reaches the app on `127.0.0.1`. The window shows
-which mode is active. NAT mode is not bridged yet: it would need a listener
-beyond loopback plus a firewall rule.
+**Networking:** no setup needed. Hooks first POST to `127.0.0.1`, which reaches
+the app with `networkingMode=mirrored` (Windows 11 22H2+). In the default NAT
+mode that connection is refused in about a millisecond, and the Linux hook pipes
+the event to the *Windows* hook through WSL interop (`CLAUDE_OFFICE_RELAY` in
+the distro's `~/.claude/claude-office-config.env`, `hooks/.../relay.py`). The
+Windows hook posts it on Windows' loopback with the app's key. There is no
+listener beyond loopback and no firewall rule. Relaying adds about 0.1–0.3 s per
+event (a Windows process start), well within the 2 s hook timeout.
 
 Known limitations: git status for WSL repos is not shown (working dirs stay
 Linux paths), and connected distros are re-pointed on launch only after an app

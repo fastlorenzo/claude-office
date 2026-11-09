@@ -457,6 +457,7 @@ _MANAGED_KEYS = (
     "CLAUDE_OFFICE_DEBUG",
     "CLAUDE_OFFICE_API_KEY",
     "CLAUDE_OFFICE_API_URL",
+    "CLAUDE_OFFICE_RELAY",
 )
 
 
@@ -492,6 +493,7 @@ def write_config(
     strip_prefixes: str | None = None,
     force: bool = False,
     replace_key: bool = False,
+    relay: str | None = None,
 ) -> dict[str, str]:
     """Write the hook config file; returns the effective managed values.
 
@@ -502,7 +504,8 @@ def write_config(
       every producer (e.g. each WSL distro) send the key it enforces;
     * strip prefixes / debug: explicit arg > existing value > default, and
       ``force`` resets them to defaults;
-    * ``api_url``: explicit arg > existing value; empty string removes it;
+    * ``api_url`` / ``relay``: explicit arg > existing value; empty string
+      removes it (``relay``: Windows hook used from WSL, see ``relay.py``);
     * user-added keys are preserved verbatim.
     """
     existing, extra = _read_env_file(path)
@@ -542,6 +545,15 @@ def write_config(
     if url:
         lines += ["", "# Backend events endpoint (default http://localhost:8000/api/v1/events)"]
         lines.append(f'CLAUDE_OFFICE_API_URL="{url}"')
+    relay_cmd = relay if relay is not None else existing.get("CLAUDE_OFFICE_RELAY", "")
+    if relay_cmd:
+        values["CLAUDE_OFFICE_RELAY"] = relay_cmd
+        lines += [
+            "",
+            "# WSL: Windows hook that relays events when the app is not reachable on",
+            "# localhost (NAT networking). Set by the Claude Office desktop app.",
+            f'CLAUDE_OFFICE_RELAY="{relay_cmd}"',
+        ]
     lines += extra
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -596,6 +608,7 @@ def get_status(config_file: Path) -> dict[str, Any]:
         "config_present": config_file.exists(),
         "api_key_present": bool(values.get("CLAUDE_OFFICE_API_KEY")),
         "api_url": values.get("CLAUDE_OFFICE_API_URL") or None,
+        "relay": values.get("CLAUDE_OFFICE_RELAY") or None,
         "statusline_wrapped": sl is not None and is_wrapped(sl["command"]),
     }
 
@@ -649,6 +662,11 @@ def cli(argv: list[str]) -> int:
         action="store_true",
         help="Overwrite an existing key with --api-key (the caller runs the backend)",
     )
+    p_install.add_argument(
+        "--relay",
+        help="WSL: path of the Windows hook to relay through when localhost is refused "
+        "('' to remove)",
+    )
     p_install.add_argument("--strip-prefixes", help="Comma-separated project-name prefixes")
     p_install.add_argument("--statusline", action="store_true", help="Also wrap statusLine")
     p_install.add_argument("--force", action="store_true", help="Reset managed config keys")
@@ -685,6 +703,7 @@ def cli(argv: list[str]) -> int:
                 strip_prefixes=args.strip_prefixes,
                 force=args.force,
                 replace_key=args.replace_api_key,
+                relay=args.relay,
             )
             print(f"Configuration saved to {CONFIG_FILE}")
         install_hooks(hook_cmd, args.dry_run)

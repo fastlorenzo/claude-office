@@ -12,8 +12,10 @@
  * paths to the share (backend/app/core/wsl_bridge.py).
  *
  * Networking: with networkingMode=mirrored, WSL reaches Windows' 127.0.0.1 and
- * hooks use the normal loopback URL. NAT mode is reported to the UI; bridging
- * it needs a non-loopback listener and a firewall rule (not done yet).
+ * hooks post directly. In the default NAT mode that POST is refused, and the
+ * Linux hook relays the event through the Windows hook via WSL interop
+ * (CLAUDE_OFFICE_RELAY, hooks relay.py): no firewall rule, no listener beyond
+ * loopback.
  */
 import { spawn } from "node:child_process";
 import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
@@ -99,6 +101,16 @@ async function distroHome(distro: string): Promise<string> {
   return home;
 }
 
+/** Linux path (inside the distro) of a Windows path, via the distro's own wslpath. */
+async function toDistroPath(distro: string, windowsPath: string): Promise<string> {
+  const res = await runCli(WSL, inDistro(distro, ["wslpath", "-u", windowsPath]));
+  const path = res.stdout.trim();
+  if (res.code !== 0 || !path.startsWith("/")) {
+    throw new Error(`${distro}: wslpath failed for ${windowsPath} (${res.stderr.trim()})`);
+  }
+  return path;
+}
+
 /** Copy the Linux hook bundle into the distro; returns its Linux path. */
 async function deployIntoDistro(distro: string, bundle: string, version: string): Promise<string> {
   const exe = linuxHookPath(await distroHome(distro), version);
@@ -129,9 +141,19 @@ export async function connectDistro(
   apiKey: string,
   port: number,
   statusline: boolean,
+  windowsHook: string,
 ): Promise<HookStatus | null> {
   const exe = await deployIntoDistro(distro, bundle, version);
-  const args = installArgs(exe, { apiKey, apiUrl: eventsUrlFor(port), statusline, replaceKey: true });
+  // NAT networking: the distro cannot reach this app's 127.0.0.1, so the Linux
+  // hook relays refused POSTs through the Windows hook (WSL interop).
+  const relay = await toDistroPath(distro, windowsHook);
+  const args = installArgs(exe, {
+    apiKey,
+    apiUrl: eventsUrlFor(port),
+    statusline,
+    replaceKey: true,
+    relay,
+  });
   const res = await runCli(WSL, inDistro(distro, [exe, ...args]), process.env, 60_000);
   if (res.code !== 0) throw new Error(`${distro}: hook install failed: ${res.stderr || res.stdout}`);
   return parseStatus(res.stdout);

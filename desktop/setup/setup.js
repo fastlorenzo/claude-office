@@ -64,8 +64,8 @@ function render(s) {
     );
     $("wsl-net").textContent = wsl.mirrored
       ? "WSL networking is mirrored: distributions reach this app on localhost."
-      : "WSL uses NAT networking: hooks reach this app through the Windows host address. " +
-        "If events do not arrive, set networkingMode=mirrored in %UserProfile%\\.wslconfig.";
+      : "WSL uses NAT networking: events are relayed through the Windows hook (WSL interop). " +
+        "networkingMode=mirrored in %UserProfile%\\.wslconfig is faster but optional.";
   }
 }
 

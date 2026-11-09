@@ -32,6 +32,7 @@ try:
     from claude_office_hooks.config import API_URL, TIMEOUT, get_api_key, load_config
     from claude_office_hooks.debug_logger import debug_log
     from claude_office_hooks.event_mapper import map_event
+    from claude_office_hooks.relay import is_connection_refused, relay, relay_command
 
     # Derived from package metadata; fallback covers the uninstalled case (ARC-021).
     try:
@@ -78,27 +79,50 @@ try:
             opener.add_handler(handler)
         return opener.open(req, timeout=TIMEOUT)
 
+    def _post_json(url: str, data: bytes, timeout: float = TIMEOUT) -> int:
+        """POST *data* to *url* with the configured key; returns the HTTP status."""
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        api_key = get_api_key()
+        if api_key:
+            headers["X-API-Key"] = api_key
+        req = urllib.request.Request(url, data=data, headers=headers)
+        with _open_request(req) as response:
+            return int(response.status)
+
     def send_event(payload: dict[str, Any]) -> None:
         """POST *payload* as JSON to the backend API.
 
-        Silently ignores all errors so the hook never blocks Claude.
+        On a refused connection with a relay configured (Claude Code inside WSL,
+        desktop app on Windows: see ``relay.py``), hand the payload to the
+        Windows hook instead. Silently ignores all errors so the hook never
+        blocks Claude.
         """
+        json_data = b""
         try:
             json_data = json.dumps(payload).encode("utf-8")
-            headers: dict[str, str] = {"Content-Type": "application/json"}
-            api_key = get_api_key()
-            if api_key:
-                headers["X-API-Key"] = api_key
-            req = urllib.request.Request(API_URL, data=json_data, headers=headers)
-            with _open_request(req) as response:
-                if response.status >= 300:
-                    log_error(
-                        RuntimeError(f"backend returned HTTP {response.status}"),
-                        "send_event",
-                    )
+            status = _post_json(API_URL, json_data)
+            if status >= 300:
+                log_error(RuntimeError(f"backend returned HTTP {status}"), "send_event")
         except Exception as exc:
+            if is_connection_refused(exc) and relay(relay_command(_config), "events", json_data):
+                return
             # Record the failure but never disrupt the user (always swallow).
             log_error(exc, "send_event failed")
+
+    def _relay_main(argv: list[str]) -> int:
+        """``relay events|statusline``: POST stdin to this host's backend (WSL relay)."""
+        from claude_office_hooks.statusline import read_stdin, telemetry_url
+
+        kind = argv[0] if argv else "events"
+        url = telemetry_url(API_URL) if kind == "statusline" else API_URL
+        data = read_stdin()
+        if not data.strip():
+            return 1
+        try:
+            return 0 if _post_json(url, data, timeout=1.0) < 300 else 1
+        except Exception as exc:
+            log_error(exc, "relay failed")
+            return 1
 
     def _statusline_main(argv: list[str]) -> int:
         """``statusline -- <cmd...>``: tee status line JSON to the backend, run cmd."""
@@ -129,7 +153,14 @@ try:
                 urllib.request.HTTPErrorProcessor(),
             ):
                 opener.add_handler(handler)
-            opener.open(req, timeout=POST_TIMEOUT).close()
+            try:
+                opener.open(req, timeout=POST_TIMEOUT).close()
+            except Exception as exc:
+                # WSL in NAT mode: relay through the Windows hook (relay.py).
+                if not (
+                    is_connection_refused(exc) and relay(relay_command(_config), "statusline", data)
+                ):
+                    raise
 
         def write(out: bytes) -> None:
             real = sys.__stdout__
@@ -159,6 +190,14 @@ try:
             from claude_office_hooks.manage import cli
 
             sys.exit(cli(sys.argv[1:]))
+
+        if len(sys.argv) > 1 and sys.argv[1] == "relay":
+            try:
+                code = _relay_main(sys.argv[2:])
+            except Exception as exc:
+                log_error(exc, "relay failed")
+                code = 1
+            sys.exit(code)
 
         if len(sys.argv) > 1 and sys.argv[1] == "statusline":
             try:

@@ -140,6 +140,11 @@ export interface InstallOptions {
   statusline: boolean;
   /** Overwrite an existing key (WSL distros: this app's backend enforces its own). */
   replaceKey?: boolean;
+  /**
+   * WSL distros: Linux path of the Windows hook to relay through when the
+   * app's loopback is unreachable (NAT networking). See hooks relay.py.
+   */
+  relay?: string;
 }
 
 export function installArgs(hookCmd: string, opts: InstallOptions): string[] {
@@ -148,6 +153,7 @@ export function installArgs(hookCmd: string, opts: InstallOptions): string[] {
   // empty arguments, which would make the next flag the URL.
   args.push(`--api-url=${opts.apiUrl}`);
   if (opts.replaceKey) args.push("--replace-api-key");
+  if (opts.relay !== undefined) args.push(`--relay=${opts.relay}`);
   if (opts.statusline) args.push("--statusline");
   args.push("--json");
   return args;

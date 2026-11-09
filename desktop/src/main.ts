@@ -164,6 +164,7 @@ const wslSyncKey = () => `${VERSION}:${cfg.port}`;
 async function syncDistros(wanted: string[], statusline: boolean): Promise<string[]> {
   if (!wslAvailable() || !PATHS.hookLinuxBundle) return [];
   const bundle = PATHS.hookLinuxBundle;
+  const windowsHook = deployedHook(); // the relay target for NAT-mode distros
   const errors: string[] = [];
   const connected = new Set(cfg.wslDistros);
   for (const distro of cfg.wslDistros.filter((d) => !wanted.includes(d))) {
@@ -176,7 +177,7 @@ async function syncDistros(wanted: string[], statusline: boolean): Promise<strin
   }
   for (const distro of wanted) {
     try {
-      await connectDistro(distro, bundle, VERSION, cfg.apiKey, cfg.port, statusline);
+      await connectDistro(distro, bundle, VERSION, cfg.apiKey, cfg.port, statusline, windowsHook);
       connected.add(distro);
     } catch (err) {
       errors.push(String((err as Error).message ?? err));
