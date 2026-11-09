@@ -97,6 +97,13 @@ const FOG_DENSITY = 0.0013;
 const fogAt = (d: number): number =>
   1 - Math.exp(-(FOG_DENSITY * d) * (FOG_DENSITY * d));
 const TERRAIN_SEED = 5;
+/**
+ * Mean colour (bake units, same gain as the far ground vertex colours) and
+ * opacity of the baked ground just beyond the live near ground; tuned so the
+ * cube reads as the live lawn's continuation (see bakeFar's veil).
+ */
+const NEAR_FLAT: RGB = [0.9, 1.04, 0.66];
+const NEAR_FLAT_A = 0.9;
 /** Bake render size per face (transient half-float RGBA: 6 faces x 8 B/px). */
 const CUBE_SIZE = 1536;
 /**
@@ -1656,21 +1663,31 @@ export class Exterior {
     // horizon band reads as distant farmland, not a flat disc.
     const R = 9000;
     const ground = buildGround(c.x, c.z, g, R);
-    // Haze veil over the near disc of the baked ground, matching the live
-    // fog (so the clipped near ground meets the cube without a seam), easing
-    // back to the bake's own aerial perspective further out.
+    // Near-field veil. The bake is one cube seen from 1.6 m but read from any
+    // eye height (2..60 m flying): a skybox has no parallax, so from altitude
+    // the cube's ground at 6..400 m radius (which the live ground covers at
+    // eye level) is what shows between the live ground's edge (200 m) and the
+    // horizon, magnified into the 0..15 degree band below it. Nothing of the
+    // cube below ~0.4 degrees is ever seen at eye level, so that band is free
+    // to be authored as "the landscape just beyond the live ground":
+    //  - a flat mean lawn colour (the 75 m field cells of the far texture
+    //    become huge slabs and stripes at the band's scale otherwise),
+    //  - hazed by exactly the live fog at the live edge (fogAt(200), held
+    //    constant inside it) and by the same EXP2 curve beyond, so colour and
+    //    fog density agree across the edge at every height,
+    //  - fading back to the true far ground by ~1.1 km (sub-pixel at eye
+    //    level, a sliver at the horizon from altitude).
     const veil = newBuf();
+    const VEIL_EDGE = 200; // live near-ground half extent
     const VEIL: [number, number][] = [
-      [0, 0],
-      [100, fogAt(100)],
-      [160, fogAt(160)],
-      [220, fogAt(220)],
-      [420, fogAt(220) * 0.85],
-      [1000, 0.04],
+      [0, NEAR_FLAT_A],
+      [400, NEAR_FLAT_A],
+      [1100, 0.04],
       [R, 0],
     ];
     const VSEG = 64;
-    for (const [rad, al] of VEIL)
+    for (const [rad, al] of VEIL) {
+      const f = fogAt(Math.max(rad, VEIL_EDGE));
       for (let k = 0; k <= VSEG; k++) {
         const a = (k / VSEG) * Math.PI * 2;
         veil.pos.push(
@@ -1678,9 +1695,15 @@ export class Exterior {
           g - 0.15,
           c.z + Math.cos(a) * rad,
         );
-        veil.col.push(HAZE.r, HAZE.g, HAZE.b, al);
+        veil.col.push(
+          NEAR_FLAT[0] + (HAZE.r - NEAR_FLAT[0]) * f,
+          NEAR_FLAT[1] + (HAZE.g - NEAR_FLAT[1]) * f,
+          NEAR_FLAT[2] + (HAZE.b - NEAR_FLAT[2]) * f,
+          al,
+        );
         veil.uv.push(0, 0);
       }
+    }
     for (let ring = 1; ring < VEIL.length; ring++)
       for (let k = 1; k <= VSEG; k++) {
         const i = ring * (VSEG + 1) + k;
