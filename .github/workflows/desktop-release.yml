@@ -1,7 +1,10 @@
 name: Desktop release
 
 # Builds the desktop app for Windows (NSIS .exe) and Linux (AppImage + .deb).
-# - workflow_dispatch: build only (artifacts on the run, nothing published)
+# - workflow_dispatch, or a push to a desktop-build/** branch: build only
+#   (installers attached to the run as artifacts, nothing published). The
+#   branch trigger exists because GitHub only allows dispatch for workflows
+#   already on the default branch:  git push origin HEAD:desktop-build/test
 # - push of a v* tag: build, then publish a DRAFT GitHub release with the
 #   installers and the electron-updater feeds (latest.yml / latest-linux.yml)
 #
@@ -12,6 +15,7 @@ name: Desktop release
 on:
   push:
     tags: ["v*"]
+    branches: ["desktop-build/**"]
   workflow_dispatch:
 
 permissions:
