@@ -160,6 +160,7 @@ export const SECTIONS: SectionDef[] = [
         format: "number",
       },
       { key: "iblShadows", kind: "toggle", impact: "high" },
+      { key: "skinScattering", kind: "toggle", impact: "high" },
     ],
   },
   {

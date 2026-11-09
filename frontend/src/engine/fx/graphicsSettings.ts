@@ -90,6 +90,7 @@ export interface GraphicsSettings {
   areaLights: boolean; // RectAreaLight ceiling panels vs emissive + point lights
   maxDynamicLights: number; // point/spot lights near the player (0–8)
   iblShadows: boolean; // experimental voxel-traced environment shadows
+  skinScattering: boolean; // character skin subsurface scattering (prepass)
 
   // ---- Reflections ----
   screenSpaceReflections: EffectQuality;
@@ -153,6 +154,7 @@ export const PRESETS: Record<
     areaLights: false,
     maxDynamicLights: 0,
     iblShadows: false,
+    skinScattering: false,
     screenSpaceReflections: "off",
     reflectionProbes: false,
     bloom: true,
@@ -160,7 +162,9 @@ export const PRESETS: Record<
     depthOfField: "off",
     colorGrading: false,
     filmGrain: false,
-    vignette: false,
+    // Free (part of the image-processing pass) and keeps low's framing /
+    // luminance with the other tiers (spawn: +7 % mean without it).
+    vignette: true,
     chromaticAberration: false,
     motionBlur: false,
     characterDetail: "low",
@@ -182,6 +186,7 @@ export const PRESETS: Record<
     areaLights: false,
     maxDynamicLights: 2,
     iblShadows: false,
+    skinScattering: false,
     screenSpaceReflections: "off",
     reflectionProbes: true,
     bloom: true,
@@ -208,6 +213,7 @@ export const PRESETS: Record<
     areaLights: true,
     maxDynamicLights: 4,
     iblShadows: false,
+    skinScattering: false,
     // Off (WS5b): SSR only traces surfaces with reflectivity > 0.25, i.e.
     // metals, and the zone probes already reflect the room in them; the
     // pass changed < 0.1 % of the pixels by > 8 levels (dock A/B) and was
@@ -238,6 +244,9 @@ export const PRESETS: Record<
     areaLights: true,
     maxDynamicLights: 8,
     iblShadows: true,
+    // Screen-space skin scattering: a prepass (MRT) for the whole scene, so
+    // ultra only.
+    skinScattering: true,
     screenSpaceReflections: "high",
     reflectionProbes: true,
     bloom: true,

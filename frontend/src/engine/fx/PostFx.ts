@@ -45,6 +45,7 @@ import {
   type FxPlan,
   type StageName,
 } from "@/engine/fx/fxPlan";
+import { look } from "@/engine/fx/look";
 
 interface Handle {
   dispose(): void;
@@ -62,8 +63,10 @@ function makeColorCurves(): ColorCurves {
   // density in the mids.
   const c = new ColorCurves();
   c.globalSaturation = 6;
+  c.globalHue = 35;
+  c.globalDensity = look("warmth");
   c.shadowsHue = 215;
-  c.shadowsDensity = 22;
+  c.shadowsDensity = look("shadowCool");
   c.shadowsSaturation = 14;
   c.shadowsExposure = -4;
   c.highlightsHue = 38;
@@ -591,7 +594,7 @@ export class PostFx {
     const ip = this.scene.imageProcessingConfiguration;
     ip.toneMappingEnabled = true;
     ip.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
-    ip.exposure = 1.05;
+    ip.exposure = look("exposure");
     ip.vignetteWeight = 0.9; // a lens falloff, not an iris
     ip.vignetteStretch = 0.4;
     ip.vignetteColor = new Color4(0.05, 0.04, 0.03, 0);
@@ -634,7 +637,9 @@ export class PostFx {
         const ipc = this.scene.imageProcessingConfiguration;
         ipc.vignetteEnabled = pl.vignette;
         ipc.colorCurvesEnabled = pl.colorGrading;
-        ipc.contrast = pl.colorGrading ? 1.16 : 1.1;
+        ipc.contrast = pl.colorGrading
+          ? look("contrast")
+          : look("contrastNoGrade");
         if (pl.sharpenOn) p.sharpen.edgeAmount = pl.sharpen * 0.72;
       },
     };

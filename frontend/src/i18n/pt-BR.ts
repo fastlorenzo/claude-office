@@ -558,6 +558,9 @@ const ptBR: Record<TranslationKey, string> = {
   "gfx.s.iblShadows": "Sombras de ambiente rastreadas",
   "gfx.s.iblShadows.d":
     "Sombras experimentais rastreadas por voxels. Muito pesadas.",
+  "gfx.s.skinScattering": "Dispersão na pele",
+  "gfx.s.skinScattering.d":
+    "Luz suave através da pele dos personagens (dispersão subsuperficial em tela). Custa um render target completo extra.",
   "gfx.s.screenSpaceReflections": "Reflexos em espaço de tela",
   "gfx.s.screenSpaceReflections.d":
     "Pisos e vidros brilhantes refletem a cena. Caro no alto.",

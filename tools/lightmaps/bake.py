@@ -64,6 +64,18 @@ MAX_IRRADIANCE = 64.0
 PACK_SHAPE = os.environ.get("LIGHTMAP_PACK_SHAPE", "AABB")
 
 
+# Runtime look levels per set (WS-E photoreal look; see fx/look.ts):
+# `gain` multiplies the baked irradiance, `iblScale` is the fraction of the
+# realtime IBL diffuse kept on baked surfaces. Used for a set that is not in
+# the manifest yet; an existing manifest's values are preserved on rebake.
+LOOK_LEVELS = {
+    "modules": {"gain": 1.5, "iblScale": 0.2},
+    "lobby": {"gain": 1.1, "iblScale": 0.25},
+    "entrance": {"gain": 1.15, "iblScale": 0.25},
+    "control": {"gain": 0.9, "iblScale": 0.25},
+}
+
+
 def log(*a):
     print("[bake]", *a, flush=True)
 
@@ -774,12 +786,20 @@ def main():
                 pass
     man["version"] = 1
     man.setdefault("sets", {})
+    # Look levels (runtime gain / iblScale) are tuned by hand against the
+    # references: a rebake keeps the manifest's current values and only falls
+    # back to LOOK_LEVELS for a set baked for the first time.
+    prev = man["sets"].get(setn) or {}
+    levels = dict(LOOK_LEVELS.get(setn, {"gain": 1.0}))
+    for k in ("gain", "iblScale"):
+        if isinstance(prev.get(k), (int, float)):
+            levels[k] = prev[k]
     man["sets"][setn] = {
         "image": png_name,
         "encoding": "rgbd",
         "rgbdGamma": GAMMA,
         "size": size,
-        "gain": 1.0,
+        **levels,
         "sun": bool(data.get("sun")),
         "frame": data["frame"],
         "origin": data["origin"],

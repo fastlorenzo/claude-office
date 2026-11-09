@@ -33,6 +33,7 @@ import {
   type FxPlan,
 } from "@/engine/fx/fxPlan";
 import { QualityGovernor } from "@/engine/fx/Quality";
+import { setSkinScattering } from "@/engine/characters/characterMaterials";
 import {
   nearestPreset,
   type GraphicsSettings,
@@ -430,6 +431,17 @@ export class GraphicsController {
     }
     if (d.has("textureQuality") && typeof M.setTextureQuality === "function")
       M.setTextureQuality(plan.textureQuality);
+
+    if (d.has("skinScattering") && (prev || plan.skinScattering)) {
+      // The prepass changes every material's outputs: thaw the frozen ones
+      // so they recompile against it (else they stop drawing).
+      if (setSkinScattering(this.t.scene, plan.skinScattering))
+        for (const m of this.t.scene.materials)
+          if (m.isFrozen) {
+            m.unfreeze();
+            m.freeze();
+          }
+    }
 
     if (d.has("iblShadows") && plan.iblShadows && !this.iblNoted) {
       this.iblNoted = true;

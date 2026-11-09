@@ -69,6 +69,7 @@ export interface FxPlan {
   anisotropy: number;
   textureQuality: "low" | "medium" | "high";
   iblShadows: boolean;
+  skinScattering: boolean;
   characterDetail: GraphicsSettings["characterDetail"];
   characterCast: GraphicsSettings["characterCast"];
   liveScreens: GraphicsSettings["liveScreens"];
@@ -223,6 +224,7 @@ export function planFx(s0: GraphicsSettings, opts: PlanOptions = {}): FxPlan {
     anisotropy: s.anisotropy,
     textureQuality: s.textureQuality,
     iblShadows: s.iblShadows,
+    skinScattering: s.skinScattering,
     characterDetail: s.characterDetail,
     characterCast: s.characterCast,
     liveScreens: s.liveScreens,

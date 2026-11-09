@@ -548,6 +548,9 @@ const en = {
   "gfx.s.iblShadows": "Traced env. shadows",
   "gfx.s.iblShadows.d":
     "Experimental voxel-traced shadows from the environment. Very heavy.",
+  "gfx.s.skinScattering": "Skin scattering",
+  "gfx.s.skinScattering.d":
+    "Soft light through character skin (screen-space subsurface scattering). Costs a full extra render target.",
   "gfx.s.screenSpaceReflections": "Screen-space reflections",
   "gfx.s.screenSpaceReflections.d":
     "Glossy floors and glass reflect the scene. Costly at high.",

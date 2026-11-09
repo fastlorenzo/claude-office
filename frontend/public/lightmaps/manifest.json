@@ -6,7 +6,8 @@
    "encoding": "rgbd",
    "rgbdGamma": 2.2,
    "size": 2048,
-   "gain": 1.0,
+   "gain": 0.9,
+   "iblScale": 0.25,
    "sun": false,
    "frame": "control-local",
    "origin": [
@@ -313,7 +314,8 @@
    "encoding": "rgbd",
    "rgbdGamma": 2.2,
    "size": 2048,
-   "gain": 1.0,
+   "gain": 1.15,
+   "iblScale": 0.25,
    "sun": true,
    "frame": "world",
    "origin": [
@@ -380,7 +382,8 @@
    "encoding": "rgbd",
    "rgbdGamma": 2.2,
    "size": 2048,
-   "gain": 1.0,
+   "gain": 1.1,
+   "iblScale": 0.25,
    "sun": true,
    "frame": "world",
    "origin": [
@@ -472,7 +475,8 @@
    "encoding": "rgbd",
    "rgbdGamma": 2.2,
    "size": 2048,
-   "gain": 1.0,
+   "gain": 1.5,
+   "iblScale": 0.2,
    "sun": false,
    "frame": "module-local",
    "origin": [

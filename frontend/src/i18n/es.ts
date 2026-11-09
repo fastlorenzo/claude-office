@@ -559,6 +559,9 @@ const es: Record<TranslationKey, string> = {
   "gfx.s.iblShadows": "Sombras de entorno trazadas",
   "gfx.s.iblShadows.d":
     "Sombras experimentales trazadas por vóxeles. Muy pesadas.",
+  "gfx.s.skinScattering": "Dispersión en la piel",
+  "gfx.s.skinScattering.d":
+    "Luz suave a través de la piel de los personajes (dispersión subsuperficial en pantalla). Cuesta un render target completo extra.",
   "gfx.s.screenSpaceReflections": "Reflejos en espacio de pantalla",
   "gfx.s.screenSpaceReflections.d":
     "Suelos y vidrios brillantes reflejan la escena. Costoso en alto.",

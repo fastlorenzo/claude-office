@@ -76,6 +76,7 @@ import {
 import { ASSET_MANIFEST, hdriPath } from "@/engine/assets/manifest";
 import { lin } from "@/engine/materials/Materials";
 import { refreezeStale } from "@/engine/materials/staleEffects";
+import { look } from "@/engine/fx/look";
 
 /** Safety-net period of the stale frozen-effect scan (ms). */
 const STALE_SCAN_MS = 2000;
@@ -158,11 +159,36 @@ const STATIC_DEBOUNCE_MS = 1500;
 const STATIC_READY_TIMEOUT_MS = 6000;
 /** Baked sky brightness relative to the bake (windows read as daylight). */
 const SKY_GAIN = 1.6;
-/** Overhead key (contact shadows) and hemispheric bounce, fixtures on. */
-const KEY_ON = 0.8;
-const FILL_ON = 0.25;
+/** IBL level without the reflection probes (of LOOK env), see applyEnvIntensity. */
+const NO_PROBE_ENV = 0.65;
+/** Ambient compensation factors (of LOOK fill / key), see compensateAmbient. */
+const LOW_FILL = 1.2;
+const LOW_KEY = 0.75;
+const NO_SUN_FILL = 1.6;
+const NO_FIXTURE_FILL = 1.8;
+/** Clustered fixture lights per `maxDynamicLights` step (realtime / baked). */
+const POOL_PER_LIGHT = 20;
+const BAKED_POOL_PER_LIGHT = 10;
 /** Per-fixture intensity cap without shadows / AO (no hard hotspots). */
 const LOW_TIER_LIGHT_CAP = 3.5;
+
+/**
+ * Fixture lights for a `maxDynamicLights` budget: clustered, 20 luminaires
+ * per step near the player (cap 160); the forward fallback hops min(n, 4).
+ * Lightmapped architecture takes no fixture light (bakeExclude): the pool
+ * then only lights furniture, characters and the realtime hall around the
+ * player, so half as many luminaires suffice.
+ */
+export function fixturePoolSize(
+  maxLights: number,
+  clustered: boolean,
+  baked: boolean,
+): number {
+  if (maxLights <= 0) return 0;
+  if (!clustered) return Math.min(4, maxLights);
+  const per = baked ? BAKED_POOL_PER_LIGHT : POOL_PER_LIGHT;
+  return Math.min(160, maxLights * per);
+}
 
 export class Lighting {
   /** Interior HDRI (IBL). */
@@ -235,14 +261,14 @@ export class Lighting {
       scene,
     );
     this.key.position = new Vector3(10, 60, 10);
-    this.key.intensity = KEY_ON;
+    this.key.intensity = look("key");
     this.key.diffuse = lin("#FFF1E2");
     this.key.specular = lin("#FFF1E2").scale(0.25);
 
     // Bounce: light coming *up* from the floors lights the ceilings and the
     // undersides of things (no real GI) — the ground colour does the work.
     this.fill = new HemisphericLight("fill", new Vector3(0, 1, 0), scene);
-    this.fill.intensity = FILL_ON;
+    this.fill.intensity = look("fill");
     this.fill.diffuse = lin("#DCE6F2");
     this.fill.groundColor = lin("#E8DCCB");
     this.fill.specular = Color3.Black();
@@ -349,7 +375,7 @@ export class Lighting {
     }
     this.env = tex;
     this.scene.environmentTexture = tex;
-    this.scene.environmentIntensity = 0.42;
+    this.applyEnvIntensity();
     tex.rotationY = Math.PI * 0.35;
     return true;
   }
@@ -400,6 +426,18 @@ export class Lighting {
     box.alwaysSelectAsActiveMesh = true;
     mat.freeze();
     this.skybox = box;
+  }
+
+  /**
+   * Interior IBL level. Without the zone probes (low tier) the glossy floors
+   * and glass reflect this generic HDRI instead of the room: it reads much
+   * brighter than the probe (lobby terrazzo + glass strip +4 % mean at the
+   * spawn), so it is dimmed then (low within 15 % of high, WS5).
+   */
+  private applyEnvIntensity(): void {
+    if (!this.env) return;
+    this.scene.environmentIntensity =
+      look("env") * (this.probesOn ? 1 : NO_PROBE_ENV);
   }
 
   private useFallbackAmbient(): void {
@@ -796,6 +834,7 @@ export class Lighting {
    */
   bakeExclude(meshes: AbstractMesh[], opts: { sun: boolean }): void {
     if (meshes.length === 0) return;
+    const first = this.baked.size === 0;
     for (const m of meshes) this.baked.add(m);
     const exclude = (l: Light) => {
       const list = l.excludedMeshes.filter((m) => !m.isDisposed());
@@ -809,6 +848,11 @@ export class Lighting {
     for (const l of this.zoneLights) this.includeZone(l);
     for (const m of [...this.baked]) if (m.isDisposed()) this.baked.delete(m);
     this.lightsChanged = true;
+    if (first) {
+      // Smaller fixture pool and the baked-aware ambient (see poolSize).
+      this.resizePool();
+      this.compensateAmbient();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -831,10 +875,7 @@ export class Lighting {
   }
 
   private poolSize(): number {
-    if (this.maxLights <= 0) return 0;
-    return this.clustered
-      ? Math.min(160, this.maxLights * 20)
-      : Math.min(4, this.maxLights);
+    return fixturePoolSize(this.maxLights, this.clustered, this.baked.size > 0);
   }
 
   private resizePool(): void {
@@ -899,16 +940,21 @@ export class Lighting {
   private compensateAmbient(): void {
     const noFixtures = this.maxLights === 0 || this.poolIntensity === 0;
     const noSun = this.configured && this.shadowQuality === "off";
-    let fill = FILL_ON;
-    let key = KEY_ON;
+    const fill0 = look("fill");
+    const key0 = look("key");
+    let fill = fill0;
+    let key = key0;
     if (noSun && noFixtures) {
       // The low tier. Since the sun map occludes properly (WS5b) the high
       // spawn lost its through-the-ceiling daylight (mean 109.8 -> 94.6),
-      // and 0.62 / 0.82 left low 32 % brighter (124.7); target within 15 %.
-      fill = 0.3;
-      key = 0.6;
-    } else if (noSun) fill = Math.max(fill, 0.4);
-    else if (noFixtures) fill = Math.max(fill, 0.45);
+      // and 0.62 / 0.82 left low 32 % brighter (124.7); target within 15 %
+      // (fill 0.3 / key 0.6 at the old 0.25 / 0.8 levels). With lightmaps
+      // the baked surfaces get neither fill nor fixtures at any tier: the
+      // key stays, so baked rooms look the same at low as at high.
+      fill = fill0 * LOW_FILL;
+      key = this.baked.size > 0 ? key0 : key0 * LOW_KEY;
+    } else if (noSun) fill = Math.max(fill, fill0 * NO_SUN_FILL);
+    else if (noFixtures) fill = Math.max(fill, fill0 * NO_FIXTURE_FILL);
     this.fill.intensity = fill;
     this.key.intensity = key;
   }
@@ -1163,6 +1209,7 @@ export class Lighting {
   setReflectionProbes(on: boolean): void {
     if (on === this.probesOn) return;
     this.probesOn = on;
+    this.applyEnvIntensity();
     for (const [name, spec] of this.probes) {
       if (on) this.buildProbe(name, spec);
       else this.releaseProbe(spec);

@@ -236,8 +236,11 @@ describe("lighting state is a pure function of the plan (WS5 L1, P4)", () => {
     lighting.setPoolIntensity(0);
     const low = [lighting.fill.intensity, lighting.key.intensity];
     // Low tier (no sun, no fixtures): its own ambient, within 15 % of high
-    // at the spawn (WS5b perf-gate luminance).
-    expect(low).toEqual([0.3, 0.6]);
+    // at the spawn (WS5b perf-gate luminance): 1.2 x fill, 0.75 x key of the
+    // LOOK levels (no lightmaps in this scene).
+    const { LOOK } = await import("@/engine/fx/look");
+    expect(low[0]).toBeCloseTo(LOOK.fill * 1.2, 6);
+    expect(low[1]).toBeCloseTo(LOOK.key * 0.75, 6);
     lighting.setShadowQuality("high");
     lighting.setMaxDynamicLights(4);
     lighting.setPoolIntensity(1);
