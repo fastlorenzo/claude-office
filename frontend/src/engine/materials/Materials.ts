@@ -48,6 +48,7 @@
 import {
   Color3,
   Constants,
+  configureKtx2,
   Mesh,
   PBRMaterial,
   Scene,
@@ -60,6 +61,7 @@ import {
   type Observer,
 } from "@/engine/babylon";
 import {
+  fetchBytes,
   fetchImage,
   neutralPixel,
   type FetchImageOptions,
@@ -71,6 +73,9 @@ import {
   material2Path,
   MATERIAL_CANDIDATES,
   textureEdge,
+  ktx2Edge,
+  type Ktx2Manifest,
+  type Ktx2Tier,
   type MaterialRole,
   type PbrMaterialAsset,
 } from "@/engine/assets/materials2";
@@ -673,8 +678,19 @@ interface TexSlot {
   kind: MapKind;
   srgb: boolean;
   scale: number;
-  /** Shipped edge of the file (px). */
+  /** Set id (folder under materials2/). */
+  id: string;
+  /** Shipped edge of the WebP file (px). */
   native: number;
+  /** KTX2 files (hi / lo) + their edges; null once unusable for this slot. */
+  ktx2: {
+    files: Record<Ktx2Tier, string>;
+    edges: Record<Ktx2Tier, number>;
+  } | null;
+  /** What the latest load asked for ("<file>@<edge>"). */
+  wantKey: string;
+  /** What is installed ("<file>@<edge>"). */
+  srcKey: string;
   /** Neutral pixel shown until (and whenever) the real map is missing. */
   neutral: Uint8Array;
   /** Load generation: only the latest request may install its result. */
@@ -715,6 +731,16 @@ export class Materials {
   private quality: TextureQuality = "high";
   private detail: BaseTexture | null = null;
   private available: Set<string> | null = null;
+  /** materials2 manifest `ktx2` section (null: not loaded / unsupported). */
+  private ktx2: Ktx2Manifest | null = null;
+  /**
+   * KTX2 mode: row order of an uploaded map is the file's (top row first),
+   * so the slot textures run vScale < 0 and normal maps flip their green
+   * channel back (invertNormalMapY off). Decided once, before any slot
+   * exists; WebP maps then decode unflipped to match.
+   */
+  private useKtx2 = false;
+  private ktx2Failures = 0;
 
   constructor(
     private readonly scene: Scene,
@@ -1067,6 +1093,8 @@ export class Materials {
       })),
     );
     this.available = new Set(ok.filter((r) => r.ok).map((r) => r.id));
+    this.ktx2 = await this.loadKtx2Manifest();
+    this.useKtx2 = this.ktx2 !== null;
     for (const key of Object.keys(SURFACES) as SurfaceKey[]) {
       const spec = SURFACES[key];
       if (!spec.role) {
@@ -1081,6 +1109,19 @@ export class Materials {
       if (mat) this.applyTextures(mat, spec);
     }
     await this.whenTexturesReady();
+  }
+
+  /** The materials2 manifest's `ktx2` section, or null (no KTX2 here). */
+  private async loadKtx2Manifest(): Promise<Ktx2Manifest | null> {
+    if (!configureKtx2()) return null;
+    try {
+      const res = await fetch(this.url("manifest.json"));
+      if (!res.ok) return null;
+      const json = (await res.json()) as { ktx2?: Ktx2Manifest };
+      return json.ktx2 && Object.keys(json.ktx2).length > 0 ? json.ktx2 : null;
+    } catch {
+      return null;
+    }
   }
 
   private url(file: string): string {
@@ -1120,7 +1161,8 @@ export class Materials {
     } else bump = this.tex(asset, "normal", false, scale, level);
     mat.bumpTexture = bump;
     // ambientCG ships OpenGL (+Y) normal maps; Babylon's left-handed frame wants DirectX.
-    mat.invertNormalMapY = true;
+    // (KTX2 mode: the slot's vScale < 0 already reverses the frame.)
+    mat.invertNormalMapY = spec.normal === "sandwichPanel" || !this.useKtx2;
     mat.metallicTexture = this.tex(asset, "orm", false, scale);
     mat.useAmbientOcclusionFromMetallicTextureRed = true;
     mat.useRoughnessFromMetallicTextureGreen = !spec.flatRough;
@@ -1167,14 +1209,15 @@ export class Materials {
     );
     const tex = new Texture(null, this.scene, {
       noMipmap: false,
-      invertY: true,
+      invertY: !this.useKtx2,
       samplingMode: Texture.TRILINEAR_SAMPLINGMODE,
       gammaSpace: srgb,
       internalTexture: this.neutralInternal(neutral),
     });
     tex.name = `mat2:${file}`;
     tex.uScale = scale;
-    tex.vScale = scale;
+    tex.vScale = this.useKtx2 ? -scale : scale;
+    tex.vOffset = this.useKtx2 ? 1 : 0;
     tex.level = lv;
     tex.anisotropicFilteringLevel = this.anisotropy;
     tex.wrapU = Texture.WRAP_ADDRESSMODE;
@@ -1186,7 +1229,11 @@ export class Materials {
       kind,
       srgb,
       scale,
+      id: asset.id,
       native: textureEdge(asset, kind),
+      ktx2: this.ktx2Files(asset, kind),
+      wantKey: "",
+      srcKey: "",
       neutral,
       gen: 0,
       edge: 0,
@@ -1196,6 +1243,21 @@ export class Materials {
     this.slots.set(key, slot);
     this.load(slot);
     return tex;
+  }
+
+  private ktx2Files(asset: PbrMaterialAsset, kind: MapKind): TexSlot["ktx2"] {
+    const entry = this.ktx2?.[asset.id]?.[kind];
+    if (!this.useKtx2 || !entry?.hi || !entry.lo) return null;
+    return {
+      files: {
+        hi: `${asset.id}/${entry.hi}`,
+        lo: `${asset.id}/${entry.lo}`,
+      },
+      edges: {
+        hi: ktx2Edge(asset, kind, "hi"),
+        lo: ktx2Edge(asset, kind, "lo"),
+      },
+    };
   }
 
   /** A 1x1 internal texture holding `px` (ready at once, rebuilt from data). */
@@ -1215,7 +1277,7 @@ export class Materials {
     return it;
   }
 
-  /** Edge (px) the current quality wants for a slot's map. */
+  /** Edge (px) the current quality wants for a slot's WebP map. */
   private edgeFor(slot: TexSlot): number {
     const cap = MAX_SIZE[this.quality];
     const max = slot.kind === "orm" ? Math.max(128, cap / 2) : cap;
@@ -1223,27 +1285,73 @@ export class Materials {
   }
 
   /**
+   * What the current quality wants for a slot: the KTX2 tier (high: hi,
+   * medium: lo) or the WebP map capped by MAX_SIZE (also the low tier: 256
+   * texels cost less resident than the smallest KTX2 file, and the fallback).
+   */
+  private planFor(slot: TexSlot): {
+    ktx2: Ktx2Tier | null;
+    file: string;
+    edge: number;
+    key: string;
+  } {
+    const tier: Ktx2Tier | null =
+      slot.ktx2 && this.ktx2Failures < 3 && this.quality !== "low"
+        ? this.quality === "high"
+          ? "hi"
+          : "lo"
+        : null;
+    if (tier && slot.ktx2) {
+      const file = slot.ktx2.files[tier];
+      const edge = slot.ktx2.edges[tier];
+      return { ktx2: tier, file, edge, key: `${file}@${edge}` };
+    }
+    const edge = this.edgeFor(slot);
+    return { ktx2: null, file: slot.file, edge, key: `${slot.file}@${edge}` };
+  }
+
+  /**
    * Load the slot's map at the current quality and install it in place. The
    * texture keeps showing what it has (neutral or the previous quality) until
-   * the new map is uploaded; a final failure keeps it and is reported.
+   * the new map is uploaded; a final failure keeps it and is reported. A
+   * KTX2 failure (missing file, transcoder error) falls back to the WebP map
+   * for that slot.
    */
   private load(slot: TexSlot): Promise<void> {
     const gen = ++slot.gen;
-    const edge = this.edgeFor(slot);
-    slot.want = edge;
-    const url = this.url(slot.file);
-    const full = edge >= slot.native;
+    const plan = this.planFor(slot);
+    slot.want = plan.edge;
+    slot.wantKey = plan.key;
+    const url = this.url(plan.file);
+    const full = plan.edge >= slot.native;
     // Distinct cache keys per edge: Babylon shares internal textures by URL.
-    const key = full ? url : `${url}#${edge}`;
+    const key = plan.ktx2 || full ? url : `${url}#${plan.edge}`;
     const stale = () => this.disposed || gen !== slot.gen;
-    const p = this.decode(url, key, full ? undefined : edge)
-      .then((bmp) => (stale() ? undefined : this.upload(slot, key, bmp, gen)))
+    const p = this.decode(
+      url,
+      key,
+      plan.ktx2 ? "ktx2" : full ? undefined : plan.edge,
+    )
+      .then((data) =>
+        stale() ? undefined : this.upload(slot, key, data, gen, !!plan.ktx2),
+      )
       .then(
         () => {
           if (!stale()) noteTextureRecovered(url);
         },
         (err: unknown) => {
-          if (!stale()) noteTextureFailure(url, err);
+          if (stale()) return;
+          if (plan.ktx2) {
+            // Never leave the surface on the neutral map: try the WebP.
+            this.ktx2Failures += 1;
+            slot.ktx2 = null;
+            console.warn(
+              `[materials] KTX2 ${url} failed, falling back to WebP`,
+              err,
+            );
+            return this.load(slot);
+          }
+          noteTextureFailure(url, err);
         },
       )
       .finally(() => {
@@ -1254,22 +1362,32 @@ export class Materials {
   }
 
   /** One fetch + decode per (url, edge) in flight, shared by its slots. */
-  private readonly decoding = new Map<string, Promise<ImageBitmap>>();
+  private readonly decoding = new Map<
+    string,
+    Promise<ImageBitmap | ArrayBuffer>
+  >();
 
   private decode(
     url: string,
     key: string,
-    edge: number | undefined,
-  ): Promise<ImageBitmap> {
+    edge: number | "ktx2" | undefined,
+  ): Promise<ImageBitmap | ArrayBuffer> {
     const hit = this.decoding.get(key);
     if (hit) return hit;
     // Shared by every slot of this (url, edge): only disposal cancels it.
-    const p: Promise<ImageBitmap> = fetchImage(url, {
-      edge,
-      delays: this.loaderOptions.delays,
-      cancelled: () => this.disposed,
-    }).finally(() => {
-      // Keep the entry until the slots of this tick have taken the bitmap.
+    const cancelled = () => this.disposed;
+    const p: Promise<ImageBitmap | ArrayBuffer> = (
+      edge === "ktx2"
+        ? // No retries: a failure falls back to the (retrying) WebP path.
+          fetchBytes(url, { delays: [], cancelled })
+        : fetchImage(url, {
+            edge,
+            flipY: !this.useKtx2,
+            delays: this.loaderOptions.delays,
+            cancelled,
+          })
+    ).finally(() => {
+      // Keep the entry until the slots of this tick have taken the data.
       setTimeout(() => {
         if (this.decoding.get(key) === p) this.decoding.delete(key);
       }, 0);
@@ -1278,12 +1396,13 @@ export class Materials {
     return p;
   }
 
-  /** Upload a decoded map and swap it into the slot's texture. */
+  /** Upload a decoded map (or KTX2 file) and swap it into the slot's texture. */
   private upload(
     slot: TexSlot,
     key: string,
-    bmp: ImageBitmap,
+    data: ImageBitmap | ArrayBuffer,
     gen: number,
+    isKtx2: boolean,
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       // Babylon may call onLoad / onError synchronously from the constructor
@@ -1311,10 +1430,12 @@ export class Materials {
       }, 20000);
       probe = new Texture(key, this.scene, {
         noMipmap: false,
-        invertY: true,
+        invertY: !this.useKtx2,
         samplingMode: Texture.TRILINEAR_SAMPLINGMODE,
         gammaSpace: slot.srgb,
-        buffer: bmp,
+        // A copy per slot: the transcoder takes (transfers) the bytes it gets.
+        buffer: isKtx2 ? (data as ArrayBuffer).slice(0) : (data as ImageBitmap),
+        forcedExtension: isKtx2 ? ".ktx2" : undefined,
         onLoad: () => {
           loaded = true;
           settle();
@@ -1344,6 +1465,7 @@ export class Materials {
     // internal texture, this drops the probe's extra reference instead).
     prev?.dispose();
     slot.edge = slot.want;
+    slot.srcKey = slot.wantKey;
   }
 
   /**
@@ -1370,7 +1492,7 @@ export class Materials {
   private reloadAll(force: boolean): void {
     if (this.disposed) return;
     for (const slot of this.slots.values())
-      if (force || this.edgeFor(slot) !== slot.want) this.load(slot);
+      if (force || this.planFor(slot).key !== slot.wantKey) this.load(slot);
   }
 
   private whenTexturesReady(): Promise<void> {

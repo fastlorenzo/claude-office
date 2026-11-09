@@ -15,6 +15,8 @@ interface TexLike {
   is3D?: boolean;
   is2DArray?: boolean;
   generateMipMaps: boolean;
+  /** Levels of an uploaded chain (KTX2 ships its own mips). */
+  mipLevelCount?: number;
   type: number;
   format: number;
 }
@@ -32,6 +34,56 @@ function bytesPerChannel(type: number): number {
     default:
       return 1;
   }
+}
+
+/**
+ * Bits per pixel of a compressed internal format (the GL enum Babylon stores
+ * in `texture.format` for KTX2 uploads), or 0 when `format` is not one.
+ * Block formats are fixed-rate: 128 bits per block.
+ */
+export function compressedBitsPerPixel(format: number): number {
+  switch (format) {
+    // BC1 / DXT1, ETC1, ETC2 RGB(A1), EAC R11, PVRTC 4bpp
+    case 33776:
+    case 33777:
+    case 35916:
+    case 35917:
+    case 36196:
+    case 37488:
+    case 37489:
+    case 37492:
+    case 37493:
+    case 37494:
+    case 37495:
+    case 35840:
+    case 35842:
+      return 4;
+    // PVRTC 2bpp
+    case 35841:
+    case 35843:
+      return 2;
+    // BC2/3 DXT3/5, BC6H, BC7, ETC2 RGBA8, EAC RG11
+    case 33778:
+    case 33779:
+    case 35918:
+    case 35919:
+    case 36492:
+    case 36493:
+    case 36494:
+    case 36495:
+    case 37490:
+    case 37491:
+    case 37496:
+    case 37497:
+      return 8;
+  }
+  // ASTC (linear 37808..37821, sRGB 37840..37853): 128 bits / block texels.
+  const astc = format >= 37840 ? format - 37840 : format - 37808;
+  if (astc >= 0 && astc <= 13 && (format <= 37821 || format >= 37840)) {
+    const blocks = [16, 20, 25, 30, 36, 40, 48, 64, 50, 60, 80, 100, 120, 144];
+    return 128 / blocks[astc];
+  }
+  return 0;
 }
 
 function channels(format: number): number {
@@ -59,8 +111,11 @@ export function textureBytes(t: TexLike): number {
   const depthFormat =
     t.format >= Constants.TEXTUREFORMAT_DEPTH24_STENCIL8 &&
     t.format <= Constants.TEXTUREFORMAT_DEPTH32FLOAT_STENCIL8;
+  const mips = t.generateMipMaps || (t.mipLevelCount ?? 1) > 1;
+  const compressed = compressedBitsPerPixel(t.format);
+  if (compressed > 0) return (px * compressed * (mips ? 4 / 3 : 1)) / 8;
   const bpp = depthFormat ? 4 : bytesPerChannel(t.type) * channels(t.format);
-  return px * bpp * (t.generateMipMaps ? 4 / 3 : 1);
+  return px * bpp * (mips ? 4 / 3 : 1);
 }
 
 /** Resident texture memory in MB (rounded to 0.1). */

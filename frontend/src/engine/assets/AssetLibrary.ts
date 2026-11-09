@@ -17,6 +17,7 @@
  * Collider proxies (invisible boxes / cylinders) come from `Colliders`.
  */
 import {
+  configureKtx2,
   LoadAssetContainerAsync,
   Matrix,
   Mesh,
@@ -26,10 +27,12 @@ import {
   TransformNode,
   Vector3,
   type AbstractMesh,
+  type AssetContainer,
 } from "@/engine/babylon";
 import {
   ASSET_MANIFEST,
   modelPath,
+  modelKtx2Path,
   type ModelAsset,
   type ModelRole,
 } from "@/engine/assets/manifest";
@@ -280,21 +283,45 @@ export class AssetLibrary {
     return this.loading;
   }
 
+  /**
+   * The prop's container: the KTX2 variant (GPU-compressed textures) when
+   * KTX2 is usable and the file exists, else (or when it fails to load) the
+   * plain glTF. Null when no file exists (procedural fallback).
+   */
+  private async loadModelContainer(
+    asset: ModelAsset,
+  ): Promise<AssetContainer | null> {
+    const load = (url: string) => {
+      const slash = url.lastIndexOf("/");
+      return LoadAssetContainerAsync(url.slice(slash + 1), this.scene, {
+        rootUrl: url.slice(0, slash + 1),
+      });
+    };
+    const exists = async (url: string) => {
+      const head = await fetch(url, { method: "HEAD" });
+      return (
+        head.ok && !(head.headers.get("content-type") ?? "").includes("html")
+      );
+    };
+    if (configureKtx2()) {
+      const ktx = modelKtx2Path(asset.id, this.assetBase);
+      try {
+        if (await exists(ktx)) return await load(ktx);
+      } catch (err) {
+        if (this.scene.isDisposed) return null;
+        console.warn(`[assets] ${asset.id}: KTX2 failed, using glTF`, err);
+      }
+    }
+    const url = modelPath(asset.id, this.assetBase);
+    return (await fetch(url, { method: "HEAD" })).ok ? await load(url) : null;
+  }
+
   private async loadOne(asset: ModelAsset): Promise<void> {
     let parts: Mesh[] | null = null;
     let anchor: PotAnchor | null = null;
-    const url = modelPath(asset.id, this.assetBase);
-    const slash = url.lastIndexOf("/");
     try {
-      const head = await fetch(url, { method: "HEAD" });
-      if (head.ok) {
-        const container = await LoadAssetContainerAsync(
-          url.slice(slash + 1),
-          this.scene,
-          {
-            rootUrl: url.slice(0, slash + 1),
-          },
-        );
+      const container = await this.loadModelContainer(asset);
+      if (container) {
         if (this.scene.isDisposed) {
           container.dispose();
           return;

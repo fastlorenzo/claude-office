@@ -98,6 +98,11 @@ export function modelPath(id: string, base = ASSET_BASE): string {
   return `${base}/models/${id}/${id}_1k.gltf`;
 }
 
+/** KTX2 (Basis) variant of a prop: one GLB, KHR_texture_basisu textures. */
+export function modelKtx2Path(id: string, base = ASSET_BASE): string {
+  return `${base}/models/${id}/${id}.ktx2.glb`;
+}
+
 export function hdriPath(
   id: string,
   base = ASSET_BASE,

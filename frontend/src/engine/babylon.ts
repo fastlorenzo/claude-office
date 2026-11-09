@@ -25,6 +25,7 @@ import "@babylonjs/core/Rendering/depthRendererSceneComponent";
 import "@babylonjs/core/Rendering/outlineRenderer";
 import "@babylonjs/core/Materials/Textures/Loaders/hdrTextureLoader";
 import "@babylonjs/core/Materials/Textures/Loaders/envTextureLoader";
+import "@babylonjs/core/Materials/Textures/Loaders/ktxTextureLoader"; // .ktx2 (Basis) textures
 import "@babylonjs/core/Meshes/thinInstanceMesh";
 import "@babylonjs/core/Meshes/instancedMesh";
 import "@babylonjs/core/Animations/animatable";
@@ -32,6 +33,7 @@ import "@babylonjs/core/Engines/Extensions/engine.renderTarget";
 import "@babylonjs/core/Misc/screenshotTools";
 import "@babylonjs/core/Helpers/sceneHelpers";
 import "@babylonjs/loaders/glTF/2.0";
+import { KhronosTextureContainer2 as Ktx2Container } from "@babylonjs/core/Misc/khronosTextureContainer2";
 
 // ---------------------------------------------------------------------------
 // Engine / scene
@@ -95,6 +97,7 @@ export { PBRMetallicRoughnessMaterial } from "@babylonjs/core/Materials/PBR/pbrM
 export { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
 export { BaseTexture } from "@babylonjs/core/Materials/Textures/baseTexture";
 export { Texture } from "@babylonjs/core/Materials/Textures/texture";
+export { KhronosTextureContainer2 } from "@babylonjs/core/Misc/khronosTextureContainer2";
 export type { InternalTexture } from "@babylonjs/core/Materials/Textures/internalTexture";
 export { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 export { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
@@ -220,3 +223,61 @@ export { CreateCylinderVertexData } from "@babylonjs/core/Meshes/Builders/cylind
 
 // Added by the factory life agent (additive)
 export { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";
+
+// ---------------------------------------------------------------------------
+// KTX2 (Basis Universal) transcoder: local files only, no CDN (offline-safe)
+// ---------------------------------------------------------------------------
+
+/** URLConfig key -> file under public/ktx2 (see public/ktx2/manifest.json). */
+const KTX2_FILES: Record<string, string> = {
+  jsDecoderModule: "babylon.ktx2Decoder.js",
+  jsMSCTranscoder: "msc_basis_transcoder.js",
+  wasmMSCTranscoder: "msc_basis_transcoder.wasm",
+  wasmUASTCToASTC: "uastc_astc.wasm",
+  wasmUASTCToBC7: "uastc_bc7.wasm",
+  wasmUASTCToR8_UNORM: "uastc_r8_unorm.wasm",
+  wasmUASTCToRG8_UNORM: "uastc_rg8_unorm.wasm",
+  wasmUASTCToRGBA_SRGB: "uastc_rgba8_srgb_v2.wasm",
+  wasmUASTCToRGBA_UNORM: "uastc_rgba8_unorm_v2.wasm",
+  wasmZSTDDecoder: "zstddec.wasm",
+};
+
+let ktx2Configured: boolean | null = null;
+
+/**
+ * Point the KTX2 transcoder at the local `/ktx2/*` files. Idempotent; call
+ * before the first KTX2 load. Returns whether KTX2 loading is usable here
+ * (a browser with Worker + WebAssembly; `?ktx2=0` forces it off, which is
+ * also the WebP-fallback test hook). Headless / unit-test environments
+ * (no Worker) report false and keep the WebP / plain glTF paths.
+ */
+export function configureKtx2(): boolean {
+  if (ktx2Configured !== null) return ktx2Configured;
+  let ok =
+    typeof window !== "undefined" &&
+    typeof Worker === "function" &&
+    typeof WebAssembly === "object" &&
+    typeof URL !== "undefined" &&
+    !!window.location?.origin &&
+    window.location.protocol !== "file:";
+  try {
+    if (ok && new URLSearchParams(window.location.search).get("ktx2") === "0")
+      ok = false;
+  } catch {
+    // ignore
+  }
+  if (ok) {
+    // Absolute URLs: the decoder runs in a blob: worker (no base to resolve a
+    // root-relative path against).
+    const cfg = Ktx2Container.URLConfig as unknown as Record<string, string>;
+    for (const [key, file] of Object.entries(KTX2_FILES))
+      cfg[key] = new URL(`/ktx2/${file}`, window.location.origin).href;
+  }
+  ktx2Configured = ok;
+  return ok;
+}
+
+/** Test hook: forget the configured state. */
+export function resetKtx2ForTests(): void {
+  ktx2Configured = null;
+}

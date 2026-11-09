@@ -13,6 +13,7 @@
 
 import {
   Animation,
+  configureKtx2,
   AnimationGroup,
   AssetContainer,
   LoadAssetContainerAsync,
@@ -95,25 +96,53 @@ export interface PackIo {
   fetchJson(url: string): Promise<unknown>;
 }
 
+/**
+ * KTX2 variant of a character GLB (`office_f01.ktx2.glb`; textures are
+ * GPU-compressed Basis, KHR_texture_basisu REQUIRED), or null when KTX2 is
+ * unusable here, the file is an animation library (no textures) or already
+ * the variant.
+ */
+export function ktx2VariantUrl(url: string): string | null {
+  if (!/\.glb$/.test(url) || /\.ktx2\.glb$/.test(url)) return null;
+  if (/\/animations_[mf]\.glb$/.test(url)) return null;
+  return url.replace(/\.glb$/, ".ktx2.glb");
+}
+
+async function loadGlb(url: string, scene: Scene): Promise<AssetContainer> {
+  const c = await LoadAssetContainerAsync(url, scene, {
+    // Don't auto-play the first clip: nodes must stay at their rest pose
+    // (retargeting reads it) and nothing should tick inside containers.
+    pluginOptions: { gltf: { animationStartMode: 0 } as never },
+  });
+  for (const g of c.animationGroups) g.stop();
+  tuneCharacterMaterials(c);
+  return c;
+}
+
 const defaultIo: PackIo = {
-  loadContainer: (url, scene) =>
-    LoadAssetContainerAsync(url, scene, {
-      // Don't auto-play the first clip: nodes must stay at their rest pose
-      // (retargeting reads it) and nothing should tick inside containers.
-      pluginOptions: { gltf: { animationStartMode: 0 } as never },
-    }).then(
-      (c) => {
-        for (const g of c.animationGroups) g.stop();
-        tuneCharacterMaterials(c);
-        return c;
-      },
-      (err: unknown) => {
-        // A page teardown mid-download is not worth a warning.
-        if (!scene.isDisposed)
-          console.warn(`[characters] failed to load ${url}`, err);
-        return null;
-      },
-    ),
+  loadContainer: async (url, scene) => {
+    // KTX2 variant first; the plain GLB is the fallback (absent, transcoder
+    // unavailable, or a load error).
+    const ktx = ktx2VariantUrl(url);
+    if (ktx && typeof fetch === "function" && configureKtx2()) {
+      try {
+        const head = await fetch(ktx, { method: "HEAD" });
+        const html = (head.headers.get("content-type") ?? "").includes("html");
+        if (head.ok && !html) return await loadGlb(ktx, scene);
+      } catch (err) {
+        if (scene.isDisposed) return null;
+        console.warn(`[characters] KTX2 ${ktx} failed, using GLB`, err);
+      }
+    }
+    try {
+      return await loadGlb(url, scene);
+    } catch (err) {
+      // A page teardown mid-download is not worth a warning.
+      if (!scene.isDisposed)
+        console.warn(`[characters] failed to load ${url}`, err);
+      return null;
+    }
+  },
   fetchJson: async (url) => {
     if (typeof fetch !== "function") return null;
     try {

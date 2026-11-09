@@ -271,3 +271,31 @@ describe("lighting state is a pure function of the plan (WS5 L1, P4)", () => {
     engine.dispose();
   });
 });
+
+describe("compressed texture memory (KTX2)", () => {
+  const tex = {
+    width: 1024,
+    height: 1024,
+    isCube: false,
+    generateMipMaps: false,
+    type: 0,
+    format: 36492, // BC7
+  };
+  it("sizes block formats by bits per pixel, mips included", async () => {
+    const { textureBytes: tb, compressedBitsPerPixel } =
+      await import("@/engine/fx/textureMemory");
+    expect(tb(tex)).toBe(1024 * 1024); // 8 bpp
+    expect(tb({ ...tex, format: 37492 })).toBe(1024 * 512); // ETC2 RGB 4 bpp
+    expect(tb({ ...tex, format: 33776, generateMipMaps: true })).toBeCloseTo(
+      (1024 * 512 * 4) / 3,
+    );
+    // a shipped mip chain counts even when generateMipMaps is off
+    expect(tb({ ...tex, mipLevelCount: 11 })).toBeCloseTo(
+      (1024 * 1024 * 4) / 3,
+    );
+    expect(compressedBitsPerPixel(37808)).toBe(8); // ASTC 4x4
+    expect(compressedBitsPerPixel(37840)).toBe(8); // sRGB ASTC 4x4
+    expect(compressedBitsPerPixel(37815)).toBe(2); // ASTC 8x8
+    expect(compressedBitsPerPixel(5)).toBe(0); // RGBA is not compressed
+  });
+});

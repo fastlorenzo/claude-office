@@ -325,3 +325,27 @@ describe("readiness monitor", () => {
     engine.dispose();
   });
 });
+
+describe("KTX2 helpers", () => {
+  it("tier edges follow the shipped files", async () => {
+    const { ktx2Edge } = await import("@/engine/assets/materials2");
+    // E = 1024 (tile 2 m): albedo hi 2048 / lo 1024, normal 1024 / 512, orm half
+    const a = { tileMeters: 2 };
+    expect(ktx2Edge(a, "albedo", "hi")).toBe(2048);
+    expect(ktx2Edge(a, "albedo", "lo")).toBe(1024);
+    expect(ktx2Edge(a, "normal", "hi")).toBe(1024);
+    expect(ktx2Edge(a, "normal", "lo")).toBe(512);
+    expect(ktx2Edge(a, "orm", "hi")).toBe(1024);
+    // E = 512 (tile 0.6 m): orm lo is floored at 256
+    const b = { tileMeters: 0.6 };
+    expect(ktx2Edge(b, "albedo", "hi")).toBe(1024);
+    expect(ktx2Edge(b, "orm", "lo")).toBe(256);
+  });
+  it("character GLB variants skip animation libraries", async () => {
+    const { ktx2VariantUrl } =
+      await import("@/engine/characters/characterPacks");
+    expect(ktx2VariantUrl("/a/office_f01.glb")).toBe("/a/office_f01.ktx2.glb");
+    expect(ktx2VariantUrl("/a/animations_m.glb")).toBeNull();
+    expect(ktx2VariantUrl("/a/x.ktx2.glb")).toBeNull();
+  });
+});

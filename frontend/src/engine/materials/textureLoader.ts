@@ -20,6 +20,11 @@ export type MapKind = "albedo" | "normal" | "orm";
 export interface FetchImageOptions {
   /** Resize to this edge (px); omit for the shipped size. */
   edge?: number;
+  /**
+   * Flip rows at decode (default true: GL convention, image top at v = 1).
+   * False keeps the file's row order, the convention a KTX2 upload has.
+   */
+  flipY?: boolean;
   /** Retry delays (tests pass zeros). */
   delays?: readonly number[];
   /** Abort further attempts (owner disposed / superseded). */
@@ -44,7 +49,11 @@ export class TextureLoadError extends Error {
 const sleep = (ms: number) =>
   new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
 
-async function attempt(url: string, edge?: number): Promise<ImageBitmap> {
+async function attempt(
+  url: string,
+  edge?: number,
+  flipY = true,
+): Promise<ImageBitmap> {
   if (injectedTextureFailure(url))
     throw new Error("injected failure (texfail)");
   const res = await fetch(url);
@@ -57,17 +66,18 @@ async function attempt(url: string, edge?: number): Promise<ImageBitmap> {
           resizeWidth: edge,
           resizeHeight: edge,
           resizeQuality: "high",
-          imageOrientation: "flipY",
+          imageOrientation: flipY ? "flipY" : "none",
         }
-      : { imageOrientation: "flipY" },
+      : { imageOrientation: flipY ? "flipY" : "none" },
   );
 }
 
-/** Fetch + decode with retries; rejects with `TextureLoadError` at the end. */
-export async function fetchImage(
+/** Run `fn` with the loader's retry/backoff; the final failure is thrown. */
+async function withRetries<T>(
   url: string,
-  opts: FetchImageOptions = {},
-): Promise<ImageBitmap> {
+  opts: Pick<FetchImageOptions, "delays" | "cancelled">,
+  fn: () => Promise<T>,
+): Promise<T> {
   const delays = opts.delays ?? RETRY_DELAYS_MS;
   let last: unknown = null;
   for (let i = 0; i <= delays.length; i++) {
@@ -77,12 +87,40 @@ export async function fetchImage(
     }
     if (opts.cancelled?.()) throw new TextureLoadError(url, i, "cancelled");
     try {
-      return await attempt(url, opts.edge);
+      return await fn();
     } catch (err) {
       last = err;
     }
   }
   throw new TextureLoadError(url, delays.length + 1, last);
+}
+
+/** Fetch + decode with retries; rejects with `TextureLoadError` at the end. */
+export function fetchImage(
+  url: string,
+  opts: FetchImageOptions = {},
+): Promise<ImageBitmap> {
+  return withRetries(url, opts, () => attempt(url, opts.edge, opts.flipY));
+}
+
+/**
+ * Fetch a file's bytes with retries (KTX2: Babylon transcodes + uploads it).
+ * A static host answering a missing file with the app's HTML counts as a
+ * failure so the caller falls back instead of feeding HTML to the decoder.
+ */
+export function fetchBytes(
+  url: string,
+  opts: Pick<FetchImageOptions, "delays" | "cancelled"> = {},
+): Promise<ArrayBuffer> {
+  return withRetries(url, opts, async () => {
+    if (injectedTextureFailure(url))
+      throw new Error("injected failure (texfail)");
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if ((res.headers.get("content-type") ?? "").includes("html"))
+      throw new Error("not a texture (HTML)");
+    return res.arrayBuffer();
+  });
 }
 
 /**

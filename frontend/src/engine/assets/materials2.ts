@@ -76,6 +76,30 @@ export function textureEdge(
   return kind === "orm" ? Math.max(256, edge / 2) : edge;
 }
 
+export type Ktx2Tier = "hi" | "lo";
+
+/** `ktx2` section of materials2/manifest.json: files per set, map and tier. */
+export type Ktx2Manifest = Record<
+  string,
+  Record<"albedo" | "normal" | "orm", Record<Ktx2Tier, string>>
+>;
+
+/**
+ * Edge (px) of a KTX2 tier (fetch-materials.ts): albedo hi = min(2E, 2048),
+ * lo = E; normal hi 1024 / lo 512; ORM = albedo / 2 (at least 256).
+ */
+export function ktx2Edge(
+  asset: Pick<PbrMaterialAsset, "tileMeters">,
+  kind: "albedo" | "normal" | "orm",
+  tier: Ktx2Tier,
+): number {
+  const e = textureEdge(asset, "albedo");
+  const albedo = tier === "hi" ? Math.min(2 * e, 2048) : e;
+  if (kind === "albedo") return albedo;
+  if (kind === "normal") return tier === "hi" ? 1024 : 512;
+  return Math.max(256, albedo / 2);
+}
+
 export function material2Path(file: string): string {
   return `${MATERIALS2_BASE}/${file}`;
 }
