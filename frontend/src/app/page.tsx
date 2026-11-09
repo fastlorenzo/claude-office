@@ -133,6 +133,8 @@ export default function V2TestPage(): React.ReactNode {
     handleDeleteSession,
     handleClearDB,
     handleSimulate,
+    handlePlayDemo,
+    handleExportDemo,
     handleReset,
     handleRenameSession,
   } = useSessionSwitch({ sessionId, setSessionId, fetchSessions, showStatus });
@@ -464,6 +466,8 @@ export default function V2TestPage(): React.ReactNode {
             aiSummaryEnabled={aiSummaryEnabled}
             activeSessionCount={activeSessionCount}
             onSimulate={handleSimulate}
+            onPlayDemo={handlePlayDemo}
+            onExportDemo={handleExportDemo}
             onReset={handleReset}
             onClearDB={() => setIsClearModalOpen(true)}
             onToggleDebug={handleToggleDebug}

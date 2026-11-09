@@ -1,0 +1,25 @@
+# Example Claude Office demo (docs/demo-files.md). Play it from the ⋯ menu
+# ("Play demo file…") or: claude-office-server simulate --file checkout-feature.jsonl
+{"claude_office_demo": 1, "name": "Apple Pay checkout"}
+{"t": 0, "event_type": "session_start", "data": {"project_name": "acme-shop"}}
+{"t": 1.5, "event_type": "user_prompt_submit", "data": {"prompt": "Add Apple Pay to the checkout page, with tests."}}
+{"t": 3, "event_type": "pre_tool_use", "data": {"tool_name": "TodoWrite", "agent_id": "main", "input_tokens": 12000, "output_tokens": 3000, "tool_input": {"todos": [{"content": "Add Apple Pay button", "status": "in_progress"}, {"content": "Payment intent endpoint", "status": "pending"}, {"content": "Checkout tests", "status": "pending"}]}}}
+{"delay": 0.3, "event_type": "post_tool_use", "data": {"tool_name": "TodoWrite", "agent_id": "main"}}
+{"delay": 1, "event_type": "pre_tool_use", "data": {"tool_name": "Read", "agent_id": "main", "tool_input": {"file_path": "src/checkout/CheckoutPage.tsx"}, "input_tokens": 3000, "output_tokens": 400}}
+{"delay": 1.2, "event_type": "post_tool_use", "data": {"tool_name": "Read", "agent_id": "main", "tool_input": {"file_path": "src/checkout/CheckoutPage.tsx"}}}
+{"delay": 1, "event_type": "subagent_start", "data": {"agent_id": "pay_api", "task_description": "Create the payment intent endpoint for Apple Pay", "speech_content": {"boss": "Can you build the payment API?", "agent": "On it!"}, "input_tokens": 2000, "output_tokens": 800}}
+{"delay": 0.5, "event_type": "subagent_start", "data": {"agent_id": "pay_tests", "task_description": "Write checkout tests for the Apple Pay flow", "speech_content": {"boss": "And you take the tests.", "agent": "Sure thing."}, "input_tokens": 2000, "output_tokens": 800}}
+{"delay": 2, "event_type": "pre_tool_use", "data": {"tool_name": "Edit", "agent_id": "pay_api", "tool_input": {"file_path": "server/payments/intent.ts"}, "input_tokens": 4000, "output_tokens": 1500}}
+{"delay": 0.5, "event_type": "pre_tool_use", "data": {"tool_name": "Write", "agent_id": "pay_tests", "tool_input": {"file_path": "tests/checkout/applePay.test.ts"}, "input_tokens": 3500, "output_tokens": 1800}}
+{"delay": 2, "event_type": "post_tool_use", "data": {"tool_name": "Edit", "agent_id": "pay_api", "tool_input": {"file_path": "server/payments/intent.ts"}}}
+{"delay": 0.5, "event_type": "post_tool_use", "data": {"tool_name": "Write", "agent_id": "pay_tests", "tool_input": {"file_path": "tests/checkout/applePay.test.ts"}}}
+{"delay": 1, "event_type": "permission_request", "data": {"tool_name": "Bash", "agent_id": "main", "tool_input": {"command": "npm install @stripe/stripe-js"}}}
+{"delay": 3, "event_type": "pre_tool_use", "data": {"tool_name": "Bash", "agent_id": "main", "tool_input": {"command": "npm install @stripe/stripe-js"}}}
+{"delay": 2, "event_type": "post_tool_use", "data": {"tool_name": "Bash", "agent_id": "main", "tool_input": {"command": "npm install @stripe/stripe-js"}}}
+{"delay": 1.5, "event_type": "subagent_stop", "data": {"agent_id": "pay_api", "success": true, "speech_content": {"agent": "Endpoint is live.", "boss": "Great."}}}
+{"delay": 2, "event_type": "pre_tool_use", "data": {"tool_name": "Bash", "agent_id": "pay_tests", "tool_input": {"command": "npm test -- checkout"}, "input_tokens": 1500, "output_tokens": 300}}
+{"delay": 3, "event_type": "post_tool_use", "data": {"tool_name": "Bash", "agent_id": "pay_tests", "tool_input": {"command": "npm test -- checkout"}}}
+{"delay": 0.5, "event_type": "subagent_stop", "data": {"agent_id": "pay_tests", "success": true, "speech_content": {"agent": "All 14 tests pass.", "boss": "Nice work."}}}
+{"delay": 1, "event_type": "pre_tool_use", "data": {"tool_name": "TodoWrite", "agent_id": "main", "tool_input": {"todos": [{"content": "Add Apple Pay button", "status": "completed"}, {"content": "Payment intent endpoint", "status": "completed"}, {"content": "Checkout tests", "status": "completed"}]}}}
+{"delay": 0.3, "event_type": "post_tool_use", "data": {"tool_name": "TodoWrite", "agent_id": "main"}}
+{"delay": 1, "event_type": "stop", "data": {"speech_content": {"boss_phone": "Apple Pay is in, tests are green."}}}

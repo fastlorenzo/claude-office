@@ -42,6 +42,8 @@ The scripts directory contains testing and development utilities:
 
 ## Simulation Scenarios
 
+To play your own event streams (recorded sessions or hand-written demos) instead of these built-in scenarios, see [Demo Files](../docs/guides/demo-files.md); [`demos/checkout-feature.jsonl`](demos/checkout-feature.jsonl) is an example.
+
 The main simulation script supports three scenarios, each exercising different aspects of the visualizer.
 
 ### Scenario Comparison

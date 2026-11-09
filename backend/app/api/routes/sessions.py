@@ -1,18 +1,27 @@
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from datetime import UTC
 from typing import Annotated, Any, TypedDict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.connection_manager import get_manager
+from app.core.demo_file import (
+    MAX_DEMO_BYTES,
+    DemoFileError,
+    export_lines,
+    parse_demo,
+    rename_sessions,
+)
 from app.core.event_processor import get_event_processor
 from app.db.database import get_db
 from app.db.models import EventRecord, SessionRecord, TaskRecord, UserPreference
@@ -552,9 +561,16 @@ def simulation_command() -> list[str]:
     return [sys.executable, "-m", "app", "simulate"]
 
 
-@router.post("/simulate")
-async def trigger_simulation(request: Request) -> dict[str, str]:
-    """Start the event simulation in the background."""
+def _demo_upload_path() -> str:
+    """Where an uploaded demo is kept for the playback process (one at a time)."""
+    settings = get_settings()
+    base = settings.CLAUDE_OFFICE_DATA_DIR or os.path.join(tempfile.gettempdir(), "claude-office")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "uploaded-demo.jsonl")
+
+
+async def _start_simulation(request: Request, args: list[str]) -> None:
+    """(Re)start the simulation child process with *args* after ``simulate``."""
     global _simulation_process
 
     if _simulation_process is not None and _simulation_process.poll() is None:
@@ -572,7 +588,7 @@ async def trigger_simulation(request: Request) -> dict[str, str]:
         "CLAUDE_OFFICE_API_KEY": settings.effective_api_key,
     }
     _simulation_process = subprocess.Popen(
-        simulation_command(),
+        simulation_command() + args,
         cwd=backend_dir,
         env=env,
         stdin=subprocess.DEVNULL,
@@ -582,7 +598,116 @@ async def trigger_simulation(request: Request) -> dict[str, str]:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
+
+@router.post("/simulate")
+async def trigger_simulation(request: Request) -> dict[str, str]:
+    """Start the event simulation in the background."""
+    await _start_simulation(request, [])
     return {"status": "success", "message": "Simulation started in background"}
+
+
+class DemoPlayback(TypedDict):
+    """Response of ``POST /sessions/simulate/file``."""
+
+    status: str
+    message: str
+    name: str
+    events: int
+    sessionIds: list[str]
+
+
+@router.post("/simulate/file")
+async def play_demo_file(
+    request: Request,
+    speed: Annotated[float | None, Query(gt=0, le=50, description="Playback speed factor")] = None,
+    max_gap: Annotated[
+        float | None, Query(ge=0, le=3600, description="Cap on any pause, in seconds")
+    ] = None,
+) -> DemoPlayback:
+    """Play an uploaded demo file (JSON Lines body, see ``app.core.demo_file``).
+
+    The file is validated here, so a bad line is reported (400) instead of
+    failing silently in the background. Its sessions play as ``demo_session``,
+    ``demo_session_2``, ...
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_DEMO_BYTES:
+        raise HTTPException(status_code=413, detail="Demo file is too large")
+    body = await request.body()
+    if len(body) > MAX_DEMO_BYTES:
+        raise HTTPException(status_code=413, detail="Demo file is too large")
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Demo file must be UTF-8 text") from None
+    try:
+        demo = parse_demo(text)
+        session_ids = rename_sessions(demo.events)
+    except DemoFileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    path = _demo_upload_path()
+    # The previous playback may still be reading the file: stop it first.
+    await asyncio.to_thread(kill_simulation)
+    await asyncio.to_thread(_write_text, path, text)
+    args = ["--file", path]
+    if speed is not None:
+        args += ["--speed", repr(speed)]
+    if max_gap is not None:
+        args += ["--max-gap", repr(max_gap)]
+    await _start_simulation(request, args)
+    return {
+        "status": "success",
+        "message": "Demo playback started",
+        "name": demo.name,
+        "events": len(demo.events),
+        "sessionIds": session_ids,
+    }
+
+
+def _write_text(path: str, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+def _export_filename(name: str, session_id: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower()[:60]
+    return f"claude-office-{slug or session_id[:12]}.jsonl"
+
+
+@router.get("/{session_id}/export")
+async def export_session(
+    session_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Download a session's events as a demo file (``app.core.demo_file``).
+
+    Playable anywhere through ``POST /sessions/simulate/file`` or
+    ``claude-office-server simulate --file``. Transcript paths are dropped;
+    prompts, commands and file paths are kept.
+    """
+    session = await db.get(SessionRecord, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    result = await db.execute(
+        select(EventRecord.timestamp, EventRecord.event_type, EventRecord.data)
+        .where(EventRecord.session_id == session_id)
+        .order_by(EventRecord.timestamp.asc(), EventRecord.id.asc())
+    )
+    name = session.display_name or session.project_name or session_id
+    body = "".join(
+        export_lines(
+            ((row.timestamp, row.event_type, row.data) for row in result),
+            name=name,
+            source_session=session_id,
+        )
+    )
+    filename = _export_filename(name, session_id)
+    return Response(
+        content=body,
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("")

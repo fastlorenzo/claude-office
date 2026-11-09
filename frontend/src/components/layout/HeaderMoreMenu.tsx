@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Play, RefreshCw, Trash2, Bug } from "lucide-react";
+import {
+  MoreHorizontal,
+  Play,
+  RefreshCw,
+  Trash2,
+  Bug,
+  FileUp,
+  Download,
+} from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 
 // ============================================================================
@@ -11,6 +19,10 @@ import { useTranslation } from "@/hooks/useTranslation";
 interface HeaderMoreMenuProps {
   debugMode: boolean;
   onSimulate: () => Promise<void>;
+  /** Play a demo file (.jsonl) picked by the user. */
+  onPlayDemo: (file: File) => Promise<void>;
+  /** Download the current session as a demo file. */
+  onExportDemo: () => Promise<void>;
   onReset: () => void;
   onClearDB: () => void;
   onToggleDebug: () => void;
@@ -22,12 +34,14 @@ interface HeaderMoreMenuProps {
 
 /**
  * Overflow "⋯" menu holding the rarely-used developer/maintenance actions
- * (Simulate, Reset, Clear DB, Debug) so they don't crowd the header.
+ * (Simulate, demo files, Reset, Clear DB, Debug) so they don't crowd the header.
  * Closes on outside click or Escape.
  */
 export function HeaderMoreMenu({
   debugMode,
   onSimulate,
+  onPlayDemo,
+  onExportDemo,
   onReset,
   onClearDB,
   onToggleDebug,
@@ -35,6 +49,7 @@ export function HeaderMoreMenu({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -59,6 +74,19 @@ export function HeaderMoreMenu({
 
   return (
     <div ref={ref} className="relative">
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".jsonl,.ndjson,.json,application/x-ndjson,application/json"
+        className="hidden"
+        data-testid="demo-file-input"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          // Reset so picking the same file again still fires onChange.
+          e.target.value = "";
+          if (file) void onPlayDemo(file);
+        }}
+      />
       <button
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -90,6 +118,32 @@ export function HeaderMoreMenu({
           >
             <Play size={14} fill="currentColor" />
             {t("header.simulate")}
+          </button>
+
+          <button
+            role="menuitem"
+            title={t("header.playDemoHint")}
+            onClick={() => {
+              setOpen(false);
+              fileRef.current?.click();
+            }}
+            className={`${itemClass} text-emerald-400 hover:bg-emerald-500/15`}
+          >
+            <FileUp size={14} />
+            {t("header.playDemo")}
+          </button>
+
+          <button
+            role="menuitem"
+            title={t("header.exportDemoHint")}
+            onClick={() => {
+              setOpen(false);
+              void onExportDemo();
+            }}
+            className={`${itemClass} text-sky-400 hover:bg-sky-500/15`}
+          >
+            <Download size={14} />
+            {t("header.exportDemo")}
           </button>
 
           <button

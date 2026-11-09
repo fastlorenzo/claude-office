@@ -36,11 +36,12 @@ def _watch_stdin(server: uvicorn.Server) -> None:
 
 
 def simulate(argv: list[str]) -> int:
-    """Run a simulation scenario (``scripts/scenarios``) against a backend.
+    """Run a simulation scenario (``scripts/scenarios``) or a demo file against a backend.
 
-    ``POST /api/v1/sessions/simulate`` starts this as a child process (with the
-    server's own events URL and key in the environment), so it works in the
-    frozen desktop backend, where neither ``uv`` nor ``scripts/`` exist on disk.
+    ``POST /api/v1/sessions/simulate`` (and ``/simulate/file``) start this as a
+    child process (with the server's own events URL and key in the
+    environment), so it works in the frozen desktop backend, where neither
+    ``uv`` nor ``scripts/`` exist on disk.
     """
     if not getattr(sys, "frozen", False):
         # Source checkout: scripts/ sits next to backend/.
@@ -57,10 +58,43 @@ def simulate(argv: list[str]) -> int:
     ).SimulationContext
     parser = argparse.ArgumentParser(prog="claude-office-server simulate")
     parser.add_argument("scenario", nargs="?", default="complex", choices=sorted(scenarios))
-    parser.add_argument("--session", default="sim_session_123")
+    parser.add_argument("--session", default=None, help="session id (demo: base of the ids)")
+    parser.add_argument("--file", help="play a demo file (.jsonl) instead of a scenario")
+    parser.add_argument("--speed", type=float, help="demo playback speed factor")
+    parser.add_argument("--max-gap", type=float, help="cap on any demo pause, in seconds")
+    parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
-    ctx = simulation_context(session_id=args.session, verbose=False)
+    if args.file:
+        return _play_demo_file(args, simulation_context)
+    ctx = simulation_context(session_id=args.session or "sim_session_123", verbose=not args.quiet)
     scenarios[args.scenario](ctx)
+    failures: int = ctx.failures
+    return 1 if failures else 0
+
+
+def _play_demo_file(args: argparse.Namespace, simulation_context: Callable[..., Any]) -> int:
+    from app.core.demo_file import (
+        DEFAULT_SESSION_BASE,
+        DemoFileError,
+        parse_demo,
+        play,
+        rename_sessions,
+    )
+
+    try:
+        with open(args.file, encoding="utf-8") as fh:
+            demo = parse_demo(fh.read())
+        rename_sessions(demo.events, args.session or DEFAULT_SESSION_BASE)
+    except (OSError, UnicodeDecodeError, DemoFileError) as exc:
+        print(f"{args.file}: {exc}", file=sys.stderr)
+        return 2
+    ctx = simulation_context(verbose=not args.quiet)
+
+    def send(event: Any) -> None:
+        ctx.session_id = event.session_id
+        ctx.send_event(event.event_type, event.data)
+
+    play(demo, send, speed=args.speed, max_gap=args.max_gap)
     failures: int = ctx.failures
     return 1 if failures else 0
 

@@ -5,6 +5,11 @@ const en = {
 
   // Header Controls
   "header.simulate": "SIMULATE",
+  "header.playDemo": "PLAY DEMO FILE…",
+  "header.playDemoHint": "Play a recorded or hand-written demo (.jsonl)",
+  "header.exportDemo": "EXPORT AS DEMO",
+  "header.exportDemoHint":
+    "Download this session as a demo file. It includes prompts, commands and file paths.",
   "header.reset": "RESET",
   "header.clearDb": "CLEAR DB",
   "header.debugOn": "DEBUG ON",
@@ -210,6 +215,10 @@ const en = {
   "status.triggeringSimulation": "Triggering simulation...",
   "status.simulationStarted": "Simulation started!",
   "status.failedSimulation": "Failed to trigger simulation.",
+  "status.demoStarted": "Playing demo: {name}",
+  "status.failedDemo": "Demo file rejected: {reason}",
+  "status.demoExported": "Exported {file}",
+  "status.failedExport": "Failed to export this session.",
   "status.storeReset": "Store reset.",
   "status.sessionDeletedSwitched": "Session deleted. Switched to {sessionName}",
   "status.sessionDeletedNoOthers":

@@ -22,6 +22,8 @@ interface UseSessionSwitchResult {
   handleDeleteSession: (session: Session) => Promise<void>;
   handleClearDB: () => Promise<void>;
   handleSimulate: () => Promise<void>;
+  handlePlayDemo: (file: File) => Promise<void>;
+  handleExportDemo: () => Promise<void>;
   handleReset: () => void;
   handleRenameSession: (sessionId: string, newName: string) => Promise<void>;
 }
@@ -126,6 +128,66 @@ export function useSessionSwitch({
     }
   };
 
+  const handlePlayDemo = async (file: File): Promise<void> => {
+    try {
+      const res = await apiFetch("/api/v1/sessions/simulate/file", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-ndjson" },
+        body: await file.text(),
+      });
+      const body: unknown = await res.json().catch(() => null);
+      if (!res.ok) {
+        const detail =
+          body && typeof body === "object" && "detail" in body
+            ? String((body as { detail: unknown }).detail)
+            : `HTTP ${res.status}`;
+        showStatus(t("status.failedDemo", { reason: detail }), "error");
+        return;
+      }
+      const { name, sessionIds } = body as {
+        name?: string;
+        sessionIds?: string[];
+      };
+      showStatus(
+        t("status.demoStarted", { name: name || file.name }),
+        "success",
+      );
+      const first = sessionIds?.[0];
+      if (first) await handleSessionSelect(first);
+    } catch (e) {
+      console.error(e);
+      showStatus(t("status.errorConnecting"), "error");
+    }
+  };
+
+  const handleExportDemo = async (): Promise<void> => {
+    try {
+      const res = await apiFetch(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}/export`,
+      );
+      if (!res.ok) {
+        showStatus(t("status.failedExport"), "error");
+        return;
+      }
+      const match = /filename="([^"]+)"/.exec(
+        res.headers.get("Content-Disposition") ?? "",
+      );
+      const filename = match?.[1] ?? `claude-office-${sessionId}.jsonl`;
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      showStatus(t("status.demoExported", { file: filename }), "success");
+    } catch (e) {
+      console.error(e);
+      showStatus(t("status.errorConnecting"), "error");
+    }
+  };
+
   const handleReset = (): void => {
     agentMachineService.reset();
     useGameStore.getState().resetForSessionSwitch();
@@ -162,6 +224,8 @@ export function useSessionSwitch({
     handleDeleteSession,
     handleClearDB,
     handleSimulate,
+    handlePlayDemo,
+    handleExportDemo,
     handleReset,
     handleRenameSession,
   };

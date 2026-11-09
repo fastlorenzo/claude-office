@@ -63,7 +63,7 @@ def _is_state_changing(path: str, method: str) -> bool:
     prefix = settings.API_V1_STR + "/sessions"
     return (
         (path == prefix and method == "DELETE")
-        or (path == f"{prefix}/simulate" and method == "POST")
+        or (path in (f"{prefix}/simulate", f"{prefix}/simulate/file") and method == "POST")
         or (path.startswith(f"{prefix}/") and path.endswith("/focus") and method == "POST")
     )
 

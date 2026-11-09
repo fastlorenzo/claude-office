@@ -18,6 +18,8 @@ interface HeaderControlsProps {
   /** Number of active sessions — gates the Command Center button (>= 2). */
   activeSessionCount: number;
   onSimulate: () => Promise<void>;
+  onPlayDemo: (file: File) => Promise<void>;
+  onExportDemo: () => Promise<void>;
   onReset: () => void;
   onClearDB: () => void;
   onToggleDebug: () => void;
@@ -43,6 +45,8 @@ export function HeaderControls({
   aiSummaryEnabled,
   activeSessionCount,
   onSimulate,
+  onPlayDemo,
+  onExportDemo,
   onReset,
   onClearDB,
   onToggleDebug,
@@ -143,6 +147,8 @@ export function HeaderControls({
       <HeaderMoreMenu
         debugMode={debugMode}
         onSimulate={onSimulate}
+        onPlayDemo={onPlayDemo}
+        onExportDemo={onExportDemo}
         onReset={onReset}
         onClearDB={onClearDB}
         onToggleDebug={onToggleDebug}

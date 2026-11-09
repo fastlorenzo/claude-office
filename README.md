@@ -405,6 +405,7 @@ Contributions are welcome! Please ensure that all pull requests:
 - [Hooks README](hooks/README.md) - Hook installation details
 - [OpenCode Plugin](opencode-plugin/) - OpenCode integration plugin
 - [Scripts README](scripts/README.md) - Testing and simulation scripts
+- [Demo Files](docs/guides/demo-files.md) - Play your own recorded or hand-written sessions
 - [CLAUDE.md](CLAUDE.md) - AI assistant instructions for this project
 
 ## Star History

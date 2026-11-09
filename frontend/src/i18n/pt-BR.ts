@@ -7,6 +7,11 @@ const ptBR: Record<TranslationKey, string> = {
 
   // Header Controls
   "header.simulate": "SIMULAR",
+  "header.playDemo": "REPRODUZIR DEMO…",
+  "header.playDemoHint": "Reproduz uma demo gravada ou escrita à mão (.jsonl)",
+  "header.exportDemo": "EXPORTAR COMO DEMO",
+  "header.exportDemoHint":
+    "Baixa esta sessão como arquivo de demo. Inclui prompts, comandos e caminhos de arquivos.",
   "header.reset": "RESETAR",
   "header.clearDb": "LIMPAR BD",
   "header.debugOn": "DEBUG LIGADO",
@@ -213,6 +218,10 @@ const ptBR: Record<TranslationKey, string> = {
   "status.triggeringSimulation": "Iniciando simulação...",
   "status.simulationStarted": "Simulação iniciada!",
   "status.failedSimulation": "Falha ao iniciar simulação.",
+  "status.demoStarted": "Reproduzindo demo: {name}",
+  "status.failedDemo": "Arquivo de demo rejeitado: {reason}",
+  "status.demoExported": "Exportado {file}",
+  "status.failedExport": "Falha ao exportar esta sessão.",
   "status.storeReset": "Estado resetado.",
   "status.sessionDeletedSwitched": "Sessão excluída. Mudou para {sessionName}",
   "status.sessionDeletedNoOthers":

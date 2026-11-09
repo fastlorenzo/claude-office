@@ -7,6 +7,11 @@ const es: Record<TranslationKey, string> = {
 
   // Header Controls
   "header.simulate": "SIMULAR",
+  "header.playDemo": "REPRODUCIR DEMO…",
+  "header.playDemoHint": "Reproduce una demo grabada o escrita a mano (.jsonl)",
+  "header.exportDemo": "EXPORTAR COMO DEMO",
+  "header.exportDemoHint":
+    "Descarga esta sesión como archivo de demo. Incluye prompts, comandos y rutas de archivos.",
   "header.reset": "REINICIAR",
   "header.clearDb": "LIMPIAR BD",
   "header.debugOn": "DEPURAR ON",
@@ -213,6 +218,10 @@ const es: Record<TranslationKey, string> = {
   "status.triggeringSimulation": "Iniciando simulación...",
   "status.simulationStarted": "¡Simulación iniciada!",
   "status.failedSimulation": "Error al iniciar simulación.",
+  "status.demoStarted": "Reproduciendo demo: {name}",
+  "status.failedDemo": "Archivo de demo rechazado: {reason}",
+  "status.demoExported": "Exportado {file}",
+  "status.failedExport": "No se pudo exportar esta sesión.",
   "status.storeReset": "Estado reiniciado.",
   "status.sessionDeletedSwitched": "Sesión eliminada. Cambió a {sessionName}",
   "status.sessionDeletedNoOthers":
