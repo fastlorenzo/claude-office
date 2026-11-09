@@ -12,7 +12,7 @@
  * Idempotent: materials whose outputs already exist are skipped.
  *
  * Also emits GPU-compressed KTX2 (Basis) per tier next to the WebP files:
- *   albedo.{hi,lo}.ktx2   ETC1S, sRGB   (lo = WebP edge, hi = 2x capped at 2K)
+ *   albedo.{hi,lo}.ktx2   sRGB: hi UASTC+zstd (RDO), lo ETC1S (lo = WebP edge, hi = 2x capped at 2K)
  *   normal.{hi,lo}.ktx2   UASTC+zstd, linear, 1024 / 512 (plain RGB normals)
  *   orm.{hi,lo}.ktx2      UASTC+zstd, linear, half the albedo tier
  * recorded in manifest.json `ktx2[id]`. Needs the pinned `ktx` CLI (see
@@ -167,10 +167,15 @@ async function encodeMaterialKtx2(
         brightness: a.grade.brightness ?? 1,
       });
     await albedo.removeAlpha().png().toFile(tmp("albedo"));
-    await encodeKtx2(tmp("albedo"), dst("albedo"), {
-      mode: "etc1s",
-      srgb: true,
-    });
+    // hi: UASTC (ETC1S flattens fine grain / dark low-chroma colour into
+    // block noise and reads softer than the WebP); lo stays ETC1S.
+    await encodeKtx2(
+      tmp("albedo"),
+      dst("albedo"),
+      tier === "hi"
+        ? { mode: "uastc", srgb: true, uastcRdo: 1 }
+        : { mode: "etc1s", srgb: true },
+    );
 
     const N = edges.normal[tier];
     await sharp(src.normal)
@@ -430,7 +435,7 @@ async function main(): Promise<void> {
         normal: "OpenGL (+Y)",
         ktx2: await ktx2Manifest(unique),
         ktx2Notes:
-          "Basis Universal KTX2 with full mip chain. albedo: ETC1S sRGB; normal/orm: UASTC+zstd linear (normal is plain RGB, GL +Y, no normal-mode packing). Filenames relative to materials2/<id>/. Entries exist only for materials whose six files are on disk.",
+          "Basis Universal KTX2 with full mip chain. albedo: sRGB (hi UASTC+zstd, lo ETC1S); normal/orm: UASTC+zstd linear (normal is plain RGB, GL +Y, no normal-mode packing). Filenames relative to materials2/<id>/. Entries exist only for materials whose six files are on disk.",
         candidates: MATERIAL_CANDIDATES,
       },
       null,

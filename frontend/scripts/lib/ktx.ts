@@ -150,6 +150,8 @@ export interface EncodeOptions {
   normalMap?: boolean;
   /** zstd level for UASTC (default 19). */
   zstd?: number;
+  /** UASTC RDO lambda (smaller files, lossier; omitted = no RDO). */
+  uastcRdo?: number;
   /** UASTC quality 0-4 (default 2). */
   uastcQuality?: number;
   /** Resize so max(w,h) <= maxEdge (ktx resamples). */
@@ -185,6 +187,8 @@ export async function encodeKtx2(
   if (o.mode === "etc1s") args.push("--clevel", "2", "--qlevel", "160");
   else {
     args.push("--uastc-quality", String(o.uastcQuality ?? 2));
+    if (o.uastcRdo)
+      args.push("--uastc-rdo", "--uastc-rdo-l", String(o.uastcRdo));
     args.push("--zstd", String(o.zstd ?? 19));
   }
   if (o.normalMap) args.push("--normal-mode", "--normalize");
