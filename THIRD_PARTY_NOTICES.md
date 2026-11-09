@@ -16,6 +16,8 @@ The full per-asset list with authors and source links is generated into
 | Characters and animations | [Microsoft Rocketbox](https://github.com/microsoft/Microsoft-Rocketbox) | MIT, Copyright (c) 2020 Microsoft (`static/assets/characters/LICENSE-ROCKETBOX.md`) |
 | MPFB cast (when built with `tools/mpfb`) | MPFB2 / MakeHuman CC0 assets, Quaternius UAL, Mesh2Motion | CC0 1.0 |
 | Havok physics (`HavokPhysics.wasm`) | [`@babylonjs/havok`](https://www.npmjs.com/package/@babylonjs/havok) | MIT |
+| Basis Universal KTX2 transcoder (`public/ktx2/*.js`, `*.wasm`; shipped) | [Basis Universal](https://github.com/BinomialLLC/basis_universal) via [`@babylonjs/ktx2decoder`](https://www.npmjs.com/package/@babylonjs/ktx2decoder) 9.31.3 | Apache-2.0 |
+| KTX-Software `ktx` CLI 4.4.2 (build-time texture encoder only; downloaded to `node_modules/.cache`, not redistributed or shipped) | [KhronosGroup/KTX-Software](https://github.com/KhronosGroup/KTX-Software) | Apache-2.0 |
 
 Bring-your-own character packs (Character Creator, MetaHuman, …) are never
 bundled; release builds are made from a clean checkout.

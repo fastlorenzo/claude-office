@@ -9,6 +9,10 @@
  *  - textures: resized (skin 2048, everything else <= 1024, eyes/brows 512) and
  *    re-encoded as WebP (EXT_texture_webp, same approach as scripts/fetch-characters.ts)
  *  - animations: resampled, constant tracks removed; dedup + prune
+ *  - additionally writes <id>.ktx2.glb (KHR_texture_basisu: colour ETC1S sRGB, normals UASTC
+ *    linear, alpha-tested cards UASTC; same texture sizes, image names preserved) encoded from
+ *    the lossless processed pixels with the pinned `ktx` CLI (frontend/scripts/lib/ktx.ts);
+ *    skipped with a warning when unavailable or with --no-ktx. WebP stays the fallback.
  *  - optional --quantize: KHR_mesh_quantization (no custom decoder needed); meshopt is
  *    deliberately NOT used (Babylon needs an external decoder for it)
  */
@@ -21,7 +25,7 @@ import {
   type Material,
   type Texture,
 } from "@gltf-transform/core";
-import { ALL_EXTENSIONS, EXTTextureWebP } from "@gltf-transform/extensions";
+import { ALL_EXTENSIONS, EXTTextureWebP, KHRTextureBasisu } from "@gltf-transform/extensions";
 import {
   dedup,
   getBounds,
@@ -30,9 +34,11 @@ import {
   resample,
 } from "@gltf-transform/functions";
 import sharp from "sharp";
+import { ensureKtx, ktx2ifyDocument, withHeavyLock } from "../../frontend/scripts/lib/ktx";
 
 const [rawDir, outDir] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const QUANTIZE = process.argv.includes("--quantize");
+const NO_KTX = process.argv.includes("--no-ktx");
 if (!rawDir || !outDir) {
   console.error("usage: bun optimize.ts <rawDir> <outDir> [--quantize]");
   process.exit(2);
@@ -96,6 +102,7 @@ async function main() {
   const files = (await readdir(rawDir)).filter((f) => f.endsWith(".glb")).sort();
   const avatars: unknown[] = [];
   let totalBytes = 0;
+  const ktxOk = !NO_KTX && !!(await ensureKtx());
   for (const f of files) {
     const id = basename(f, ".glb");
     const info = JSON.parse(await readFile(join(rawDir, `${id}.info.json`), "utf8"));
@@ -145,6 +152,7 @@ async function main() {
     }
 
     // --- textures -> WebP
+    const pngSources = new Map<Texture, Uint8Array>();
     for (const t of root.listTextures()) {
       const img = t.getImage();
       if (!img) continue;
@@ -157,6 +165,7 @@ async function main() {
       const tintTarget = texTint.get(t);
       if (tintTarget !== undefined) s = await neutralise(s, tintTarget, texAlpha.has(t));
       if (!texAlpha.has(t)) s = s.removeAlpha();
+      if (ktxOk) pngSources.set(t, new Uint8Array(await s.clone().png().toBuffer()));
       const webp = await s
         .webp({ quality: kind === "skin" ? 86 : 80, alphaQuality: 92, effort: 5, exact: true })
         .toBuffer();
@@ -176,6 +185,17 @@ async function main() {
     const bytes = (await stat(out)).size;
     totalBytes += bytes;
 
+    // --- KTX2 variant (mutates doc; written last)
+    let ktx2Bytes: number | undefined;
+    if (ktxOk) {
+      const n = await ktx2ifyDocument(doc, { extension: KHRTextureBasisu, maxEdge: 2048, sources: pngSources });
+      if (n > 0) {
+        const kout = join(outDir, `${id}.ktx2.glb`);
+        await io.write(kout, doc);
+        ktx2Bytes = (await stat(kout)).size;
+      }
+    }
+
     // --- manifest entry
     const bounds = getBounds(doc.getRoot().listScenes()[0]!);
     let triangles = 0;
@@ -188,6 +208,7 @@ async function main() {
     avatars.push({
       id,
       file: `${id}.glb`,
+      ...(ktx2Bytes !== undefined ? { ktx2File: `${id}.ktx2.glb`, ktx2Bytes } : {}),
       gender: info.spec.sex,
       heightM: +(bounds.max[1] - bounds.min[1]).toFixed(3),
       footY: +bounds.min[1].toFixed(4),
@@ -214,6 +235,7 @@ async function main() {
         license: "CC0 1.0 (all assets); tooling GPL-3.0 (MPFB) is not part of the outputs",
         units: "metres, Y-up, glTF right-handed; models face +Z in glTF space",
         quantized: QUANTIZE,
+        ktx2: "avatars[].ktx2File (when present) is the KHR_texture_basisu variant of avatars[].file; WebP stays the fallback",
         totalBytes,
         avatars,
       },
@@ -222,4 +244,4 @@ async function main() {
     ),
   );
 }
-await main();
+await withHeavyLock(main);

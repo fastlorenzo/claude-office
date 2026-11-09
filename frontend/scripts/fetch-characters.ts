@@ -26,14 +26,17 @@ import {
   PropertyType,
   type Node as GltfNode,
 } from "@gltf-transform/core";
-import { EXTTextureWebP } from "@gltf-transform/extensions";
+import { EXTTextureWebP, KHRTextureBasisu } from "@gltf-transform/extensions";
 import { dedup, getBounds, prune, resample } from "@gltf-transform/functions";
 import sharp from "sharp";
+import { ensureKtx, ktx2ifyDocument, withHeavyLock } from "./lib/ktx";
+import { ktx2GlbName } from "./lib/ktxTiers";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public", "assets", "characters");
 const CACHE = join(ROOT, "node_modules", ".cache", "rocketbox");
 const FORCE = process.argv.includes("--force");
+const NO_KTX = process.argv.includes("--no-ktx");
 
 const ROCKETBOX_SHA = "0943055db6ec570bcef9f2c8b41c9e5467c808f9";
 const RAW = `https://raw.githubusercontent.com/microsoft/Microsoft-Rocketbox/${ROCKETBOX_SHA}`;
@@ -380,7 +383,7 @@ async function tgaToWebp(
 // --- glTF helpers ---------------------------------------------------------------
 
 function makeIO(): NodeIO {
-  return new NodeIO().registerExtensions([EXTTextureWebP]);
+  return new NodeIO().registerExtensions([EXTTextureWebP, KHRTextureBasisu]);
 }
 
 function triangleCount(doc: Document): number {
@@ -420,6 +423,7 @@ async function buildAvatar(spec: AvatarSpec, exe: string): Promise<void> {
     return;
   }
   log(`build ${spec.id}`);
+  await rm(join(OUT, ktx2GlbName(`${spec.id}.glb`)), { force: true }); // stale variant
   const base = `${RAW}/Assets/Avatars/${spec.group}/${spec.folder}`;
   const fbx = await cachedDownload(
     `${base}/Export/${spec.folder}.fbx`,
@@ -490,6 +494,30 @@ async function buildAvatar(spec: AvatarSpec, exe: string): Promise<void> {
   }
   await mkdir(OUT, { recursive: true });
   await io.write(outPath, doc);
+}
+
+/**
+ * <id>.ktx2.glb next to <id>.glb: same scene, textures re-encoded as KTX2
+ * (KHR_texture_basisu; colour ETC1S sRGB, normals UASTC linear, alpha-tested
+ * colour UASTC), image names preserved (textureCap.ts FACE_TEXTURE keys on
+ * them). Encoded from the WebP GLB's decoded pixels (already 1024 max).
+ */
+async function buildAvatarKtx2(spec: AvatarSpec): Promise<void> {
+  const src = join(OUT, `${spec.id}.glb`);
+  const outPath = join(OUT, ktx2GlbName(`${spec.id}.glb`));
+  if (!FORCE && (await fileSize(outPath)) !== null) {
+    log(`skip ${spec.id}.ktx2 (exists)`);
+    return;
+  }
+  const io = makeIO();
+  const doc = await io.read(src);
+  const n = await ktx2ifyDocument(doc, {
+    extension: KHRTextureBasisu,
+    maxEdge: TEX_SIZE.body,
+  });
+  if (n === 0) return;
+  await io.write(outPath, doc);
+  log(`ktx2 ${spec.id}: ${n} textures`);
 }
 
 // ---------------------------------------------------------------------------
@@ -873,9 +901,12 @@ async function writeManifest(): Promise<void> {
     const bounds = getBounds(scene);
     const nodes = nodeByName(doc);
     total += bytes;
+    const ktx2File = ktx2GlbName(file);
+    const ktx2Bytes = await fileSize(join(OUT, ktx2File));
     avatars.push({
       id: spec.id,
       file,
+      ...(ktx2Bytes !== null ? { ktx2File, ktx2Bytes } : {}),
       gender: spec.gender,
       style: spec.style,
       source: `Assets/Avatars/${spec.group}/${spec.folder}`,
@@ -929,6 +960,7 @@ async function writeManifest(): Promise<void> {
     generatedBy: "scripts/fetch-characters.ts",
     source: "https://github.com/microsoft/Microsoft-Rocketbox",
     sourceCommit: ROCKETBOX_SHA,
+    ktx2: "avatars[].ktx2File (when present) is the KHR_texture_basisu variant of avatars[].file; WebP stays the fallback",
     license: "MIT (Copyright (c) 2020 Microsoft)",
     units: "metres, Y-up, glTF right-handed; models face +Z in glTF space",
     totalBytes: total,
@@ -964,6 +996,10 @@ async function main(): Promise<void> {
   if (FORCE) await rm(join(CACHE, "glb"), { recursive: true, force: true });
   const exe = await ensureFbx2gltf();
   for (const spec of AVATARS) await buildAvatar(spec, exe);
+  if (!NO_KTX && (await ensureKtx()))
+    await withHeavyLock(async () => {
+      for (const spec of AVATARS) await buildAvatarKtx2(spec);
+    });
   for (const g of ["m", "f"] as const) await buildAnimationLibrary(g, exe);
   await writeLicense();
   await writeManifest();

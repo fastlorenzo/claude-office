@@ -5,8 +5,16 @@
  *
  * Usage: bun scripts/fetch-assets.ts [--force] [--check]
  */
-import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { NodeIO } from "@gltf-transform/core";
+import { ALL_EXTENSIONS, KHRTextureBasisu } from "@gltf-transform/extensions";
+import { ensureKtx, ktx2ifyDocument, withHeavyLock } from "./lib/ktx";
+import {
+  BASIS_TRANSCODER_FILES,
+  BASIS_TRANSCODER_VERSION,
+} from "./lib/ktxTiers";
 import { fileURLToPath } from "node:url";
 import {
   ASSET_MANIFEST,
@@ -22,6 +30,7 @@ const CONCURRENCY = 4;
 
 const FORCE = process.argv.includes("--force");
 const CHECK = process.argv.includes("--check");
+const NO_KTX = process.argv.includes("--no-ktx");
 
 type AssetKind = "model" | "hdri";
 interface Job {
@@ -159,6 +168,105 @@ async function copyHavok(): Promise<void> {
   console.log("copied HavokPhysics.wasm -> public/havok/");
 }
 
+/**
+ * Self-hosted Basis Universal transcoder for Babylon's KhronosTextureContainer2
+ * (KTX2 / KHR_texture_basisu). Fetched from the versioned Babylon CDN
+ * (byte-identical to @babylonjs/ktx2decoder@${BASIS_TRANSCODER_VERSION}'s wasm/),
+ * sha256-pinned in lib/ktxTiers.ts. Apache-2.0 (Binomial / Basis Universal).
+ */
+async function fetchTranscoder(): Promise<void> {
+  const dir = join(ROOT, "public", "ktx2");
+  await mkdir(dir, { recursive: true });
+  let got = 0;
+  for (const f of BASIS_TRANSCODER_FILES) {
+    const dest = join(dir, f.file);
+    try {
+      if (
+        !FORCE &&
+        createHash("sha256")
+          .update(await readFile(dest))
+          .digest("hex") === f.sha256
+      )
+        continue;
+    } catch {
+      /* missing -> download */
+    }
+    const url = `https://cdn.babylonjs.com/v${BASIS_TRANSCODER_VERSION}/${f.cdnPath}`;
+    let buf: Buffer | null = null;
+    let lastErr = "";
+    for (let attempt = 0; attempt < 3 && !buf; attempt++) {
+      try {
+        const res = await fetch(url, { headers: { "User-Agent": UA } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        buf = Buffer.from(await res.arrayBuffer());
+      } catch (e) {
+        lastErr = String(e);
+      }
+    }
+    if (!buf) throw new AssetError("ktx2", `${url}: ${lastErr}`);
+    const sha = createHash("sha256").update(buf).digest("hex");
+    if (sha !== f.sha256)
+      throw new AssetError("ktx2", `sha256 mismatch for ${f.file}: ${sha}`);
+    await writeFile(dest, buf);
+    got++;
+  }
+  await writeFile(
+    join(dir, "manifest.json"),
+    JSON.stringify(
+      {
+        generatedBy: "scripts/fetch-assets.ts",
+        version: BASIS_TRANSCODER_VERSION,
+        license: "Apache-2.0 (Basis Universal / Binomial; Babylon.js wrappers)",
+        usage:
+          "Set KhronosTextureContainer2.URLConfig[urlConfigKey] = `/ktx2/${file}` for every entry before loading the first KTX2 texture.",
+        files: BASIS_TRANSCODER_FILES.map(({ file, urlConfigKey, sha256 }) => ({
+          file,
+          path: `/ktx2/${file}`,
+          urlConfigKey,
+          sha256,
+        })),
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  console.log(
+    `Basis transcoder v${BASIS_TRANSCODER_VERSION}: ${BASIS_TRANSCODER_FILES.length} files in public/ktx2/ (${got} downloaded)`,
+  );
+}
+
+/**
+ * Poly Haven props -> <id>/<id>.ktx2.glb (KHR_texture_basisu, max edge 1024).
+ * The original .gltf/.bin/textures stay as the fallback. Returns ids written.
+ */
+async function ktx2Props(
+  models: { id: string; rel: string }[],
+): Promise<Record<string, string>> {
+  const made: Record<string, string> = {};
+  if (NO_KTX || !(await ensureKtx())) return made;
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  await withHeavyLock(async () => {
+    for (const m of models) {
+      const outName = `${m.id}.ktx2.glb`;
+      const out = join(OUT, dirname(m.rel), outName);
+      if (!FORCE && (await sizeOf(out)) > 0) {
+        made[m.id] = outName;
+        continue;
+      }
+      const doc = await io.read(join(OUT, m.rel));
+      const n = await ktx2ifyDocument(doc, {
+        extension: KHRTextureBasisu,
+        maxEdge: 1024,
+      });
+      if (n === 0) continue;
+      await io.write(out, doc);
+      made[m.id] = outName;
+      console.log(`  ktx2 ${m.id}: ${n} textures, ${mb(await sizeOf(out))}`);
+    }
+  });
+  return made;
+}
+
 interface Info {
   name: string;
   authors: Record<string, string>;
@@ -216,6 +324,15 @@ async function main(): Promise<void> {
   if (failures.length) fail(failures);
 
   await copyHavok();
+  await fetchTranscoder();
+  const ktx2Glbs = await ktx2Props(
+    resolved
+      .filter((r) => r.entry.kind === "model")
+      .map((r) => ({
+        id: r.entry.id,
+        rel: r.jobs.find((j) => j.rel.endsWith(".gltf"))!.rel,
+      })),
+  );
 
   resolved.sort(
     (a, b) =>
@@ -229,6 +346,7 @@ async function main(): Promise<void> {
       kind: entry.kind,
       role: entry.role,
       files: Object.fromEntries(jobs.map((j) => [j.rel, j.size])),
+      ...(ktx2Glbs[entry.id] ? { ktx2: ktx2Glbs[entry.id] } : {}),
       ...(info.dimensions
         ? {
             dimensionsMeters: info.dimensions.map(

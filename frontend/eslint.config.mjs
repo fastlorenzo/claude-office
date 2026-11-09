@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Auto-generated files — do not lint
     "src/types/generated.ts",
+    // Vendored Basis Universal transcoder (fetched by scripts/fetch-assets.ts, git-ignored)
+    "public/ktx2/**",
   ]),
   // Allow underscore-prefixed unused variables (common pattern for ignored parameters)
   {

@@ -10,11 +10,20 @@
  * those ids after a `grade` change). --prune deletes folders under
  * public/assets/materials2 that are no longer listed.
  * Idempotent: materials whose outputs already exist are skipped.
+ *
+ * Also emits GPU-compressed KTX2 (Basis) per tier next to the WebP files:
+ *   albedo.{hi,lo}.ktx2   ETC1S, sRGB   (lo = WebP edge, hi = 2x capped at 2K)
+ *   normal.{hi,lo}.ktx2   UASTC+zstd, linear, 1024 / 512 (plain RGB normals)
+ *   orm.{hi,lo}.ktx2      UASTC+zstd, linear, half the albedo tier
+ * recorded in manifest.json `ktx2[id]`. Needs the pinned `ktx` CLI (see
+ * lib/ktx.ts); when unavailable they are skipped with a warning. --no-ktx skips.
  */
 import {
+  copyFile,
   mkdir,
   mkdtemp,
   readdir,
+  rename,
   readFile,
   rm,
   stat,
@@ -25,6 +34,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import sharp from "sharp";
+import { encodeKtx2, ensureKtx, withHeavyLock } from "./lib/ktx";
+import {
+  materialKtx2Edges,
+  materialKtx2Entry,
+  materialKtx2File,
+  type Ktx2Map,
+  type Ktx2Tier,
+} from "./lib/ktxTiers";
 import {
   MATERIAL_CANDIDATES,
   textureEdge,
@@ -34,9 +51,12 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public", "assets", "materials2");
 const UA = "claude-office-material-fetch/1.0";
+/** Original 2K-JPG zips are kept so KTX2 encodes can be (re)made without re-downloading. */
+const ZIP_CACHE = join(ROOT, "node_modules", ".cache", "ambientcg");
 const CONCURRENCY = 3;
 const FORCE = process.argv.includes("--force");
 const PRUNE = process.argv.includes("--prune");
+const NO_KTX = process.argv.includes("--no-ktx");
 const ONLY = new Set(
   (process.argv.find((a) => a.startsWith("--only="))?.slice(7) ?? "")
     .split(",")
@@ -62,13 +82,21 @@ async function exists(p: string): Promise<boolean> {
 }
 
 async function download(id: string, dest: string): Promise<void> {
+  const cached = join(ZIP_CACHE, `${id}_2K-JPG.zip`);
+  if (await exists(cached)) {
+    await copyFile(cached, dest);
+    return;
+  }
+  await mkdir(ZIP_CACHE, { recursive: true });
   const url = `https://ambientcg.com/get?file=${id}_2K-JPG.zip`;
   let lastErr = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(url, { headers: { "User-Agent": UA } });
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-      await Bun.write(dest, res);
+      await Bun.write(cached + ".part", res);
+      await rename(cached + ".part", cached);
+      await copyFile(cached, dest);
       return;
     } catch (e) {
       lastErr = (e as Error).message;
@@ -97,7 +125,88 @@ async function grey(file: string, size: number): Promise<Buffer> {
     .toBuffer();
 }
 
-async function process_(a: PbrMaterialAsset): Promise<void> {
+const TIERS: Ktx2Tier[] = ["hi", "lo"];
+
+async function ktx2Done(a: PbrMaterialAsset): Promise<boolean> {
+  const dir = join(OUT, a.id);
+  const names = Object.values(materialKtx2Entry()).flatMap((t) =>
+    Object.values(t),
+  );
+  return (await Promise.all(names.map((f) => exists(join(dir, f))))).every(
+    Boolean,
+  );
+}
+
+async function encodeMaterialKtx2(
+  a: PbrMaterialAsset,
+  src: {
+    color: string;
+    normal: string;
+    rough: string;
+    ao: string | null;
+    met: string | null;
+  },
+  work: string,
+  outDir: string,
+): Promise<void> {
+  const edges = materialKtx2Edges(textureEdge(a, "albedo"));
+  for (const tier of TIERS) {
+    const tmp = (n: string) => join(work, `${n}.${tier}.png`);
+    const dst = (m: Ktx2Map) => join(outDir, materialKtx2File(m, tier));
+
+    let albedo = sharp(src.color).resize(
+      edges.albedo[tier],
+      edges.albedo[tier],
+      {
+        kernel: "lanczos3",
+      },
+    );
+    if (a.grade)
+      albedo = albedo.modulate({
+        saturation: a.grade.saturation ?? 1,
+        brightness: a.grade.brightness ?? 1,
+      });
+    await albedo.removeAlpha().png().toFile(tmp("albedo"));
+    await encodeKtx2(tmp("albedo"), dst("albedo"), {
+      mode: "etc1s",
+      srgb: true,
+    });
+
+    const N = edges.normal[tier];
+    await sharp(src.normal)
+      .resize(N, N, { kernel: "lanczos3" })
+      .removeAlpha()
+      .png()
+      .toFile(tmp("normal"));
+    await encodeKtx2(tmp("normal"), dst("normal"), {
+      mode: "uastc",
+      srgb: false,
+    });
+
+    const S = edges.orm[tier];
+    const r = await grey(src.rough, S);
+    const aoBuf = src.ao ? await grey(src.ao, S) : Buffer.alloc(S * S, 255);
+    const mBuf =
+      src.met && !a.forceMetal
+        ? await grey(src.met, S)
+        : Buffer.alloc(S * S, a.forceMetal ? 255 : 0);
+    const orm = Buffer.alloc(S * S * 3);
+    for (let i = 0; i < S * S; i++) {
+      orm[i * 3] = aoBuf[i]!;
+      orm[i * 3 + 1] = r[i]!;
+      orm[i * 3 + 2] = mBuf[i]!;
+    }
+    await sharp(orm, { raw: { width: S, height: S, channels: 3 } })
+      .png()
+      .toFile(tmp("orm"));
+    await encodeKtx2(tmp("orm"), dst("orm"), { mode: "uastc", srgb: false });
+  }
+}
+
+async function process_(
+  a: PbrMaterialAsset,
+  want: { webp: boolean; ktx2: boolean },
+): Promise<void> {
   const id = a.id;
   const outDir = join(OUT, id);
   await mkdir(outDir, { recursive: true });
@@ -118,6 +227,17 @@ async function process_(a: PbrMaterialAsset): Promise<void> {
     if (!color || !normal || !rough)
       throw new AssetError(id, `missing maps in zip: ${names.join(", ")}`);
 
+    const ao = find("AmbientOcclusion");
+    const met = find("Metalness");
+    if (want.ktx2)
+      await encodeMaterialKtx2(
+        a,
+        { color, normal, rough, ao, met },
+        work,
+        outDir,
+      );
+    if (!want.webp) return;
+
     const E = textureEdge(a, "albedo");
     let albedo = sharp(color).resize(E, E);
     if (a.grade)
@@ -135,8 +255,6 @@ async function process_(a: PbrMaterialAsset): Promise<void> {
       .toFile(join(outDir, "normal.webp"));
 
     const S = textureEdge(a, "orm");
-    const ao = find("AmbientOcclusion");
-    const met = find("Metalness");
     const r = await grey(rough, S);
     const aoBuf = ao ? await grey(ao, S) : Buffer.alloc(S * S, 255);
     const mBuf =
@@ -193,6 +311,15 @@ async function normalise(a: PbrMaterialAsset): Promise<boolean> {
   return changed;
 }
 
+async function ktx2Manifest(
+  unique: Map<string, PbrMaterialAsset>,
+): Promise<Record<string, ReturnType<typeof materialKtx2Entry>>> {
+  const out: Record<string, ReturnType<typeof materialKtx2Entry>> = {};
+  for (const a of [...unique.values()].sort((x, y) => x.id.localeCompare(y.id)))
+    if (await ktx2Done(a)) out[a.id] = materialKtx2Entry();
+  return out;
+}
+
 const NOTICE_BEGIN = "<!-- BEGIN MATERIALS2 -->";
 const NOTICE_END = "<!-- END MATERIALS2 -->";
 const noticeSection = (ids: string[]): string => `${NOTICE_BEGIN}
@@ -243,37 +370,47 @@ async function main(): Promise<void> {
       }
   }
 
-  const todo: PbrMaterialAsset[] = [];
+  const ktx = NO_KTX ? null : await ensureKtx();
+  const todo = new Map<
+    string,
+    { a: PbrMaterialAsset; webp: boolean; ktx2: boolean }
+  >();
   for (const a of unique.values()) {
     if (ONLY.size && !ONLY.has(a.id)) continue;
-    const done =
+    const webpDone =
       !FORCE &&
       (
         await Promise.all(
           Object.values(a.files).map((f) => exists(join(OUT, f))),
         )
       ).every(Boolean);
-    if (!done) todo.push(a);
+    const wantKtx = !!ktx && (FORCE || !(await ktx2Done(a)));
+    if (!webpDone || wantKtx)
+      todo.set(a.id, { a, webp: !webpDone, ktx2: wantKtx });
   }
-  console.log(`materials2: ${unique.size} materials, ${todo.length} to fetch`);
+  console.log(
+    `materials2: ${unique.size} materials, ${todo.size} to process (${[...todo.values()].filter((t) => t.ktx2).length} KTX2)`,
+  );
   for (const a of unique.values())
-    if (!todo.includes(a) && (await normalise(a)))
-      console.log(`  size ${a.id}`);
+    if (!todo.has(a.id) && (await normalise(a))) console.log(`  size ${a.id}`);
 
-  const queue = [...todo];
+  const queue = [...todo.values()];
   const failures: string[] = [];
-  await Promise.all(
-    Array.from({ length: CONCURRENCY }, async () => {
-      for (let a = queue.shift(); a; a = queue.shift()) {
-        try {
-          await process_(a);
-          console.log(`  ok   ${a.id}`);
-        } catch (e) {
-          failures.push((e as Error).message);
-          console.error(`  FAIL ${(e as Error).message}`);
+  // One heavy-lock hold for the whole batch (reentrant; no-op when nothing encodes).
+  await withHeavyLock(() =>
+    Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        for (let t = queue.shift(); t; t = queue.shift()) {
+          try {
+            await process_(t.a, t);
+            console.log(`  ok   ${t.a.id}${t.ktx2 ? " (+ktx2)" : ""}`);
+          } catch (e) {
+            failures.push((e as Error).message);
+            console.error(`  FAIL ${(e as Error).message}`);
+          }
         }
-      }
-    }),
+      }),
+    ),
   );
   if (failures.length) {
     console.error(
@@ -291,6 +428,9 @@ async function main(): Promise<void> {
         license: "CC0-1.0 (ambientCG, https://ambientcg.com)",
         orm: "R=AO, G=roughness, B=metalness",
         normal: "OpenGL (+Y)",
+        ktx2: await ktx2Manifest(unique),
+        ktx2Notes:
+          "Basis Universal KTX2 with full mip chain. albedo: ETC1S sRGB; normal/orm: UASTC+zstd linear (normal is plain RGB, GL +Y, no normal-mode packing). Filenames relative to materials2/<id>/. Entries exist only for materials whose six files are on disk.",
         candidates: MATERIAL_CANDIDATES,
       },
       null,
