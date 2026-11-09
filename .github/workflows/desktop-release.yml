@@ -72,10 +72,13 @@ jobs:
       - name: Package (AppImage + deb)
         working-directory: desktop
         run: |
-          bun install --frozen-lockfile
-          node node_modules/electron/install.js
+          # GitHub release downloads (Electron, AppImage/NSIS tooling) intermittently
+          # return 504: retry each network-bound step with backoff.
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed: $*"; sleep $((i * 20)); done; return 1; }
+          retry bun install --frozen-lockfile
+          retry node node_modules/electron/install.js
           bun run build
-          npx electron-builder --linux --publish never
+          retry npx electron-builder --linux --publish never
       - name: Archive the Linux hook for the Windows job (keeps exec bits)
         run: tar -C packaging/dist -czf hook-linux.tgz claude-office-hook
       - uses: actions/upload-artifact@v7
@@ -130,10 +133,13 @@ jobs:
       - name: Package (NSIS)
         working-directory: desktop
         run: |
-          bun install --frozen-lockfile
-          node node_modules/electron/install.js
+          # GitHub release downloads (Electron, AppImage/NSIS tooling) intermittently
+          # return 504: retry each network-bound step with backoff.
+          retry() { for i in 1 2 3 4; do "$@" && return 0; echo "attempt $i failed: $*"; sleep $((i * 20)); done; return 1; }
+          retry bun install --frozen-lockfile
+          retry node node_modules/electron/install.js
           bun run build
-          npx electron-builder --win --publish never
+          retry npx electron-builder --win --publish never
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-windows
