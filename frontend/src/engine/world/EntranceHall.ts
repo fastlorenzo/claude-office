@@ -155,11 +155,7 @@ export class EntranceHall {
     this.frame = new TransformNode("entrance:frame", scene);
     this.frame.position.y = e.floorY;
     this.frame.computeWorldMatrix(true);
-    const built = b.build({
-      receiveShadows: true,
-      parent: this.frame,
-      bake: { set: "entrance" },
-    });
+    const built = b.build({ receiveShadows: true, parent: this.frame });
     for (const m of built) {
       m.computeWorldMatrix(true);
       m.metadata = { ...(m.metadata ?? {}), probe: true };
@@ -367,9 +363,7 @@ export class EntranceHall {
           v3(0.004, ch + 0.3, 0.02),
         );
       // 100 mm charcoal skirting (15 mm proud) with a shadow gap above (G14).
-      b.box("charcoal", v3(s * (x1 - 0.0075), 0.05, cz), v3(0.015, 0.1, d), {
-        bevel: 0.003,
-      });
+      b.box("charcoal", v3(s * (x1 - 0.0075), 0.05, cz), v3(0.015, 0.1, d));
       b.box("shadowGap", v3(s * (x1 - 0.002), 0.106, cz), v3(0.004, 0.012, d));
     }
     // Shared north wall with the factory door (both faces finished).
@@ -421,13 +415,11 @@ export class EntranceHall {
         "blackMetal",
         v3(fd.x + sx * (fd.width / 2 - LINING_T / 2), fd.height / 2, lzc),
         v3(LINING_T, fd.height, ld),
-        { bevel: 0.003 },
       );
     b.box(
       "blackMetal",
       v3(fd.x, fd.height - LINING_T / 2, lzc),
       v3(fd.width, LINING_T, ld),
-      { bevel: 0.003 },
     );
     // Factory side: charcoal plinth band, stopping at the door jambs.
     for (const [p0, p1] of [
@@ -618,7 +610,6 @@ export class EntranceHall {
         "oak",
         v3(xm, yt - 0.02, zr + dir * (going / 2 - 0.01)),
         v3(inner, 0.04, going + 0.02),
-        { bevel: 0.005 },
       );
       // 30 mm dark anodised nosing on the tread's front edge (R13).
       b.box(
@@ -688,7 +679,6 @@ export class EntranceHall {
         "blackMetal",
         v3(x, y + (0.04 + RAIL_TOP) / 2, z),
         v3(0.025, RAIL_TOP - 0.04, 0.025),
-        { bevel: 0.004 },
       );
     }
     // Newel post where the rail reaches the floor (bottom of the flight).
@@ -697,7 +687,6 @@ export class EntranceHall {
         "blackMetal",
         v3(x, RAIL_TOP / 2, f.zBot),
         v3(0.04, RAIL_TOP, 0.04),
-        { bevel: 0.005 },
       );
     if (!collider) return;
     const ny = Math.cos(f.th);
@@ -730,13 +719,13 @@ export class EntranceHall {
       axis === "z" ? v3(fixed, y, c) : v3(c, y, fixed);
     const sz = (t: number, hh: number, l = len) =>
       axis === "z" ? v3(t, hh, l) : v3(l, hh, t);
-    b.box("blackMetal", at(y0 + 0.03), sz(0.05, 0.06), { bevel: 0.004 });
+    b.box("blackMetal", at(y0 + 0.03), sz(0.05, 0.06));
     b.box(
       "glass",
       at(y0 + (0.06 + h - 0.07) / 2),
       sz(0.012, h - 0.13, len - 0.04),
     );
-    b.box("oak", at(y0 + h), sz(0.055, 0.05), { bevel: 0.01 });
+    b.box("oak", at(y0 + h), sz(0.055, 0.05));
     const np = Math.max(2, Math.round(len / 1.2) + 1);
     for (let i = 0; i < np; i++) {
       const t = lo + 0.02 + ((len - 0.04) * i) / (np - 1);
@@ -744,7 +733,6 @@ export class EntranceHall {
         "blackMetal",
         axis === "z" ? v3(fixed, y0 + h / 2, t) : v3(t, y0 + h / 2, fixed),
         v3(0.025, h - 0.04, 0.025),
-        { bevel: 0.004 },
       );
     }
     if (collider) {
@@ -807,7 +795,6 @@ export class EntranceHall {
       "charcoal",
       v3(xSk, ly + 0.05, (L.z0 + L.z1) / 2),
       v3(0.015, 0.1, L.z1 - L.z0),
-      { bevel: 0.003 },
     );
     // Wall handrail over the lower flight's outer edge (oak on brackets).
     this.pitched(b, "oak", fl, xWall, RAIL_TOP + 0.025, RAIL_TOP - 0.025, 0.05);
@@ -871,9 +858,7 @@ export class EntranceHall {
     // Corner posts.
     for (const x of [r.x0 + 0.04, r.x1 - 0.04])
       for (const z of [r.z0 + 0.04, r.z1 - 0.04])
-        b.box("blackMetal", v3(x, H / 2, z), v3(0.08, H, 0.08), {
-          bevel: 0.006,
-        });
+        b.box("blackMetal", v3(x, H / 2, z), v3(0.08, H, 0.08));
     // Glass on three sides; the south face holds a door at each stop.
     for (const x of [r.x0 + 0.04, r.x1 - 0.04])
       b.box("glass", v3(x, H / 2, cz), v3(0.012, H - 0.05, d - 0.08));
@@ -906,13 +891,11 @@ export class EntranceHall {
           "blackMetal",
           v3(cx + s * (dw / 2 + 0.03), y0 + LIFT_DOOR_H / 2, r.z0 + 0.03),
           v3(0.06, LIFT_DOOR_H, 0.08),
-          { bevel: 0.006 },
         );
       b.box(
         "blackMetal",
         v3(cx, y0 + LIFT_DOOR_H + 0.05, r.z0 + 0.03),
         v3(dw + 0.12, 0.1, 0.08),
-        { bevel: 0.006 },
       );
       // Call panel beside the door (warm LED).
       const px = cx + dw / 2 + 0.22;
@@ -965,12 +948,8 @@ export class EntranceHall {
     });
     for (const x of [-w / 2 + 0.03, w / 2 - 0.03])
       for (const z of [-d / 2 + 0.03, d / 2 - 0.03])
-        cb.box("aluminium", v3(x, 1.24, z), v3(0.05, 2.36, 0.05), {
-          bevel: 0.005,
-        });
-    cb.box("aluminium", v3(0, 1.0, d / 2 - 0.04), v3(w - 0.1, 0.04, 0.04), {
-      bevel: 0.005,
-    });
+        cb.box("aluminium", v3(x, 1.24, z), v3(0.05, 2.36, 0.05));
+    cb.box("aluminium", v3(0, 1.0, d / 2 - 0.04), v3(w - 0.1, 0.04, 0.04));
     cb.box("glass", v3(0, 1.24, d / 2 - 0.02), v3(w - 0.08, 2.3, 0.01));
     for (const s of [-1, 1])
       cb.box("glass", v3(s * (w / 2 - 0.02), 1.24, 0), v3(0.01, 2.3, d - 0.08));
@@ -1078,9 +1057,7 @@ export class EntranceHall {
           r: 0.006,
         });
       for (const dx of [-len / 2 + 0.25, len / 2 - 0.25])
-        b.box("blackMetal", v3(x + dx, 0.21, z), v3(0.05, 0.42, 0.4), {
-          bevel: 0.006,
-        });
+        b.box("blackMetal", v3(x + dx, 0.21, z), v3(0.05, 0.42, 0.4));
       this.col(new Vector3(x, 0.23, z), new Vector3(len, 0.46, 0.46));
     }
   }
@@ -1195,17 +1172,12 @@ export class EntranceHall {
           v3(0, height / 2, 0),
           v3(lw - 0.04, height - 0.08, 0.012),
         );
-        cb.box("blackMetal", v3(0, 0.04, 0), v3(lw, 0.08, 0.04), {
-          bevel: 0.004,
-        });
-        cb.box("blackMetal", v3(0, height - 0.04, 0), v3(lw, 0.08, 0.04), {
-          bevel: 0.004,
-        });
+        cb.box("blackMetal", v3(0, 0.04, 0), v3(lw, 0.08, 0.04));
+        cb.box("blackMetal", v3(0, height - 0.04, 0), v3(lw, 0.08, 0.04));
         cb.box(
           "blackMetal",
           v3((-s * lw) / 2 + s * 0.02, height / 2, 0),
           v3(0.04, height, 0.04),
-          { bevel: 0.004 },
         );
         cb.box(
           "aluminium",

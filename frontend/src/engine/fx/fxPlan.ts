@@ -176,18 +176,7 @@ export function aaParts(aa: GraphicsSettings["antiAliasing"]): {
   }
 }
 
-export interface PlanOptions {
-  /**
-   * Baked lightmaps carry the ambient occlusion: force SSAO off at every tier
-   * (the G-buffer then only runs for SSR). Default false = no change.
-   */
-  bakesActive?: boolean;
-}
-
-export function planFx(s0: GraphicsSettings, opts: PlanOptions = {}): FxPlan {
-  const s: GraphicsSettings = opts.bakesActive
-    ? { ...s0, ambientOcclusion: "off" }
-    : s0;
+export function planFx(s: GraphicsSettings): FxPlan {
   const aa = aaParts(s.antiAliasing);
   const scale = Math.min(1, Math.max(0.5, s.renderScale));
   const fsrOn = s.upscaler === "fsr1" && scale < 0.999;

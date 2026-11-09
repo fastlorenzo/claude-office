@@ -59,10 +59,6 @@ perf-gate:			# Draw-call budgets at the reference cameras (shot.sh, heavy lock; 
 walk-gate:			# Scripted collider walks must end on the right floor (shot.sh, heavy lock)
 	scripts/walk-gate.sh
 
-.PHONY: bake-lightmaps
-bake-lightmaps:			# Headless export + Cycles bake of the lightmap sets (heavy lock; SAMPLES=512 SETS="...")
-	tools/lightmaps/bake.sh
-
 simulate:			# Run event simulation
 	uv run python scripts/simulate_events.py
 

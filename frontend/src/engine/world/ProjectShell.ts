@@ -266,9 +266,7 @@ function buildEndWall(scene: Scene, materials: Materials): Built {
   const arch = new ArtBatcher(scene, materials, "projEnd", 17);
   arch.box("wall", v3(d / 2, H / 2, 0), v3(d, H, 0.1));
   for (const s of [-1, 1])
-    arch.box("skirting", v3(d / 2, 0.035, s * 0.055), v3(d, 0.07, 0.01), {
-      bevel: 0.002,
-    });
+    arch.box("skirting", v3(d / 2, 0.035, s * 0.055), v3(d, 0.07, 0.01));
   // Graphite pier facing the hall.
   arch.rbox("wallFeature", v3(-0.03, H / 2, 0), v3(0.14, H, 0.16), {
     r: 0.006,
@@ -452,6 +450,12 @@ export class ShellModule {
     if (!m || m.parts.some((p) => p.isDisposed())) {
       m = new ShellModule(scene, materials, lighting, kind);
       byKind.set(kind, m);
+      if (kind === "pod") {
+        const mod = m;
+        (
+          globalThis as { __claudeOfficeExportRoom?: () => string }
+        ).__claudeOfficeExportRoom = () => exportModuleJson(mod);
+      }
     }
     return m;
   }
@@ -471,20 +475,14 @@ export class ShellModule {
     });
     this.plants = built.plants;
     this.localFixtures = built.fixtures;
-    // Module-local geometry, identical in every room: one lightmap for all
-    // the thin instances (fx/BakedLighting, set "modules").
-    const bake = { set: "modules" } as const;
-    const arch = built.arch.build({ receiveShadows: true, bake });
-    const furn = built.furn
-      ? built.furn.build({ receiveShadows: true, bake })
-      : [];
+    const arch = built.arch.build({ receiveShadows: true });
+    const furn = built.furn ? built.furn.build({ receiveShadows: true }) : [];
     for (const p of furn)
       p.metadata = { ...(p.metadata ?? {}), staticCaster: true };
     this.parts = [...arch, ...furn];
     const felt = materials.get("wallFelt");
-    // The felt part may carry its lightmapped variant (same albedo / tint).
     this.tintPart = built.tinted
-      ? (arch.find((p) => materials.baseOf(p.material) === felt) ?? null)
+      ? (arch.find((p) => p.material === felt) ?? null)
       : null;
     for (const p of this.parts) {
       p.metadata = { ...(p.metadata ?? {}), probe: true };
@@ -571,8 +569,24 @@ export function frameMatrix(f: {
   return Matrix.RotationY(f.yaw).multiply(Matrix.Translation(f.ox, 0, f.oz));
 }
 
-// Lightmap export: the prefabs are serialised headless by engine/bake
-// (exportParts.ts, `make bake-lightmaps`), not from a running page.
+/**
+ * Lightmap tooling hook (tools/lightmaps): serialise the pod prefab's merged
+ * parts (local space) as JSON. Exposed on `globalThis.__claudeOfficeExportRoom()`.
+ */
+export function exportModuleJson(m: ShellModule): string {
+  const parts = m.parts.map((p) => ({
+    name: p.name,
+    material: p.material?.name ?? "",
+    emissive:
+      (p.material as { disableLighting?: boolean } | null)?.disableLighting ??
+      false,
+    transparent: p.material?.needAlphaBlending() ?? false,
+    positions: Array.from(p.getVerticesData("position") ?? []),
+    normals: Array.from(p.getVerticesData("normal") ?? []),
+    indices: Array.from(p.getIndices() ?? []),
+  }));
+  return JSON.stringify({ module: m.kind, version: 2, parts });
+}
 
 function hexToLinear(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", ""), 16);

@@ -1041,13 +1041,13 @@ export class ControlRoom {
           "aluminium",
           v3((x0 + x1) / 2, railY, (z0 + z1) / 2),
           v3(0.05, 0.03, len),
-          { yaw, bevel: 0.006 },
+          { yaw },
         );
         b.box(
           "aluminium",
           v3((x0 + x1) / 2, railY - 0.42, (z0 + z1) / 2),
           v3(0.02, 0.02, len),
-          { yaw, bevel: 0.004 },
+          { yaw },
         );
         const n = Math.max(1, Math.round(len / 1.1));
         for (let i = 0; i <= n; i++) {
@@ -1143,10 +1143,7 @@ export class ControlRoom {
     // Walkable decks: tier riser + supervisor platform (slabs and ramps).
     addDeckColliders(colliders, GROUP, p);
 
-    const built = b.build({
-      receiveShadows: true,
-      bake: { set: "control", origin: { x: cx, y: 0, z: cz } },
-    });
+    const built = b.build({ receiveShadows: true });
     for (const m of built) {
       m.metadata = { ...(m.metadata ?? {}), probe: true };
       m.isPickable = false;
@@ -1251,10 +1248,7 @@ export class ControlRoom {
         { yaw: ma, r: 0.005 },
       );
       const k = onArc(ccx, ccz, rm + 0.06, ma);
-      b.box("blackMetal", v3(k.x, yC, k.z), v3(0.08, 0.08, 0.05), {
-        yaw: ma,
-        bevel: 0.01,
-      });
+      b.box("blackMetal", v3(k.x, yC, k.z), v3(0.08, 0.08, 0.05), { yaw: ma });
     }
   }
 

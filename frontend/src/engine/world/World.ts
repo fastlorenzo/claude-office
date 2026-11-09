@@ -53,7 +53,6 @@ import {
   largestTextures,
   textureMBByGroup,
 } from "@/engine/fx/textureMemory";
-import { BakedLighting, type BakeLoadOptions } from "@/engine/fx/BakedLighting";
 import { Lighting } from "@/engine/fx/Lighting";
 import { PostFx } from "@/engine/fx/PostFx";
 import { InputController, type InputEvent } from "@/engine/input/Input";
@@ -271,8 +270,6 @@ class World implements IWorld {
   private fx: PostFx | null = null;
   private interaction: Interaction | null = null;
   private building: Building | null = null;
-  /** Baked lightmaps (loaded before the building; null = not loaded yet). */
-  private bakes: BakedLighting | null = null;
   /** Software-factory level under the offices (shell + machine pools). */
   private factory: Factory | null = null;
   /** Production lines (pools + motion) fed from the campus projects. */
@@ -529,16 +526,6 @@ class World implements IWorld {
       await Promise.all([
         this.lighting.loadEnvironment(this.opts.assetBase, 256),
         this.materials.loadTextures(),
-        // Lightmaps must be in before the building (and the freeze): the
-        // batchers swap baked materials / UV2 in as they merge.
-        BakedLighting.load(
-          this.scene,
-          this.materials,
-          this.lighting,
-          bakeQueryOptions(),
-        ).then((b) => {
-          this.bakes = b;
-        }),
         this.assets.preload(),
         // Don't hold the world hostage to large avatar downloads.
         Promise.race([characters, new Promise((r) => setTimeout(r, 15000))]),
@@ -633,7 +620,6 @@ class World implements IWorld {
     this.fx?.dispose();
     this.labels.dispose();
     this.player?.dispose();
-    this.bakes?.dispose();
     this.lighting.dispose();
     this.assets.dispose();
     this.colliders.dispose();
@@ -1495,13 +1481,6 @@ class World implements IWorld {
         tex2: this.materials.textureStats(),
         /** Shell parts that cannot draw, per group (see vanishDiag.ts). */
         ...this.vanishStats(),
-        /** Lightmapped sets / mismatched parts (fx/BakedLighting). */
-        bakes: this.bakes?.stats() ?? {
-          active: [],
-          mismatched: [],
-          missing: true,
-          parts: 0,
-        },
         ...(this.debug.drawBreakdown
           ? {
               passes: this.passDraws,
@@ -1719,24 +1698,4 @@ function logVanish(r: VanishReport): void {
         bbox: x.bbox.join(","),
       })),
     );
-}
-
-/**
- * Dev switches for the lightmaps (any page): `?bakes=0` realtime only,
- * `?bakeFixture=1` synthetic lightmaps, `?bakeGain=` / `?bakeIbl=` tuning.
- */
-function bakeQueryOptions(): BakeLoadOptions {
-  if (typeof location === "undefined") return {};
-  const q = new URLSearchParams(location.search);
-  const num = (k: string) => {
-    const v = q.get(k);
-    const n = v === null ? NaN : Number(v);
-    return Number.isFinite(n) ? n : undefined;
-  };
-  return {
-    disabled: q.get("bakes") === "0",
-    fixture: q.get("bakeFixture") === "1",
-    gainScale: num("bakeGain"),
-    iblScale: num("bakeIbl"),
-  };
 }

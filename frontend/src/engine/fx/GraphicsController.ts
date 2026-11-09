@@ -177,8 +177,6 @@ function thinNear(m: Mesh, eye: Vector3, range: number): boolean {
   return false;
 }
 
-/** Shared empty list: Babylon renders nothing for [], the whole scene for null. */
-const EMPTY_LIST: AbstractMesh[] = [];
 const INSPECT_IN = 7; // 1/s exponential rates
 const INSPECT_OUT = 9;
 
@@ -195,8 +193,6 @@ export class GraphicsController {
   private iblNoted = false;
   private gbufHooked: unknown = null;
   private readonly gbufList: AbstractMesh[] = [];
-  /** Baked lightmaps carry the AO: forces SSAO off at every tier. */
-  private bakesActive = false;
 
   constructor(
     private readonly t: GfxTargets,
@@ -207,16 +203,7 @@ export class GraphicsController {
     this.governor = new QualityGovernor(initial.preset === "auto", lowEnd, () =>
       this.refresh(),
     );
-    this.plan = planFx(resolveEffective(initial, this.governor.tier), {
-      bakesActive: this.bakesActive,
-    });
-  }
-
-  /** Lightmaps active: drop SSAO (and its G-buffer pass unless SSR needs it). */
-  setBakesActive(b: boolean): void {
-    if (b === this.bakesActive) return;
-    this.bakesActive = b;
-    this.refresh();
+    this.plan = planFx(resolveEffective(initial, this.governor.tier));
   }
 
   get settings(): GraphicsSettings {
@@ -319,7 +306,7 @@ export class GraphicsController {
     mrt.getCustomRenderList = (_i, list, len) => {
       const range = this.plan?.gbufferRangeM ?? 0;
       const cam = scene.activeCamera;
-      if (range <= 0 || !cam || !list) return EMPTY_LIST;
+      if (range <= 0 || !cam || !list) return null;
       const eye = cam.globalPosition;
       out.length = 0;
       for (let i = 0; i < len; i++) {
@@ -359,7 +346,7 @@ export class GraphicsController {
 
   private refresh(): void {
     const eff = resolveEffective(this.requested, this.governor.tier);
-    this.plan = planFx(eff, { bakesActive: this.bakesActive });
+    this.plan = planFx(eff);
     if (!this.started) return;
     this.applyPlan(this.plan);
   }

@@ -22,10 +22,7 @@ import {
 import type { ColliderSink } from "@/engine/physics/Colliders";
 import type { SurfaceKey } from "@/engine/materials/Materials";
 import { fixture, type FixturePoint } from "@/engine/fx/Lighting";
-import { ArtBatcher, softBox } from "@/engine/art/geometry";
-
-/** Glass panes keep sharp edges (a bevel would catch light like a lip). */
-const isGlassMat = (m: SurfaceKey): boolean => m.startsWith("glass");
+import { ArtBatcher } from "@/engine/art/geometry";
 import { MeshBatcher, v3 } from "@/engine/util/MeshBatcher";
 
 export interface Opening {
@@ -132,10 +129,8 @@ export function windowUnit(
     depth: number,
     off = 0,
   ) => {
-    const r = isGlassMat(mat) ? 0 : 0.003;
-    if (axis === "z")
-      softBox(b, mat, v3(fixed + off, y, a), v3(depth, h, len), r);
-    else softBox(b, mat, v3(a, y, fixed + off), v3(len, h, depth), r);
+    if (axis === "z") b.box(mat, v3(fixed + off, y, a), v3(depth, h, len));
+    else b.box(mat, v3(a, y, fixed + off), v3(len, h, depth));
   };
   const w = o.a1 - o.a0;
   const h = o.y1 - o.y0;
@@ -222,10 +217,8 @@ export function glassPartition(
     depth: number,
   ) => {
     if (len <= 0.002 || h <= 0.002) return;
-    // Free-standing metal profiles catch a highlight; glass stays sharp.
-    const r = mat === frame ? 0.003 : 0;
-    if (axis === "z") softBox(b, mat, v3(fixed, y, a), v3(depth, h, len), r);
-    else softBox(b, mat, v3(a, y, fixed), v3(len, h, depth), r);
+    if (axis === "z") b.box(mat, v3(fixed, y, a), v3(depth, h, len));
+    else b.box(mat, v3(a, y, fixed), v3(len, h, depth));
   };
   const runs: [number, number][] = [];
   const solids = opts.solid ?? [];
@@ -757,12 +750,10 @@ export function glassBalustrade(
   const len = Math.abs(a1 - a0);
   if (len < 0.01) return;
   const c = (a0 + a1) / 2;
-  const put = (mat: SurfaceKey, y: number, hh: number, d: number) => {
-    const r = isGlassMat(mat) ? 0 : 0.004; // shoe + handrail catch light
-    return axis === "z"
-      ? softBox(b, mat, v3(fixed, y, c), v3(d, hh, len), r)
-      : softBox(b, mat, v3(c, y, fixed), v3(len, hh, d), r);
-  };
+  const put = (mat: SurfaceKey, y: number, hh: number, d: number) =>
+    axis === "z"
+      ? b.box(mat, v3(fixed, y, c), v3(d, hh, len))
+      : b.box(mat, v3(c, y, fixed), v3(len, hh, d));
   put("blackMetal", y0 + 0.05, 0.1, 0.07); // base shoe
   put(opts.glass ?? "glass", y0 + 0.1 + (h - 0.14) / 2, h - 0.14, 0.014);
   put("blackMetal", y0 + h - 0.02, 0.04, 0.05); // handrail

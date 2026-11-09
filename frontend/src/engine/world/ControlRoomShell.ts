@@ -289,7 +289,6 @@ export function buildControlShell(
     const q = onArc(cx, cz, rGlass, a);
     b.box("blackMetal", v3(q.x, head / 2, q.z), v3(0.06, head - 0.04, 0.14), {
       yaw: a,
-      bevel: 0.004,
     });
   }
 
@@ -416,18 +415,11 @@ export function buildControlShell(
       "steelPainted",
       v3(x, (fy + soffit) / 2, z),
       v3(COLUMN, soffit - fy, COLUMN),
-      { bevel: 0.006 },
     );
-    b.box("steelPainted", v3(x, fy + 0.015, z), v3(0.55, 0.03, 0.55), {
-      bevel: 0.005,
-    });
-    b.box("steelPainted", v3(x, soffit - 0.015, z), v3(0.45, 0.03, 0.45), {
-      bevel: 0.005,
-    });
+    b.box("steelPainted", v3(x, fy + 0.015, z), v3(0.55, 0.03, 0.55));
+    b.box("steelPainted", v3(x, soffit - 0.015, z), v3(0.45, 0.03, 0.45));
     b.paint = paintOf(YELLOW);
-    b.box("paint", v3(x, fy + 0.5, z), v3(COLUMN + 0.03, 0.9, COLUMN + 0.03), {
-      bevel: 0.005,
-    });
+    b.box("paint", v3(x, fy + 0.5, z), v3(COLUMN + 0.03, 0.9, COLUMN + 0.03));
     b.paint = null;
     colliders.addBox(
       group,
@@ -436,10 +428,7 @@ export function buildControlShell(
     );
   }
 
-  const meshes = b.build({
-    receiveShadows: true,
-    bake: { set: "control", origin: { x: cx, y: 0, z: cz } },
-  });
+  const meshes = b.build({ receiveShadows: true });
   for (const m of meshes) {
     m.isPickable = false;
     if (m.material?.needAlphaBlending()) m.alphaIndex = 0;

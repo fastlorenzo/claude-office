@@ -144,7 +144,9 @@ export interface InstallOptions {
 
 export function installArgs(hookCmd: string, opts: InstallOptions): string[] {
   const args = ["install", "--hook-cmd", hookCmd, "--api-key", opts.apiKey];
-  args.push("--api-url", opts.apiUrl);
+  // One token, never a separate "" argument: wsl.exe (WSL bridge) may drop
+  // empty arguments, which would make the next flag the URL.
+  args.push(`--api-url=${opts.apiUrl}`);
   if (opts.replaceKey) args.push("--replace-api-key");
   if (opts.statusline) args.push("--statusline");
   args.push("--json");

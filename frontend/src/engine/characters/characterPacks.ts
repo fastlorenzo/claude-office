@@ -65,7 +65,6 @@ import {
   SEATED_CLIPS,
   type RigClip,
 } from "./gltfLayers";
-import { tuneCharacterMaterials } from "./characterMaterials";
 import type { ClipTemplates, RigSpec, TemplateClip } from "./GltfRig";
 import type { MannequinOptions } from "./MannequinRig";
 import {
@@ -104,7 +103,6 @@ const defaultIo: PackIo = {
     }).then(
       (c) => {
         for (const g of c.animationGroups) g.stop();
-        tuneCharacterMaterials(c);
         return c;
       },
       (err: unknown) => {
