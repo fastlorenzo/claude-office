@@ -35,15 +35,19 @@ def _allowed_ws_origins() -> frozenset[str]:
     """Origins permitted for WebSocket connections, derived from settings.
 
     Filtered to loopback hosts so a CORS-config change can never open the
-    WebSocket stream to non-local origins.
+    WebSocket stream to non-local origins. ``WS_EXTRA_ORIGINS`` is the explicit,
+    exact-match opt-in for a non-loopback origin (reverse-proxy deployments).
     """
     from app.config import get_settings
 
-    return frozenset(
+    settings = get_settings()
+    loopback = {
         origin.rstrip("/")
-        for origin in get_settings().BACKEND_CORS_ORIGINS
+        for origin in settings.BACKEND_CORS_ORIGINS
         if urlparse(origin).hostname in _LOCALHOST_HOSTS
-    )
+    }
+    extra = {origin.rstrip("/") for origin in settings.WS_EXTRA_ORIGINS if origin}
+    return frozenset(loopback | extra)
 
 
 def validate_websocket_origin(websocket: WebSocket) -> bool:

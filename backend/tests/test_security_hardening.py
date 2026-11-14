@@ -233,6 +233,37 @@ class TestWebSocketOriginValidation:
         ws = self._make_ws(origin="https://evil.com")
         assert validate_websocket_origin(ws) is False
 
+    def test_ws_extra_origin_accepted_exact_match_only(self) -> None:
+        """WS_EXTRA_ORIGINS opts a non-loopback origin in, exact match only."""
+        settings = get_settings()
+        original = settings.WS_EXTRA_ORIGINS
+        settings.WS_EXTRA_ORIGINS = ["https://office.example.lan/"]
+        try:
+            ok = self._make_ws(origin="https://office.example.lan")
+            assert validate_websocket_origin(ok) is True
+            for bad in (
+                "http://office.example.lan",
+                "https://office.example.lan:8443",
+                "https://evil.office.example.lan",
+                "https://evil.com",
+            ):
+                assert validate_websocket_origin(self._make_ws(origin=bad)) is False
+        finally:
+            settings.WS_EXTRA_ORIGINS = original
+
+    def test_cors_origin_does_not_imply_ws_extra(self) -> None:
+        """A non-loopback CORS origin stays WS-refused unless listed in
+        WS_EXTRA_ORIGINS (QA-014 holds with the opt-in present)."""
+        settings = get_settings()
+        orig_cors, orig_extra = settings.BACKEND_CORS_ORIGINS, settings.WS_EXTRA_ORIGINS
+        settings.BACKEND_CORS_ORIGINS = [*orig_cors, "https://office.example.lan"]
+        settings.WS_EXTRA_ORIGINS = []
+        try:
+            ws = self._make_ws(origin="https://office.example.lan")
+            assert validate_websocket_origin(ws) is False
+        finally:
+            settings.BACKEND_CORS_ORIGINS, settings.WS_EXTRA_ORIGINS = orig_cors, orig_extra
+
     def test_no_origin_no_key_configured_rejected(self) -> None:
         """No origin + no key = rejected even without explicit CLAUDE_OFFICE_API_KEY.
 

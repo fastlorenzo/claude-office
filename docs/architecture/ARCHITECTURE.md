@@ -986,6 +986,7 @@ All configuration is managed via environment variables or a `.env` file in the `
 | `CLAUDE_OFFICE_API_KEY` | (empty — auto-generated per launch) | Explicit API key; when set, gates all state-changing endpoints via `X-API-Key` (see [Authentication](#authentication)) |
 | `SERVE_STATIC` | (unset) | Set to `1`/`true`/`yes` to serve the built frontend from `backend/static/` |
 | `BACKEND_CORS_ORIGINS` | localhost origins | Allowed CORS origins (localhost only by default) |
+| `WS_EXTRA_ORIGINS` | (empty) | Extra browser origins accepted on WebSocket handshakes, exact match. WebSocket otherwise only accepts the loopback entries of `BACKEND_CORS_ORIGINS`; set this for a reverse proxy on a non-loopback hostname (e.g. `["https://office.example.lan"]`) |
 | `CLAUDE_OFFICE_DATA_DIR` | (empty) | Writable state dir; the DB and `telemetry_state.json` default into it (explicit `DATABASE_URL`/`TELEMETRY_STATE_PATH` win). Set by the desktop app |
 | `CLAUDE_OFFICE_STATIC_DIR` | (empty → `backend/static/`) | Frontend export served when `SERVE_STATIC` is on. Set by the desktop app |
 | `CLAUDE_OFFICE_WSL_BRIDGE` | (auto: on for Windows) | Translate `data.wsl_distro` events' transcript paths to `\\wsl.localhost\…`; override for tests |

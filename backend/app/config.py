@@ -36,6 +36,13 @@ class Settings(BaseSettings):
         "http://127.0.0.1:8000",
     ]
 
+    # Extra browser origins allowed on WebSocket handshakes, exact match, on top
+    # of the loopback entries of BACKEND_CORS_ORIGINS. Empty by default: widening
+    # CORS never widens the WS trust boundary (QA-014); a deployment behind a
+    # reverse proxy on a non-loopback hostname opts in here explicitly
+    # (e.g. WS_EXTRA_ORIGINS=["https://office.example.lan"]).
+    WS_EXTRA_ORIGINS: list[str] = []
+
     # Persisted telemetry rollups (today's cost, series, rate-limit samples).
     TELEMETRY_STATE_PATH: str = str(_BACKEND_DIR / "telemetry_state.json")
     # Min spacing of telemetry-triggered campus broadcasts.
