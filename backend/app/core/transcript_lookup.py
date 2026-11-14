@@ -33,6 +33,10 @@ def allowed_roots() -> list[str]:
     container = get_settings().CLAUDE_PATH_CONTAINER
     if container:
         roots.append(os.path.realpath(container))
+    # Hook-fed copies of remote sessions' transcripts (transcript_mirror).
+    from app.core.transcript_mirror import mirror_root
+
+    roots.append(os.path.realpath(mirror_root()))
     return roots
 
 

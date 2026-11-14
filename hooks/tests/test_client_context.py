@@ -208,3 +208,95 @@ def test_collect_tasks_only_on_change(tmp_path: Path) -> None:
     assert cc.collect_tasks(state, [d]) is None
     # Nothing ever existed: nothing to send.
     assert cc.collect_tasks({}, [tmp_path / "missing"]) is None
+
+
+def test_trim_line_caps_and_drops() -> None:
+    big = "x" * (cc.SYNC_STR_CAP + 100)
+    rec = {
+        "type": "user",
+        "message": {
+            "content": [
+                {"type": "tool_result", "content": big},
+                {"type": "image", "source": {"type": "base64", "data": "AAAA"}},
+            ]
+        },
+    }
+    out = cc.trim_line(json.dumps(rec).encode())
+    assert out is not None
+    parsed = json.loads(out)
+    content = parsed["message"]["content"]
+    assert content[0]["content"].endswith("...[truncated]")
+    assert content[1] == {"type": "image", "source": {"type": "omitted"}}
+    assert cc.trim_line(b'{"type": "file-history-snapshot", "x": 1}') is None
+    assert cc.trim_line(b"not json") is None
+
+
+def _session_files(tmp_path: Path) -> tuple[Path, Path]:
+    main = tmp_path / "projects" / "-home-u-w" / "sid.jsonl"
+    sub = main.with_suffix("") / "subagents"
+    sub.mkdir(parents=True)
+    return main, sub
+
+
+def test_collect_sync_incremental_with_subagents(tmp_path: Path) -> None:
+    main, sub = _session_files(tmp_path)
+    _write_lines(main, [{"type": "user", "n": 1}, {"type": "assistant", "n": 2}])
+    _write_lines(sub / "agent-a1.jsonl", [{"type": "assistant", "n": 3}])
+    (sub / "agent-a1.meta.json").write_text('{"toolUseId": "t1"}')
+    state: dict[str, Any] = {}
+    chunks = cc.collect_sync(state, str(main))
+    by_path = {c["path"]: c for c in chunks}
+    m = by_path[str(main)]
+    assert [json.loads(t)["n"] for _, t in m["lines"]] == [1, 2]
+    assert m["lines"][0][0] == 0 and m["end"] == main.stat().st_size
+    assert len(by_path[str(sub / "agent-a1.jsonl")]["lines"]) == 1
+    assert by_path[str(sub / "agent-a1.meta.json")]["content"] == '{"toolUseId": "t1"}'
+    # Nothing new: nothing sent (meta unchanged too).
+    assert cc.collect_sync(state, str(main)) == []
+    # Appended line + a partial one still being written.
+    size = main.stat().st_size
+    _write_lines(main, [{"type": "user", "n": 4}], mode="a")
+    with open(main, "a", encoding="utf-8") as fh:
+        fh.write('{"type": "assistant", "n"')
+    chunks = cc.collect_sync(state, str(main))
+    assert len(chunks) == 1 and chunks[0]["lines"][0][0] == size
+    assert [json.loads(t)["n"] for _, t in chunks[0]["lines"]] == [4]
+
+
+def test_collect_sync_first_sync_starts_at_tail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cc, "SYNC_INITIAL_TAIL", 100)
+    main, _ = _session_files(tmp_path)
+    _write_lines(main, [{"type": "user", "pad": "p" * 60, "n": i} for i in range(10)])
+    chunks = cc.collect_sync({}, str(main))
+    ns = [json.loads(t)["n"] for _, t in chunks[0]["lines"]]
+    assert ns and ns[-1] == 9 and ns[0] > 0
+
+
+def test_collect_sync_send_budget_resumes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cc, "SYNC_MAX_SEND", 60)
+    main, _ = _session_files(tmp_path)
+    _write_lines(main, [{"type": "user", "n": i, "pad": "q" * 20} for i in range(5)])
+    state: dict[str, Any] = {}
+    seen: list[int] = []
+    for _ in range(10):
+        for c in cc.collect_sync(state, str(main)):
+            seen += [json.loads(t)["n"] for _, t in c["lines"]]
+    assert seen == [0, 1, 2, 3, 4]
+
+
+def test_absorb_response_mirror_offsets() -> None:
+    state: dict[str, Any] = {"sync": {"/p/a.jsonl": 500}}
+    cc.absorb_response(state, b'{"context": "push", "mirror": {"/p/a.jsonl": 800, "/x": -1}}')
+    assert state["sync"] == {"/p/a.jsonl": 800}
+
+
+def test_first_sync_tail_starting_inside_a_long_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cc, "SYNC_INITIAL_TAIL", 1000)
+    main, _ = _session_files(tmp_path)
+    _write_lines(main, [{"type": "user", "pad": "z" * 5000, "n": 0}, {"type": "user", "n": 1}])
+    chunks = cc.collect_sync({}, str(main))
+    assert [json.loads(t)["n"] for _, t in chunks[0]["lines"]] == [1]

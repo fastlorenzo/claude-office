@@ -23,6 +23,7 @@ from app.core.ci_poller import get_ci_poller
 from app.core.event_processor import EventProcessor, get_event_processor
 from app.core.local_git import get_local_git
 from app.core.summary_service import get_summary_service
+from app.core.transcript_mirror import prune_mirror
 from app.db.database import Base, get_engine
 from app.db.migrate import migrate_schema
 from app.db.models import EventRecord, SessionRecord
@@ -58,6 +59,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         await migrate_schema(conn)
 
     await _reap_stale_sessions()
+    # Drop mirrored transcripts of long-gone remote sessions (transcript_mirror).
+    with contextlib.suppress(OSError):
+        await asyncio.to_thread(prune_mirror)
 
     # Deliver the auto-generated key via the launch console (the trust boundary:
     # only the launching user sees the terminal). Never echo an explicitly

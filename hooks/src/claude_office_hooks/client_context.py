@@ -13,6 +13,8 @@ those facts here, where the files are, and attaches them to the event payload:
                      from the transcript.
 * ``task_files``     the session's task list (``~/.claude/tasks``) when it
                      changed.
+* ``transcript_sync`` the transcript lines (main + subagents) appended since
+                     the last event, trimmed, for the backend's mirror.
 
 Per-session progress (title offset, last git snapshot, ...) lives in a small
 JSON file under ``STATE_DIR`` so each hook run only does incremental work.
@@ -53,6 +55,16 @@ GIT_TOOLS = frozenset({"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Po
 TASKS_DIR = Path.home() / ".claude" / "tasks"
 TASK_MAX_FILES = 200
 TASK_MAX_BYTES = 64 * 1024  # skip a task file larger than this
+
+# Transcript mirror (backend app.core.transcript_mirror).
+SYNC_INITIAL_TAIL = 2 * 1024 * 1024  # first sync of an existing transcript: its tail
+SYNC_MAX_READ = 1024 * 1024  # raw bytes read per hook run, all files together
+SYNC_MAX_SEND = 768 * 1024  # trimmed bytes sent per hook run
+SYNC_STR_CAP = 8 * 1024  # any longer string in a record is cut
+SYNC_LINE_CAP = 64 * 1024  # a record still longer is cut harder
+SYNC_DROP_TYPES = frozenset({"file-history-snapshot"})
+SYNC_SKIP_SCAN = 64 * 1024 * 1024  # how far to look for the end of a giant line
+META_MAX_BYTES = 64 * 1024
 
 TITLE_SCAN_BYTES = 32 * 1024 * 1024  # catch up at most this much per hook run
 TITLE_MAX_CHARS = 200
@@ -419,6 +431,141 @@ def collect_tasks(state: dict[str, Any], dirs: list[Path]) -> list[dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# Transcript sync (new lines only, trimmed)
+# ---------------------------------------------------------------------------
+
+
+def _trim(value: Any, cap: int) -> Any:
+    """Cap every string at *cap* chars; drop inline image/document data."""
+    if isinstance(value, str):
+        return value if len(value) <= cap else value[:cap] + "...[truncated]"
+    if isinstance(value, list):
+        return [_trim(v, cap) for v in cast(list[Any], value)]
+    if isinstance(value, dict):
+        d = cast(dict[str, Any], value)
+        if d.get("type") in ("image", "document") and isinstance(d.get("source"), dict):
+            return {"type": d["type"], "source": {"type": "omitted"}}
+        return {k: _trim(v, cap) for k, v in d.items()}
+    return value
+
+
+def trim_line(raw: bytes) -> str | None:
+    """One transcript record, trimmed for the mirror (None to skip it)."""
+    try:
+        rec = json.loads(raw)
+    except ValueError:
+        return None
+    if isinstance(rec, dict) and cast(dict[str, Any], rec).get("type") in SYNC_DROP_TYPES:
+        return None
+    out = json.dumps(_trim(rec, SYNC_STR_CAP), ensure_ascii=False, separators=(",", ":"))
+    if len(out) > SYNC_LINE_CAP:
+        out = json.dumps(_trim(rec, 512), ensure_ascii=False, separators=(",", ":"))
+    return out
+
+
+def sync_targets(transcript_path: str) -> tuple[list[str], list[str]]:
+    """(jsonl files, subagent meta files) of a session: main + its subagents."""
+    files = [transcript_path]
+    metas: list[str] = []
+    sub = Path(transcript_path[: -len(".jsonl")] if transcript_path.endswith(".jsonl") else "")
+    if sub.parts:
+        try:
+            entries = sorted((sub / "subagents").iterdir())
+        except OSError:
+            entries = []
+        for p in entries:
+            if p.name.endswith(".meta.json"):
+                metas.append(str(p))
+            elif p.suffix == ".jsonl":
+                files.append(str(p))
+    return files, metas
+
+
+def _initial_offset(fh: Any, size: int) -> int:
+    """Start of the first whole line within the last ``SYNC_INITIAL_TAIL`` bytes."""
+    if size <= SYNC_INITIAL_TAIL:
+        return 0
+    # The tail may start inside a long line (tool results reach megabytes).
+    return _skip_line(fh, size - SYNC_INITIAL_TAIL, size)
+
+
+def _skip_line(fh: Any, off: int, size: int) -> int:
+    """Offset just past the line starting at *off* (a line too big to send)."""
+    pos = off
+    fh.seek(off)
+    while pos < size and pos - off < SYNC_SKIP_SCAN:
+        block = cast(bytes, fh.read(1024 * 1024))
+        if not block:
+            break
+        nl = block.find(b"\n")
+        if nl >= 0:
+            return pos + nl + 1
+        pos += len(block)
+    return pos
+
+
+def collect_sync(state: dict[str, Any], transcript_path: str) -> list[dict[str, Any]]:
+    """Chunks of lines appended since the last run (offsets kept in *state*)."""
+    offsets = cast(dict[str, int], state.setdefault("sync", {}))
+    meta_sigs = cast(dict[str, list[int]], state.setdefault("meta", {}))
+    files, metas = sync_targets(transcript_path)
+    read_left, send_left = SYNC_MAX_READ, SYNC_MAX_SEND
+    chunks: list[dict[str, Any]] = []
+    for path in files:
+        if read_left <= 0 or send_left <= 0:
+            break
+        try:
+            size = os.path.getsize(path)
+            if offsets.get(path) == size:
+                continue  # unchanged (the common case: no open)
+            with open(path, "rb") as fh:
+                off = offsets.get(path)
+                if off is None:
+                    off = _initial_offset(fh, size)
+                if size < off:
+                    off = 0  # rewritten
+                if size == off:
+                    offsets[path] = off
+                    continue
+                fh.seek(off)
+                data = fh.read(min(size - off, read_left))
+                last_nl = data.rfind(b"\n")
+                if last_nl < 0:
+                    if len(data) >= SYNC_MAX_READ:
+                        offsets[path] = _skip_line(fh, off, size)  # one giant line
+                        chunks.append({"path": path, "end": offsets[path], "lines": []})
+                    continue  # a line still being written
+        except OSError:
+            continue
+        lines: list[list[Any]] = []
+        pos = off
+        for raw in data[: last_nl + 1].split(b"\n")[:-1]:
+            line_off = pos
+            text = trim_line(raw)
+            if text is not None:
+                if lines and len(text) > send_left:
+                    break  # the rest goes with the next hook run
+                lines.append([line_off, text])
+                send_left -= len(text)
+            pos = line_off + len(raw) + 1
+        read_left -= pos - off
+        offsets[path] = pos
+        chunks.append({"path": path, "end": pos, "lines": lines})
+    for meta in metas:
+        try:
+            st = os.stat(meta)
+            sig = [st.st_mtime_ns, st.st_size]
+            if meta_sigs.get(meta) == sig or st.st_size > META_MAX_BYTES:
+                continue
+            content = Path(meta).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        meta_sigs[meta] = sig
+        chunks.append({"path": meta, "content": content})
+    return chunks
+
+
+# ---------------------------------------------------------------------------
 # Entry points used by main.py
 # ---------------------------------------------------------------------------
 
@@ -450,6 +597,9 @@ def enrich(payload: dict[str, Any], state: dict[str, Any]) -> None:
                 data["custom_title"] = custom
             if ai:
                 data["ai_title"] = ai
+            chunks = collect_sync(state, transcript)
+            if chunks:
+                data["transcript_sync"] = chunks
     except Exception:  # noqa: BLE001 - context is best effort, never break the hook
         pass
 
@@ -464,6 +614,14 @@ def absorb_response(state: dict[str, Any], body: bytes | None) -> None:
         return
     if not isinstance(resp, dict):
         return
-    mode = cast(dict[str, Any], resp).get("context")
+    resp_d = cast(dict[str, Any], resp)
+    mode = resp_d.get("context")
     if mode in ("local", "push"):
         state["mode"] = mode
+    mirror = resp_d.get("mirror")
+    if isinstance(mirror, dict):
+        # The backend's copy is the truth: resume from where it actually got.
+        offsets = cast(dict[str, Any], state.setdefault("sync", {}))
+        for path, end in cast(dict[str, Any], mirror).items():
+            if isinstance(end, int) and end >= 0:
+                offsets[path] = end

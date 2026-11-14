@@ -1,4 +1,5 @@
 import importlib.metadata
+import os
 import secrets
 from functools import lru_cache
 from pathlib import Path
@@ -169,6 +170,10 @@ class Settings(BaseSettings):
     # there instead of next to the source tree. An explicit DATABASE_URL or
     # TELEMETRY_STATE_PATH still wins.
     CLAUDE_OFFICE_DATA_DIR: str = ""
+    # Where remote sessions' transcripts are mirrored (hook ``transcript_sync``,
+    # see app.core.transcript_mirror). Empty: ``mirror/`` next to the data dir
+    # or the SQLite DB.
+    TRANSCRIPT_MIRROR_DIR: str = ""
     # Directory holding the frontend static export, served when SERVE_STATIC=1.
     # Empty means ``<backend>/static`` (the ``make build-static`` target).
     CLAUDE_OFFICE_STATIC_DIR: str = ""
@@ -210,6 +215,9 @@ class Settings(BaseSettings):
         Args:
             path: File path to translate (e.g., transcript_path from hooks)
 
+        Falls back to the transcript mirror (``app.core.transcript_mirror``)
+        when the path does not exist here but a mirrored copy does.
+
         Returns:
             Translated path for the current environment
         """
@@ -218,7 +226,15 @@ class Settings(BaseSettings):
             and self.CLAUDE_PATH_CONTAINER
             and path.startswith(self.CLAUDE_PATH_HOST)
         ):
-            return path.replace(self.CLAUDE_PATH_HOST, self.CLAUDE_PATH_CONTAINER, 1)
+            path = path.replace(self.CLAUDE_PATH_HOST, self.CLAUDE_PATH_CONTAINER, 1)
+        # A remote session's transcript (another machine, or outside our
+        # container): read the hook-fed mirror copy instead.
+        if path and not os.path.exists(path):
+            from app.core.transcript_mirror import mirror_path  # avoids an import cycle
+
+            mirrored = mirror_path(path)
+            if mirrored is not None and mirrored.exists():
+                return str(mirrored)
         return path
 
 

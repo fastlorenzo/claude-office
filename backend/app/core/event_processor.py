@@ -106,7 +106,7 @@ MAX_HISTORY_ENTRIES = 500
 
 # Event data fields the hook pushes for immediate use only (client_context);
 # never stored with the event row (bulky, and replay does not need them).
-_TRANSIENT_FIELDS = {"task_files"}
+_TRANSIENT_FIELDS = {"task_files", "transcript_sync"}
 
 # Hook-pushed task files are bounded before use (a misbehaving client).
 _MAX_PUSHED_TASKS = 500

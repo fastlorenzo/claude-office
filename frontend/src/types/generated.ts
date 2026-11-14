@@ -93,6 +93,11 @@ export type TaskFiles =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync = TranscriptChunk[] | null;
+export type Path1 = string;
+export type End = number | null;
+export type Lines = [unknown, unknown][] | null;
+export type Content = string | null;
 export type Summary = string | null;
 export type Message1 = string | null;
 export type TeamName = string | null;
@@ -163,6 +168,7 @@ export type TaskFiles1 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync1 = TranscriptChunk[] | null;
 export type Summary2 = string | null;
 export type Message2 = string | null;
 export type TeamName1 = string | null;
@@ -282,7 +288,7 @@ export type Branches = string[];
 export type Hash1 = string;
 export type Message3 = string;
 export type At = string;
-export type Path1 = string;
+export type Path2 = string;
 export type Branch4 = string | null;
 export type Sessionid1 = string | null;
 export type Dirtyfiles1 = number;
@@ -308,7 +314,7 @@ export type Contextutilization = number;
 export type Toolusessincecompaction = number;
 export type Printreport = boolean;
 export type TaskId = string;
-export type Content = string;
+export type Content1 = string;
 /**
  * Status of a todo list item.
  *
@@ -529,6 +535,7 @@ export type TaskFiles2 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync2 = TranscriptChunk[] | null;
 export type FloorId2 = string | null;
 export type RoomId2 = string | null;
 export type TeamName2 = string | null;
@@ -560,6 +567,7 @@ export type TaskFiles3 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync3 = TranscriptChunk[] | null;
 export type Summary6 = string | null;
 export type Message5 = string | null;
 export type TeamName3 = string | null;
@@ -649,6 +657,7 @@ export type TaskFiles4 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync4 = TranscriptChunk[] | null;
 export type Summary8 = string | null;
 export type Message6 = string | null;
 export type TeamName4 = string | null;
@@ -695,6 +704,7 @@ export type TaskFiles5 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync5 = TranscriptChunk[] | null;
 export type Summary9 = string | null;
 export type Message7 = string | null;
 export type TeamName5 = string | null;
@@ -731,6 +741,7 @@ export type TaskFiles6 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync6 = TranscriptChunk[] | null;
 export type Summary10 = string | null;
 export type Message8 = string | null;
 export type TeamName6 = string | null;
@@ -760,6 +771,7 @@ export type TaskFiles7 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync7 = TranscriptChunk[] | null;
 export type Summary11 = string | null;
 export type Message9 = string | null;
 export type TeamName7 = string | null;
@@ -796,6 +808,7 @@ export type TaskFiles8 =
       [k: string]: unknown;
     }[]
   | null;
+export type TranscriptSync8 = TranscriptChunk[] | null;
 export type Summary12 = string | null;
 export type Message10 = string | null;
 export type TeamName8 = string | null;
@@ -891,6 +904,7 @@ export interface AgentEventData {
   custom_title?: CustomTitle;
   ai_title?: AiTitle;
   task_files?: TaskFiles;
+  transcript_sync?: TranscriptSync;
   summary?: Summary;
   message?: Message1;
   team_name?: TeamName;
@@ -964,6 +978,23 @@ export interface Commit {
   author: Author;
   timestamp: Timestamp;
   relative_time: RelativeTime;
+  [k: string]: unknown;
+}
+/**
+ * Transcript lines the hook appended since its last event (transcript_mirror).
+ *
+ * ``lines`` are ``[byte offset in the client file, trimmed JSON line]``;
+ * ``end`` is how far the client has read. A ``.meta.json`` file is sent
+ * whole in ``content`` instead.
+ *
+ * This interface was referenced by `ClaudeOfficeBackendTypes`'s JSON-Schema
+ * via the `definition` "TranscriptChunk".
+ */
+export interface TranscriptChunk {
+  path: Path1;
+  end?: End;
+  lines?: Lines;
+  content?: Content;
   [k: string]: unknown;
 }
 /**
@@ -1053,6 +1084,7 @@ export interface BackgroundTaskEventData {
   custom_title?: CustomTitle1;
   ai_title?: AiTitle1;
   task_files?: TaskFiles1;
+  transcript_sync?: TranscriptSync1;
   summary?: Summary2;
   message?: Message2;
   team_name?: TeamName1;
@@ -1252,7 +1284,7 @@ export interface LocalCommit {
  * via the `definition` "LocalWorktree".
  */
 export interface LocalWorktree {
-  path: Path1;
+  path: Path2;
   branch?: Branch4;
   sessionId?: Sessionid1;
   dirtyFiles?: Dirtyfiles1;
@@ -1315,7 +1347,7 @@ export interface OfficeState {
  */
 export interface TodoItem {
   task_id?: TaskId;
-  content: Content;
+  content: Content1;
   status: TodoStatus;
   active_form?: ActiveForm;
   description?: Description;
@@ -1576,6 +1608,7 @@ export interface EventData {
   custom_title?: CustomTitle2;
   ai_title?: AiTitle2;
   task_files?: TaskFiles2;
+  transcript_sync?: TranscriptSync2;
   floor_id?: FloorId2;
   room_id?: RoomId2;
   team_name?: TeamName2;
@@ -1616,6 +1649,7 @@ export interface EventDataBase {
   custom_title?: CustomTitle3;
   ai_title?: AiTitle3;
   task_files?: TaskFiles3;
+  transcript_sync?: TranscriptSync3;
   summary?: Summary6;
   message?: Message5;
   team_name?: TeamName3;
@@ -1775,6 +1809,7 @@ export interface LifecycleEventData {
   custom_title?: CustomTitle4;
   ai_title?: AiTitle4;
   task_files?: TaskFiles4;
+  transcript_sync?: TranscriptSync4;
   summary?: Summary8;
   message?: Message6;
   team_name?: TeamName4;
@@ -1841,6 +1876,7 @@ export interface PromptEventData {
   custom_title?: CustomTitle5;
   ai_title?: AiTitle5;
   task_files?: TaskFiles5;
+  transcript_sync?: TranscriptSync5;
   summary?: Summary9;
   message?: Message7;
   team_name?: TeamName5;
@@ -1892,6 +1928,7 @@ export interface SessionEventData {
   custom_title?: CustomTitle6;
   ai_title?: AiTitle6;
   task_files?: TaskFiles6;
+  transcript_sync?: TranscriptSync6;
   summary?: Summary10;
   message?: Message8;
   team_name?: TeamName6;
@@ -1927,6 +1964,7 @@ export interface TaskEventData {
   custom_title?: CustomTitle7;
   ai_title?: AiTitle7;
   task_files?: TaskFiles7;
+  transcript_sync?: TranscriptSync7;
   summary?: Summary11;
   message?: Message9;
   team_name?: TeamName7;
@@ -1977,6 +2015,7 @@ export interface ToolEventData {
   custom_title?: CustomTitle8;
   ai_title?: AiTitle8;
   task_files?: TaskFiles8;
+  transcript_sync?: TranscriptSync8;
   summary?: Summary12;
   message?: Message10;
   team_name?: TeamName8;

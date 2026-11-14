@@ -20,6 +20,10 @@ def is_safe_transcript_path(path: str | Path) -> bool:
         container_root = get_settings().CLAUDE_PATH_CONTAINER
         if container_root:
             roots.append(Path(container_root).resolve())
+        # Hook-fed copies of remote sessions' transcripts (transcript_mirror).
+        from app.core.transcript_mirror import mirror_root
+
+        roots.append(mirror_root().resolve())
         if resolved.suffix == ".jsonl" and any(resolved.is_relative_to(r) for r in roots):
             return True
         # Windows desktop app: transcripts of Claude Code running inside WSL.

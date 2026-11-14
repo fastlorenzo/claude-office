@@ -61,6 +61,7 @@ from app.models.events import (  # noqa: E402  # type: ignore[import]
     SessionEventData,
     TaskEventData,
     ToolEventData,
+    TranscriptChunk,
 )
 from app.models.git import (  # noqa: E402  # type: ignore[import]
     ChangedFile,
@@ -110,6 +111,7 @@ MODELS = [
     EventDataBase,
     SessionEventData,
     ToolEventData,
+    TranscriptChunk,
     PromptEventData,
     AgentEventData,
     LifecycleEventData,

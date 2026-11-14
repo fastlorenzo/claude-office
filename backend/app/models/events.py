@@ -21,6 +21,7 @@ __all__ = [
     # Discriminated-union layer (ARC-014). Wire format unchanged; consumers
     # narrow to family-specific payloads via the `event_type` discriminator.
     "EventDataBase",
+    "TranscriptChunk",
     "SessionEventData",
     "ToolEventData",
     "PromptEventData",
@@ -67,6 +68,22 @@ class EventType(StrEnum):
     TASK_CREATED = "task_created"
     TASK_COMPLETED = "task_completed"
     TEAMMATE_IDLE = "teammate_idle"
+
+
+class TranscriptChunk(BaseModel):
+    """Transcript lines the hook appended since its last event (transcript_mirror).
+
+    ``lines`` are ``[byte offset in the client file, trimmed JSON line]``;
+    ``end`` is how far the client has read. A ``.meta.json`` file is sent
+    whole in ``content`` instead.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    path: Annotated[str, Field(max_length=1024)]
+    end: int | None = None
+    lines: list[tuple[int, str]] | None = None
+    content: Annotated[str | None, Field(max_length=65536)] = None
 
 
 class EventData(BaseModel):
@@ -124,6 +141,7 @@ class EventData(BaseModel):
     custom_title: str | None = None
     ai_title: str | None = None
     task_files: list[dict[str, Any]] | None = None
+    transcript_sync: list[TranscriptChunk] | None = None
     # Room assignment (populated by ProductMapper)
     floor_id: str | None = None
     room_id: str | None = None
@@ -236,6 +254,9 @@ class EventDataBase(BaseModel):
     # The session's task files (``~/.claude/tasks/<list>/*.json`` objects) when
     # they changed; [] when the list was removed. Not persisted with the event.
     task_files: list[dict[str, Any]] | None = None
+    # Transcript lines for the backend's mirror (remote sessions); written to
+    # disk at intake and never stored with the event.
+    transcript_sync: list[TranscriptChunk] | None = None
     # Free-form text fields used across multiple families.
     summary: str | None = None
     message: str | None = None

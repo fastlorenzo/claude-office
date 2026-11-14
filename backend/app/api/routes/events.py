@@ -1,13 +1,15 @@
+import asyncio
 import logging
 import time
 from collections import deque
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from app.config import get_settings
 from app.core.client_context import context_mode
 from app.core.event_processor import EventProcessor, get_event_processor
+from app.core.transcript_mirror import apply_chunks
 from app.models.events import AnyEvent
 
 logger = logging.getLogger(__name__)
@@ -108,7 +110,7 @@ async def receive_event(
     event: AnyEvent,
     background_tasks: BackgroundTasks,
     ep: Annotated[EventProcessor, Depends(get_event_processor)],
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Receive a Claude Code hook event and queue it for background processing.
 
     Events are processed asynchronously via FastAPI BackgroundTasks.
@@ -128,11 +130,19 @@ async def receive_event(
         A status payload with event_id and processing state.
     """
     _check_rate_limit(event.session_id)
+    # Remote session transcript lines go to the mirror before the event is
+    # processed, so the readers it triggers already see them.
+    mirror: dict[str, int] = {}
+    if event.data.transcript_sync:
+        mirror = await asyncio.to_thread(apply_chunks, event.data.transcript_sync)
+        event.data.transcript_sync = None
     background_tasks.add_task(ep.process_event, event)
     return {
         "status": "accepted",
         "event_id": str(event.timestamp),
         "visual_action": "processing",  # Simplified
-        # Tells the hook whether to keep pushing client context (client_context).
+        # Tells the hook whether to keep pushing client context (client_context)
+        # and how far each mirrored transcript has got (transcript_mirror).
         "context": context_mode(event),
+        "mirror": mirror,
     }
