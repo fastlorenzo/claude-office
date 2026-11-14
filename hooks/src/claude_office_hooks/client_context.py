@@ -11,6 +11,8 @@ those facts here, where the files are, and attaches them to the event payload:
                      re-sent when something changed).
 * ``custom_title`` / ``ai_title``  the session titles, tailed incrementally
                      from the transcript.
+* ``task_files``     the session's task list (``~/.claude/tasks``) when it
+                     changed.
 
 Per-session progress (title offset, last git snapshot, ...) lives in a small
 JSON file under ``STATE_DIR`` so each hook run only does incremental work.
@@ -47,6 +49,10 @@ GIT_MAX_FILES = 200
 GIT_MAX_COMMITS = 10
 # Tools that can change the working tree (refresh the snapshot after them).
 GIT_TOOLS = frozenset({"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "PowerShell"})
+
+TASKS_DIR = Path.home() / ".claude" / "tasks"
+TASK_MAX_FILES = 200
+TASK_MAX_BYTES = 64 * 1024  # skip a task file larger than this
 
 TITLE_SCAN_BYTES = 32 * 1024 * 1024  # catch up at most this much per hook run
 TITLE_MAX_CHARS = 200
@@ -348,6 +354,71 @@ def scan_titles(state: dict[str, Any], transcript_path: str) -> tuple[str | None
 
 
 # ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+
+
+def _safe_name(name: str) -> bool:
+    return bool(name) and "/" not in name and "\\" not in name and name not in (".", "..")
+
+
+def task_dirs(session_id: str, task_list_id: str | None, state: dict[str, Any]) -> list[Path]:
+    """Where Claude Code keeps this session's tasks (same lookup as the backend's).
+
+    ``CLAUDE_CODE_TASK_LIST_ID`` wins; else the session id, then a folder named
+    after the repo (a shared, named task list).
+    """
+    if task_list_id:
+        return [TASKS_DIR / task_list_id] if _safe_name(task_list_id) else []
+    dirs = [TASKS_DIR / session_id] if _safe_name(session_id) else []
+    identity = cast(
+        dict[str, Any] | None, cast(dict[str, Any], state.get("git", {})).get("identity")
+    )
+    if identity:
+        parts = [p for p in str(identity.get("root", "")).replace("\\", "/").split("/") if p]
+        if parts and _safe_name(parts[-1]):
+            dirs.append(TASKS_DIR / parts[-1])
+    return dirs
+
+
+def collect_tasks(state: dict[str, Any], dirs: list[Path]) -> list[dict[str, Any]] | None:
+    """The task files' JSON objects when they changed since last sent, else None.
+
+    Returns [] once when a previously sent list disappeared.
+    """
+    ts = cast(dict[str, Any], state.setdefault("tasks", {}))
+    files: list[Path] = []
+    for d in dirs:
+        try:
+            files = sorted(d.glob("*.json"))[:TASK_MAX_FILES]
+        except OSError:
+            files = []
+        if files:
+            break
+    sig: list[list[Any]] = []
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        sig.append([str(f), st.st_mtime_ns, st.st_size])
+    if sig == ts.get("sig", []):
+        return None
+    ts["sig"] = sig
+    tasks: list[dict[str, Any]] = []
+    for path_str, _mtime, size in sig:
+        if size > TASK_MAX_BYTES:
+            continue
+        try:
+            obj = json.loads(Path(path_str).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(obj, dict):
+            tasks.append(cast(dict[str, Any], obj))
+    return tasks
+
+
+# ---------------------------------------------------------------------------
 # Entry points used by main.py
 # ---------------------------------------------------------------------------
 
@@ -367,6 +438,11 @@ def enrich(payload: dict[str, Any], state: dict[str, Any]) -> None:
             snap = collect_git(state, cwd, event_type, tool, now)
             if snap is not None:
                 data["client_git"] = snap
+        session_id = str(payload.get("session_id") or "")
+        list_id = cast(str | None, data.get("task_list_id"))
+        tasks = collect_tasks(state, task_dirs(session_id, list_id, state))
+        if tasks is not None:
+            data["task_files"] = tasks
         transcript = data.get("transcript_path")
         if isinstance(transcript, str) and transcript:
             custom, ai = scan_titles(state, transcript)

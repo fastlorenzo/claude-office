@@ -60,7 +60,7 @@ from app.core.session_liveness import load_registry, session_alive
 from app.core.session_titles import refresh_session_titles
 from app.core.state_machine import OfficePhase, StateMachine
 from app.core.summary_backfill import SummaryBackfill
-from app.core.task_file_poller import init_task_file_poller
+from app.core.task_file_poller import init_task_file_poller, tasks_to_todos
 from app.core.task_persistence import load_tasks, save_tasks
 from app.core.telemetry import get_telemetry_store
 from app.core.tool_calls import ApplyResult
@@ -102,6 +102,14 @@ _DISPLAY_NAME_STRIP_PREFIXES = ("repos", "projects", "src", "work", "code", "git
 # cap) and frontend gameStore MAX_EVENT_LOG (the event-log cap) — those are
 # already named; this names the third `sm.history` cap site.
 MAX_HISTORY_ENTRIES = 500
+
+
+# Event data fields the hook pushes for immediate use only (client_context);
+# never stored with the event row (bulky, and replay does not need them).
+_TRANSIENT_FIELDS = {"task_files"}
+
+# Hook-pushed task files are bounded before use (a misbehaving client).
+_MAX_PUSHED_TASKS = 500
 
 
 def _todos_unchanged(old_todos: list[TodoItem], new_todos: list[TodoItem]) -> bool:
@@ -452,6 +460,13 @@ class EventProcessor:
         local = sm.is_local if sm is not None else is_local_client(host)
         return root if local else None
 
+    def note_client_activity(self, session_id: str | None) -> None:
+        """A status line report: the session is alive and busy (no hook may fire
+        during a long answer). Refreshes the staleness watermark only."""
+        sm = self.sessions.get(session_id) if session_id else None
+        if sm is not None:
+            sm.last_event_at = datetime.now(UTC)
+
     async def get_client_git_status(self, session_id: str) -> GitStatus | None:
         """The hook-reported git status of a remote session, if any."""
         sm = self.sessions.get(session_id)
@@ -773,10 +788,14 @@ class EventProcessor:
                 )
 
         # ------------------------------------------------------------------
-        # Remote session: the hook's git report replaces git_service polling
+        # Remote session: the hook's git report replaces git_service polling,
+        # its pushed task files replace the task-file poller
         # ------------------------------------------------------------------
         if event.data.client_git is not None and not sm.is_local:
             await self._broadcast_client_git(event.session_id, sm)
+        if event.data.task_files is not None and not sm.is_local:
+            todos = tasks_to_todos(event.data.task_files[:_MAX_PUSHED_TASKS])
+            await self._handle_task_file_update(event.session_id, todos)
 
         # ------------------------------------------------------------------
         # Auto-start task polling for missed SESSION_START (backend restart)
@@ -1211,7 +1230,7 @@ class EventProcessor:
                     session_id=event.session_id,
                     timestamp=event.timestamp,
                     event_type=event.event_type.value,
-                    data=event.data.model_dump(mode="json"),
+                    data=event.data.model_dump(mode="json", exclude=_TRANSIENT_FIELDS),
                 )
             )
             await db.commit()
@@ -1671,7 +1690,7 @@ class EventProcessor:
                 session_id=event.session_id,
                 timestamp=event.timestamp,
                 event_type=event.event_type,
-                data=event.data.model_dump(mode="json"),
+                data=event.data.model_dump(mode="json", exclude=_TRANSIENT_FIELDS),
             )
             db.add(event_rec)
             # Flush (not just commit) so the autoincrement primary key is

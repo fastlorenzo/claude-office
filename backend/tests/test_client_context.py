@@ -213,3 +213,57 @@ async def test_local_session_keeps_project_root() -> None:
         assert await ep.get_client_git_status(sid) is None  # git_service's job
     finally:
         await _wipe(sid)
+
+
+@pytest.mark.asyncio
+async def test_remote_task_files_become_todos() -> None:
+    from app.models.events import ToolEvent, ToolEventData
+
+    sid = "remote-tasks-1"
+    await _wipe(sid)
+    ep = EventProcessor()
+    try:
+        await ep.process_event(_start(sid, REMOTE))
+        tasks = [
+            {"id": "2", "subject": "second", "status": "in_progress"},
+            {"id": "1", "subject": "first", "status": "completed"},
+            {"id": "3", "status": "pending"},  # no subject: dropped
+        ]
+        await ep.process_event(
+            ToolEvent(
+                event_type=EventType.POST_TOOL_USE,
+                session_id=sid,
+                data=ToolEventData(tool_name="TaskUpdate", host=REMOTE, task_files=tasks),
+            )
+        )
+        sm = ep.sessions[sid]
+        assert [t.content for t in sm.todos] == ["first", "second"]
+        # Not stored with the event row.
+        async with AsyncSessionLocal() as db:
+            rows = (
+                (await db.execute(select(EventRecord).where(EventRecord.session_id == sid)))
+                .scalars()
+                .all()
+            )
+        assert rows and all("task_files" not in (r.data or {}) for r in rows)
+    finally:
+        await _wipe(sid)
+
+
+@pytest.mark.asyncio
+async def test_statusline_refreshes_remote_activity() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    sid = "remote-hb-1"
+    await _wipe(sid)
+    ep = EventProcessor()
+    try:
+        await ep.process_event(_start(sid, REMOTE))
+        sm = ep.sessions[sid]
+        sm.last_event_at = datetime.now(UTC) - timedelta(hours=1)
+        ep.note_client_activity(sid)
+        assert (datetime.now(UTC) - sm.last_event_at).total_seconds() < 5
+        ep.note_client_activity("unknown-sid")  # no-op
+        ep.note_client_activity(None)
+    finally:
+        await _wipe(sid)

@@ -88,6 +88,11 @@ export type Timestamp = string;
 export type RelativeTime = string;
 export type CustomTitle = string | null;
 export type AiTitle = string | null;
+export type TaskFiles =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary = string | null;
 export type Message1 = string | null;
 export type TeamName = string | null;
@@ -153,6 +158,11 @@ export type WslDistro1 = string | null;
 export type Host1 = string | null;
 export type CustomTitle1 = string | null;
 export type AiTitle1 = string | null;
+export type TaskFiles1 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary2 = string | null;
 export type Message2 = string | null;
 export type TeamName1 = string | null;
@@ -514,6 +524,11 @@ export type WslDistro2 = string | null;
 export type Host3 = string | null;
 export type CustomTitle2 = string | null;
 export type AiTitle2 = string | null;
+export type TaskFiles2 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type FloorId2 = string | null;
 export type RoomId2 = string | null;
 export type TeamName2 = string | null;
@@ -540,6 +555,11 @@ export type WslDistro3 = string | null;
 export type Host4 = string | null;
 export type CustomTitle3 = string | null;
 export type AiTitle3 = string | null;
+export type TaskFiles3 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary6 = string | null;
 export type Message5 = string | null;
 export type TeamName3 = string | null;
@@ -624,6 +644,11 @@ export type WslDistro4 = string | null;
 export type Host5 = string | null;
 export type CustomTitle4 = string | null;
 export type AiTitle4 = string | null;
+export type TaskFiles4 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary8 = string | null;
 export type Message6 = string | null;
 export type TeamName4 = string | null;
@@ -665,6 +690,11 @@ export type WslDistro5 = string | null;
 export type Host6 = string | null;
 export type CustomTitle5 = string | null;
 export type AiTitle5 = string | null;
+export type TaskFiles5 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary9 = string | null;
 export type Message7 = string | null;
 export type TeamName5 = string | null;
@@ -696,6 +726,11 @@ export type WslDistro6 = string | null;
 export type Host7 = string | null;
 export type CustomTitle6 = string | null;
 export type AiTitle6 = string | null;
+export type TaskFiles6 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary10 = string | null;
 export type Message8 = string | null;
 export type TeamName6 = string | null;
@@ -720,6 +755,11 @@ export type WslDistro7 = string | null;
 export type Host8 = string | null;
 export type CustomTitle7 = string | null;
 export type AiTitle7 = string | null;
+export type TaskFiles7 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary11 = string | null;
 export type Message9 = string | null;
 export type TeamName7 = string | null;
@@ -751,6 +791,11 @@ export type WslDistro8 = string | null;
 export type Host9 = string | null;
 export type CustomTitle8 = string | null;
 export type AiTitle8 = string | null;
+export type TaskFiles8 =
+  | {
+      [k: string]: unknown;
+    }[]
+  | null;
 export type Summary12 = string | null;
 export type Message10 = string | null;
 export type TeamName8 = string | null;
@@ -845,6 +890,7 @@ export interface AgentEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle;
   ai_title?: AiTitle;
+  task_files?: TaskFiles;
   summary?: Summary;
   message?: Message1;
   team_name?: TeamName;
@@ -1006,6 +1052,7 @@ export interface BackgroundTaskEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle1;
   ai_title?: AiTitle1;
+  task_files?: TaskFiles1;
   summary?: Summary2;
   message?: Message2;
   team_name?: TeamName1;
@@ -1528,6 +1575,7 @@ export interface EventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle2;
   ai_title?: AiTitle2;
+  task_files?: TaskFiles2;
   floor_id?: FloorId2;
   room_id?: RoomId2;
   team_name?: TeamName2;
@@ -1567,6 +1615,7 @@ export interface EventDataBase {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle3;
   ai_title?: AiTitle3;
+  task_files?: TaskFiles3;
   summary?: Summary6;
   message?: Message5;
   team_name?: TeamName3;
@@ -1725,6 +1774,7 @@ export interface LifecycleEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle4;
   ai_title?: AiTitle4;
+  task_files?: TaskFiles4;
   summary?: Summary8;
   message?: Message6;
   team_name?: TeamName4;
@@ -1790,6 +1840,7 @@ export interface PromptEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle5;
   ai_title?: AiTitle5;
+  task_files?: TaskFiles5;
   summary?: Summary9;
   message?: Message7;
   team_name?: TeamName5;
@@ -1840,6 +1891,7 @@ export interface SessionEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle6;
   ai_title?: AiTitle6;
+  task_files?: TaskFiles6;
   summary?: Summary10;
   message?: Message8;
   team_name?: TeamName6;
@@ -1874,6 +1926,7 @@ export interface TaskEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle7;
   ai_title?: AiTitle7;
+  task_files?: TaskFiles7;
   summary?: Summary11;
   message?: Message9;
   team_name?: TeamName7;
@@ -1923,6 +1976,7 @@ export interface ToolEventData {
   client_git?: ClientGit | null;
   custom_title?: CustomTitle8;
   ai_title?: AiTitle8;
+  task_files?: TaskFiles8;
   summary?: Summary12;
   message?: Message10;
   team_name?: TeamName8;

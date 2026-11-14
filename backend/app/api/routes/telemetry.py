@@ -25,6 +25,7 @@ async def receive_statusline(
     sid = payload.get("session_id")
     if isinstance(sid, str) and not _SID_RE.match(sid):
         payload = {**payload, "session_id": None}
-    get_telemetry_store().ingest_statusline(payload)
+    sid = get_telemetry_store().ingest_statusline(payload)
+    ep.note_client_activity(sid)  # heartbeat for sessions we cannot see (remote)
     ep.schedule_telemetry_broadcast()
     return {"status": "accepted"}

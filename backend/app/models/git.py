@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -91,4 +91,6 @@ class ClientGit(BaseModel):
     @classmethod
     def _cap_lists(cls, v: Any) -> Any:
         """Keep a misbehaving client from storing huge lists (no tuple types in TS)."""
-        return v[:_CLIENT_LIST_CAP] if isinstance(v, list) else v
+        if isinstance(v, list):
+            return cast(list[Any], v)[:_CLIENT_LIST_CAP]
+        return v

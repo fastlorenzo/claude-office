@@ -123,6 +123,7 @@ class EventData(BaseModel):
     client_git: ClientGit | None = None
     custom_title: str | None = None
     ai_title: str | None = None
+    task_files: list[dict[str, Any]] | None = None
     # Room assignment (populated by ProductMapper)
     floor_id: str | None = None
     room_id: str | None = None
@@ -232,6 +233,9 @@ class EventDataBase(BaseModel):
     client_git: ClientGit | None = None
     custom_title: Annotated[str | None, Field(max_length=500)] = None
     ai_title: Annotated[str | None, Field(max_length=500)] = None
+    # The session's task files (``~/.claude/tasks/<list>/*.json`` objects) when
+    # they changed; [] when the list was removed. Not persisted with the event.
+    task_files: list[dict[str, Any]] | None = None
     # Free-form text fields used across multiple families.
     summary: str | None = None
     message: str | None = None

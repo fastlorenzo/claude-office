@@ -79,6 +79,55 @@ def _load_json_sync(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _task_sort_key(task: dict[str, Any]) -> tuple[int, str]:
+    task_id = str(task.get("id", ""))
+    try:
+        return (0, str(int(task_id)).zfill(10))
+    except ValueError:
+        return (1, task_id)
+
+
+def task_to_todo(task_data: dict[str, Any]) -> TodoItem | None:
+    """Convert one Claude Code task JSON object to a TodoItem (None without subject)."""
+    subject = task_data.get("subject", "")
+    if not subject:
+        return None
+
+    status_str = str(task_data.get("status", "pending"))
+    try:
+        status = TodoStatus(status_str)
+    except ValueError:
+        status = TodoStatus.PENDING
+
+    active_form_raw = task_data.get("activeForm")
+    description_raw = task_data.get("description")
+    owner_raw = task_data.get("owner")
+    return TodoItem(
+        task_id=str(task_data.get("id", "")),
+        content=str(subject),
+        status=status,
+        active_form=str(active_form_raw) if active_form_raw else None,
+        description=str(description_raw) if description_raw else None,
+        blocks=_extract_string_list(task_data.get("blocks", [])),
+        blocked_by=_extract_string_list(task_data.get("blockedBy", [])),
+        owner=str(owner_raw) if owner_raw else None,
+        metadata=_extract_metadata(task_data.get("metadata")),
+    )
+
+
+def tasks_to_todos(tasks: list[dict[str, Any]]) -> list[TodoItem]:
+    """Task JSON objects (one per file) to TodoItems, ordered by task id.
+
+    Shared by the file poller and hook-pushed task files (remote sessions).
+    """
+    todos: list[TodoItem] = []
+    for task_data in sorted(tasks, key=_task_sort_key):
+        todo = task_to_todo(task_data)
+        if todo:
+            todos.append(todo)
+    return todos
+
+
 POLL_INTERVAL_SECONDS = 1.0
 INACTIVITY_TIMEOUT = timedelta(minutes=30)
 CLAUDE_TASKS_DIR = Path.home() / ".claude" / "tasks"
@@ -208,79 +257,14 @@ class TaskFilePoller(BasePoller[TaskFileState]):
 
     async def _read_task_files(self, task_files: list[Path]) -> list[TodoItem]:
         """Read task files and convert to TodoItems."""
-        todos: list[TodoItem] = []
         tasks: list[dict[str, Any]] = []
-
         for task_file in task_files:
             # Offload the synchronous open()+json.load to a worker thread so a
             # large or slow-to-read task file cannot stall the event loop.
             task_data = await asyncio.to_thread(_load_json_sync, task_file)
             if task_data is not None:
                 tasks.append(task_data)
-
-        # Sort by ID (numeric if possible)
-        def sort_key(task: dict[str, Any]) -> tuple[int, str]:
-            task_id = str(task.get("id", ""))
-            try:
-                return (0, str(int(task_id)).zfill(10))
-            except ValueError:
-                return (1, task_id)
-
-        tasks.sort(key=sort_key)
-
-        for task_data in tasks:
-            todo = self._convert_task_to_todo(task_data)
-            if todo:
-                todos.append(todo)
-
-        return todos
-
-    def _convert_task_to_todo(self, task_data: dict[str, Any]) -> TodoItem | None:
-        """Convert a task JSON object to a TodoItem."""
-        subject = task_data.get("subject", "")
-        if not subject:
-            return None
-
-        status_str = str(task_data.get("status", "pending"))
-        try:
-            status = TodoStatus(status_str)
-        except ValueError:
-            status = TodoStatus.PENDING
-
-        active_form_raw = task_data.get("activeForm")
-        active_form: str | None = str(active_form_raw) if active_form_raw else None
-
-        # Extract task ID
-        task_id = str(task_data.get("id", ""))
-
-        # Extract description
-        description_raw = task_data.get("description")
-        description: str | None = str(description_raw) if description_raw else None
-
-        # Extract blocks (list of task IDs this task blocks)
-        blocks = _extract_string_list(task_data.get("blocks", []))
-
-        # Extract blockedBy (list of task IDs that block this task)
-        blocked_by = _extract_string_list(task_data.get("blockedBy", []))
-
-        # Extract owner
-        owner_raw = task_data.get("owner")
-        owner: str | None = str(owner_raw) if owner_raw else None
-
-        # Extract metadata (arbitrary key-value pairs)
-        metadata = _extract_metadata(task_data.get("metadata"))
-
-        return TodoItem(
-            task_id=task_id,
-            content=subject,
-            status=status,
-            active_form=active_form,
-            description=description,
-            blocks=blocks,
-            blocked_by=blocked_by,
-            owner=owner,
-            metadata=metadata,
-        )
+        return tasks_to_todos(tasks)
 
 
 _task_file_poller: TaskFilePoller | None = None

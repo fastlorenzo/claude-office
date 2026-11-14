@@ -180,3 +180,31 @@ def test_state_roundtrip_and_prune(_state_dir: Path) -> None:
     cc.save_state("s", {})
     cc.drop_state("s")
     assert not (_state_dir / "s.json").exists()
+
+
+def test_task_dirs_lookup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cc, "TASKS_DIR", tmp_path)
+    state: dict[str, Any] = {"git": {"identity": {"root": "C:\\git\\widget"}}}
+    assert cc.task_dirs("sid", "named", state) == [tmp_path / "named"]
+    assert cc.task_dirs("sid", "../escape", state) == []
+    assert cc.task_dirs("sid", None, state) == [tmp_path / "sid", tmp_path / "widget"]
+    assert cc.task_dirs("sid", None, {}) == [tmp_path / "sid"]
+
+
+def test_collect_tasks_only_on_change(tmp_path: Path) -> None:
+    d = tmp_path / "sid"
+    d.mkdir()
+    (d / "1.json").write_text(json.dumps({"id": "1", "subject": "a", "status": "pending"}))
+    state: dict[str, Any] = {}
+    first = cc.collect_tasks(state, [d])
+    assert first == [{"id": "1", "subject": "a", "status": "pending"}]
+    assert cc.collect_tasks(state, [d]) is None  # unchanged
+    (d / "2.json").write_text(json.dumps({"id": "2", "subject": "b"}))
+    second = cc.collect_tasks(state, [d])
+    assert second is not None and len(second) == 2
+    for f in d.iterdir():
+        f.unlink()
+    assert cc.collect_tasks(state, [d]) == []  # list removed: sent once as empty
+    assert cc.collect_tasks(state, [d]) is None
+    # Nothing ever existed: nothing to send.
+    assert cc.collect_tasks({}, [tmp_path / "missing"]) is None
