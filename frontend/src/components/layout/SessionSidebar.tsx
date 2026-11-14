@@ -15,6 +15,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR as dateFnsPtBR, es as dateFnsEs } from "date-fns/locale";
 import { GitStatusPanel } from "@/components/layout/GitStatusPanel";
 import type { Session } from "@/hooks/useSessions";
+import { projectBasename } from "@/components/world/sessionMeta";
 import { useDragResize } from "@/hooks/useDragResize";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -37,10 +38,8 @@ const getMaxPanelHeight = () => Math.floor(window.innerHeight * 0.7);
 
 /** Derive a display name for grouping from a session. */
 function getProjectKey(session: Session): string {
-  if (session.projectName) return session.projectName;
-  if (session.projectRoot)
-    return session.projectRoot.split("/").pop() ?? "unknown";
-  return "unknown";
+  // Repo folder (POSIX or Windows root), never Claude's dash-encoded dir name.
+  return projectBasename(session) ?? "unknown";
 }
 
 /** Group sessions by project, sorted: groups with active sessions first, then by most recent update. */
@@ -153,9 +152,16 @@ function EditableName({
         setDraft(session.displayName ?? getProjectKey(session));
         onStartEdit();
       }}
-      title={session.displayName ? "Double-click to rename" : undefined}
+      title={
+        [session.host, session.displayName ? "Double-click to rename" : null]
+          .filter(Boolean)
+          .join(" · ") || undefined
+      }
     >
       {displayName}
+      {session.host && (
+        <span className="text-slate-600"> · {session.host}</span>
+      )}
     </span>
   );
 }

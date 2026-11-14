@@ -31,6 +31,7 @@ async def migrate_schema(conn: AsyncConnection) -> None:
         "team_name": "TEXT DEFAULT NULL",
         "teammate_name": "TEXT DEFAULT NULL",
         "is_lead": "BOOLEAN DEFAULT 0",
+        "host": "TEXT DEFAULT NULL",
     }
 
     result = await conn.execute(text("PRAGMA table_info(sessions)"))

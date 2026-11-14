@@ -18,8 +18,9 @@ from pydantic.alias_generators import to_camel
 
 from app.config import get_settings
 from app.core.ci_poller import derive_pr_flags, get_ci_poller
+from app.core.client_context import host_label
 from app.core.local_git import get_local_git
-from app.core.projects import ProjectRef, get_project_ref, resolve_project
+from app.core.projects import ProjectRef, get_project_ref, project_from_client, resolve_project
 from app.core.session_liveness import is_stale, last_activity
 from app.core.session_phase import PhaseInputs, PhaseKind, classify_phase
 from app.core.session_root import find_session_root
@@ -104,6 +105,8 @@ class CampusSession(BaseModel):
     project_id: str | None = None
     phase: SessionPhase | None = None
     git_branch: str | None = None
+    # Machine the session runs on ("host" / "host (WSL distro)"), None for old hooks.
+    host: str | None = None
     ended: bool = False
     # Process liveness: True/False from Claude Code's pid registry, None = unknown.
     alive: bool | None = None
@@ -240,13 +243,22 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
     from app.services.git_branch import get_branch
     from app.services.git_service import git_service
 
-    root = git_service.get_session_root(session_id)
-    if root is None:
-        root = find_session_root(session_id, sm.title_offset_path)
-        if root:
-            git_service.configure(session_id=session_id, project_root=root)
+    root: str | None = None
+    if sm.is_local:
+        root = git_service.get_session_root(session_id)
+        if root is None:
+            root = find_session_root(session_id, sm.title_offset_path)
+            if root:
+                git_service.configure(session_id=session_id, project_root=root)
     branch = get_branch(root)
     proj = resolve_project(root)
+    project = project_name_for_root(root)
+    cg = sm.client_git
+    if cg is not None and proj is None:
+        # Remote session (or a local root we could not resolve): the hook's report.
+        proj = project_from_client(cg.root, cg.main_root, cg.repo, cg.default_branch)
+        project = proj.name
+        branch = branch or cg.branch
     session_name = _one_line(sm.custom_title, SESSION_NAME_MAX_CHARS)
     objective = _one_line(sm.effective_objective, OBJECTIVE_MAX_CHARS)
 
@@ -306,8 +318,9 @@ def build_campus_session(session_id: str, sm: StateMachine) -> CampusSession:
             objective=sm.effective_objective,
             prompts=sm.first_prompts,
         ),
-        project=project_name_for_root(root),
+        project=project,
         project_id=proj.id if proj else None,
+        host=host_label(sm.host, sm.wsl_distro),
         phase=compute_phase(sm, gs.agents),
         focus=compute_focus(sm, gs.todos),
         work_items=compute_work_items(gs.todos, gs.agents),
@@ -349,7 +362,7 @@ def build_projects(sessions: list[CampusSession], now: datetime) -> list[CampusP
                 )
                 for pr in ci.pull_requests
             ]
-        local = intake.note_root(ref.root) if ref else None
+        local = intake.note_root(ref.root) if ref and ref.local else None
         if local is not None:
             local = local.model_copy(
                 update={

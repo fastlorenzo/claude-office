@@ -163,6 +163,7 @@ class TestBroadcast:
             "alive",
             "telemetry",
             "activity",
+            "host",
             "lastEventAt",
             "lastUpdated",
         }

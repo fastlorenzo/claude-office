@@ -29,6 +29,7 @@ try:
     import urllib.request
     from typing import Any, cast
 
+    from claude_office_hooks import client_context
     from claude_office_hooks.config import API_URL, TIMEOUT, get_api_key, load_config
     from claude_office_hooks.debug_logger import debug_log
     from claude_office_hooks.event_mapper import map_event
@@ -79,18 +80,24 @@ try:
             opener.add_handler(handler)
         return opener.open(req, timeout=TIMEOUT)
 
-    def _post_json(url: str, data: bytes, timeout: float = TIMEOUT) -> int:
-        """POST *data* to *url* with the configured key; returns the HTTP status."""
+    _MAX_RESPONSE = 64 * 1024
+
+    def _post_json_body(url: str, data: bytes, timeout: float = TIMEOUT) -> tuple[int, bytes]:
+        """POST *data* to *url* with the configured key; (HTTP status, body)."""
         headers: dict[str, str] = {"Content-Type": "application/json"}
         api_key = get_api_key()
         if api_key:
             headers["X-API-Key"] = api_key
         req = urllib.request.Request(url, data=data, headers=headers)
         with _open_request(req) as response:
-            return int(response.status)
+            return int(response.status), response.read(_MAX_RESPONSE)
 
-    def send_event(payload: dict[str, Any]) -> None:
-        """POST *payload* as JSON to the backend API.
+    def _post_json(url: str, data: bytes, timeout: float = TIMEOUT) -> int:
+        """POST *data* to *url* with the configured key; returns the HTTP status."""
+        return _post_json_body(url, data, timeout)[0]
+
+    def send_event(payload: dict[str, Any]) -> bytes | None:
+        """POST *payload* as JSON to the backend API; the response body or None.
 
         On a refused connection with a relay configured (Claude Code inside WSL,
         desktop app on Windows: see ``relay.py``), hand the payload to the
@@ -100,14 +107,17 @@ try:
         json_data = b""
         try:
             json_data = json.dumps(payload).encode("utf-8")
-            status = _post_json(API_URL, json_data)
+            status, body = _post_json_body(API_URL, json_data)
             if status >= 300:
                 log_error(RuntimeError(f"backend returned HTTP {status}"), "send_event")
+                return None
+            return body
         except Exception as exc:
             if is_connection_refused(exc) and relay(relay_command(_config), "events", json_data):
-                return
+                return None
             # Record the failure but never disrupt the user (always swallow).
             log_error(exc, "send_event failed")
+            return None
 
     def _relay_main(argv: list[str]) -> int:
         """``relay events|statusline``: POST stdin to this host's backend (WSL relay)."""
@@ -284,8 +294,22 @@ try:
                 )
             return
 
+        # Context the backend cannot read itself when it runs on another machine
+        # or in a container (git, titles, ...): see client_context.py.
+        sid = str(payload.get("session_id") or "default")
+        state = client_context.load_state(sid)
+        client_context.enrich(payload, state)
+
         debug_log(args.event_type, raw_data, payload, enabled=DEBUG)
-        send_event(payload)
+        body = send_event(payload)
+
+        if args.event_type == "session_end":
+            client_context.drop_state(sid)
+        else:
+            client_context.absorb_response(state, body)
+            client_context.save_state(sid, state)
+            if args.event_type == "session_start":
+                client_context.prune_states()
 
     if __name__ == "__main__":
         try:

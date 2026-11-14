@@ -18,6 +18,7 @@ __all__ = [
     "clear_project_cache",
     "get_project_ref",
     "parse_github_repo",
+    "project_from_client",
     "resolve_project",
 ]
 
@@ -38,6 +39,9 @@ class ProjectRef:
     root: str  # main repo toplevel
     repo: str | None  # "owner/name" when origin is GitHub
     default_branch: str | None
+    # False for a project known only from a remote client's report: ``root`` is
+    # that machine's path and must not be read here (see client_context).
+    local: bool = True
 
 
 def parse_github_repo(url: str | None) -> str | None:
@@ -137,6 +141,31 @@ def resolve_project(root: str | None, now: float | None = None) -> ProjectRef | 
     _cache[root] = (ts, ref)
     if len(_cache) > 256:
         _cache.pop(next(iter(_cache)))
+    return ref
+
+
+def project_from_client(
+    root: str, main_root: str | None, repo: str | None, default_branch: str | None
+) -> ProjectRef:
+    """Project for a remote session from the hook's git report (no IO).
+
+    GitHub repos key by ``owner/name`` so the same repo groups together across
+    machines (and with local sessions); others by the client's main root path.
+    """
+    top = main_root or root
+    parts = [p for p in top.replace("\\", "/").split("/") if p]
+    known = _by_id.get(repo) if repo else None
+    if known is not None:
+        return known  # a local checkout of the same repo already registered it
+    ref = ProjectRef(
+        id=repo or top,
+        name=parts[-1] if parts else top,
+        root=top,
+        repo=repo,
+        default_branch=default_branch,
+        local=False,
+    )
+    _by_id[ref.id] = ref
     return ref
 
 

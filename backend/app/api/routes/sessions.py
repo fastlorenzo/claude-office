@@ -14,6 +14,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.client_context import host_label, path_basename
 from app.core.connection_manager import get_manager
 from app.core.demo_file import (
     MAX_DEMO_BYTES,
@@ -66,6 +67,7 @@ class SessionSummary(TypedDict):
     sessionName: str | None
     projectName: str | None
     projectRoot: str | None
+    host: str | None
     createdAt: str
     updatedAt: str
     status: str
@@ -100,7 +102,7 @@ def _display_name(rec: SessionRecord, session_name: str | None) -> str:
     if rec.display_name and rec.display_name.strip():
         return rec.display_name.strip()
     if rec.project_root:
-        base = os.path.basename(rec.project_root.rstrip("/\\"))
+        base = path_basename(rec.project_root)  # POSIX or a Windows client's path
         if base:
             return base
     return rec.id[:8]
@@ -204,6 +206,7 @@ async def list_sessions(
                 "sessionName": session_name,
                 "projectName": rec.project_name,
                 "projectRoot": rec.project_root,
+                "host": host_label(rec.host, live.wsl_distro if live is not None else None),
                 "createdAt": created_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                 "updatedAt": updated_utc.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
                 "status": rec.status,

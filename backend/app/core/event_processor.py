@@ -32,6 +32,7 @@ from app.core.broadcast_service import (
     broadcast_room_state,
     broadcast_state,
 )
+from app.core.client_context import client_git_status, is_local_client, path_basename
 from app.core.connection_manager import get_manager
 from app.core.floor_config import get_cached_building_config
 from app.core.handlers import (
@@ -86,6 +87,7 @@ from app.models.events import (
     TaskEvent,
     ToolEvent,
 )
+from app.models.git import GitStatus
 from app.models.overview import OverviewState
 from app.models.sessions import ConversationEntry, GameState, HistoryEntry
 from app.services.git_service import git_service
@@ -431,13 +433,31 @@ class EventProcessor:
 
         Returns:
             The project root path if cached, None otherwise
+
+        Only for a session whose Claude Code runs on this machine: a remote
+        session's root is the client's path, which may exist here but belong to
+        a different checkout (see ``app.core.client_context``).
         """
         async with AsyncSessionLocal() as db:
             result = await db.execute(
-                select(SessionRecord.project_root).where(SessionRecord.id == session_id)
+                select(SessionRecord.project_root, SessionRecord.host).where(
+                    SessionRecord.id == session_id
+                )
             )
-            row = result.scalar_one_or_none()
-            return row
+            row = result.one_or_none()
+        if row is None:
+            return None
+        root, host = row
+        sm = self.sessions.get(session_id)
+        local = sm.is_local if sm is not None else is_local_client(host)
+        return root if local else None
+
+    async def get_client_git_status(self, session_id: str) -> GitStatus | None:
+        """The hook-reported git status of a remote session, if any."""
+        sm = self.sessions.get(session_id)
+        if sm is None or sm.is_local:
+            return None
+        return client_git_status(sm.client_git)
 
     # ------------------------------------------------------------------
     # Public event ingestion
@@ -753,6 +773,12 @@ class EventProcessor:
                 )
 
         # ------------------------------------------------------------------
+        # Remote session: the hook's git report replaces git_service polling
+        # ------------------------------------------------------------------
+        if event.data.client_git is not None and not sm.is_local:
+            await self._broadcast_client_git(event.session_id, sm)
+
+        # ------------------------------------------------------------------
         # Auto-start task polling for missed SESSION_START (backend restart)
         # ------------------------------------------------------------------
         await ensure_task_poller_running(
@@ -820,6 +846,21 @@ class EventProcessor:
         # ------------------------------------------------------------------
         self._schedule_overview_broadcast()
         self._schedule_campus_broadcast()
+
+    @staticmethod
+    async def _broadcast_client_git(session_id: str, sm: StateMachine) -> None:
+        """Send the hook-reported git status to the session's room sockets."""
+        status = client_git_status(sm.client_git)
+        if status is None:
+            return
+        await get_manager().broadcast(
+            {
+                "type": "git_status",
+                "timestamp": status.last_updated.isoformat(),
+                "gitStatus": status.model_dump(mode="json"),
+            },
+            session_id,
+        )
 
     # ------------------------------------------------------------------
     # Command Center overview (debounced cross-session broadcast)
@@ -944,7 +985,11 @@ class EventProcessor:
                     continue
                 # WSL sessions seen by a Windows backend (desktop app): the
                 # verdict is "unknown" and staleness decides (see wsl_bridge).
-                session_registry = registry if pid_registry_applies(sm.wsl_distro) else None
+                # Remote sessions (another host, see client_context): our pid
+                # registry cannot know them either.
+                session_registry = (
+                    registry if pid_registry_applies(sm.wsl_distro) and sm.is_local else None
+                )
                 alive = session_alive(sid, session_registry, sm.last_event_at, now)
                 if alive is False and sm.alive is not True and sm.dead_since is None:
                     # Never seen alive by this process (restored ghost): no "ended"
@@ -1166,7 +1211,7 @@ class EventProcessor:
                     session_id=event.session_id,
                     timestamp=event.timestamp,
                     event_type=event.event_type.value,
-                    data=event.data.model_dump(),
+                    data=event.data.model_dump(mode="json"),
                 )
             )
             await db.commit()
@@ -1509,10 +1554,25 @@ class EventProcessor:
             teammate_name = event.data.teammate_name
 
             source_dir = project_dir or working_dir
-            project_root = derive_git_root(source_dir) if source_dir else None
+            host = event.data.host
+            client_git = event.data.client_git
+            local = is_local_client(host, event.data.wsl_distro)
+            if client_git is not None:
+                # Reported by the hook where the checkout is: right for remote
+                # sessions, and the same answer for local ones.
+                project_root: str | None = client_git.root
+            elif local:
+                project_root = derive_git_root(source_dir) if source_dir else None
+            else:
+                project_root = None  # a same-named local path is another checkout
 
-            # Derive display name from working dir / project name.
-            display = derive_display_name(working_dir=source_dir, project_name=project_name)
+            # Derive display name from the repo / working dir / project name.
+            repo_name = (
+                path_basename(client_git.main_root or client_git.root) if client_git else None
+            )
+            display = repo_name or derive_display_name(
+                working_dir=source_dir if local else None, project_name=project_name
+            )
 
             # Determine the final status based on event type.
             is_session_start = event.event_type == EventType.SESSION_START
@@ -1549,6 +1609,16 @@ class EventProcessor:
             if floor_id and room_id:
                 session_rec.floor_id = floor_id
                 session_rec.room_id = room_id
+
+            if host and session_rec.host != host:
+                session_rec.host = host
+            # The hook's git report is authoritative: refresh root and name
+            # (the first events of a session may predate it).
+            if client_git is not None:
+                if session_rec.project_root != project_root:
+                    session_rec.project_root = project_root
+                if repo_name and session_rec.display_name != repo_name:
+                    session_rec.display_name = repo_name
 
             # Update project info if not yet set on the existing record.
             if project_name and not session_rec.project_name:
@@ -1601,7 +1671,7 @@ class EventProcessor:
                 session_id=event.session_id,
                 timestamp=event.timestamp,
                 event_type=event.event_type,
-                data=event.data.model_dump(),
+                data=event.data.model_dump(mode="json"),
             )
             db.add(event_rec)
             # Flush (not just commit) so the autoincrement primary key is

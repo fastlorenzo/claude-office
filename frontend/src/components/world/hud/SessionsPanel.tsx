@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { DoorOpen, GitBranch, Pencil, Trash2 } from "lucide-react";
+import { DoorOpen, GitBranch, Monitor, Pencil, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCampusStore } from "@/stores/campusStore";
@@ -119,6 +119,7 @@ export function SessionsPanel({
         const project = sessionProject(s, cs);
         const name = distinctName(sessionLabel(s, cs), project, summary);
         const branch = cs ? sessionBranch(cs) : null;
+        const host = cs?.host ?? s.host ?? null;
         const items = cs ? sessionWorkItems(cs) : [];
         return (
           <li key={s.id}>
@@ -169,6 +170,17 @@ export function SessionsPanel({
                         <GitBranch className="h-2.5 w-2.5 shrink-0" />
                         <span className="truncate">
                           {midTruncate(branch, 30)}
+                        </span>
+                      </span>
+                    )}
+                    {host && (
+                      <span
+                        className="flex min-w-0 shrink items-center gap-1 rounded-full border border-white/10 px-1.5 py-px text-xs text-slate-500"
+                        title={host}
+                      >
+                        <Monitor className="h-2.5 w-2.5 shrink-0" />
+                        <span className="truncate">
+                          {midTruncate(host, 24)}
                         </span>
                       </span>
                     )}

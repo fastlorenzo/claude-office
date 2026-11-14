@@ -60,8 +60,12 @@ export function sessionLabel(s: Session, cs?: CampusSession): string {
 /** Muted secondary line: project folder when it differs from the label. */
 export function sessionSubLabel(s: Session, cs?: CampusSession): string | null {
   const base = projectBasename(s);
-  if (!base) return null;
-  return base.toLowerCase() === sessionLabel(s, cs).toLowerCase() ? null : base;
+  const project =
+    base && base.toLowerCase() !== sessionLabel(s, cs).toLowerCase()
+      ? base
+      : null;
+  const host = usable(cs?.host) ?? usable(s.host);
+  return [project, host].filter(Boolean).join(" · ") || null;
 }
 
 /** Project / app name: backend `project`, else the session's project folder. */

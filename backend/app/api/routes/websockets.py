@@ -173,6 +173,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
             git_service.configure(session_id=session_id, project_root=project_root)
 
         git_status = git_service.get_status(session_id=session_id)
+        if git_status is None:
+            # Remote session: the hook's latest git report (client_context).
+            git_status = await get_event_processor().get_client_git_status(session_id)
         if git_status:
             await get_manager().send_personal_message(
                 {

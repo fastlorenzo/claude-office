@@ -12,6 +12,7 @@ from pydantic import (
 )
 
 from app.models.common import BubbleContent, SpeechContent
+from app.models.git import ClientGit
 
 __all__ = [
     "EventType",
@@ -117,6 +118,11 @@ class EventData(BaseModel):
     task_list_id: str | None = None
     # WSL distro of the producer (see EventDataBase.wsl_distro)
     wsl_distro: str | None = None
+    # Client context (see EventDataBase.host)
+    host: str | None = None
+    client_git: ClientGit | None = None
+    custom_title: str | None = None
+    ai_title: str | None = None
     # Room assignment (populated by ProductMapper)
     floor_id: str | None = None
     room_id: str | None = None
@@ -219,6 +225,13 @@ class EventDataBase(BaseModel):
     # at intake (app.core.wsl_bridge) and skips the Windows pid registry for
     # these sessions' liveness.
     wsl_distro: str | None = None
+    # Client context (hooks >= 0.26, see hooks client_context.py): facts the
+    # hook gathers on the machine Claude Code runs on, for a backend that cannot
+    # read that machine's files (another host, a container).
+    host: Annotated[str | None, Field(max_length=255)] = None
+    client_git: ClientGit | None = None
+    custom_title: Annotated[str | None, Field(max_length=500)] = None
+    ai_title: Annotated[str | None, Field(max_length=500)] = None
     # Free-form text fields used across multiple families.
     summary: str | None = None
     message: str | None = None

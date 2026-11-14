@@ -42,7 +42,8 @@ async def handle_session_start(
     """
     ensure_task_file_poller_fn()
     task_poller = get_task_file_poller()
-    if task_poller:
+    # A remote session's task files live on its own machine (the hook sends them).
+    if task_poller and sm.is_local:
         task_list_id = event.data.task_list_id
         await task_poller.start_polling(event.session_id, task_list_id=task_list_id)
     await broadcast_state(event.session_id, sm)
@@ -79,7 +80,7 @@ async def ensure_task_poller_running(
     handled gracefully.
 
     Args:
-        sm: The StateMachine for this session (unused here, kept for symmetry).
+        sm: The StateMachine for this session (remote sessions are skipped).
         event: The current event being processed.
         ensure_task_file_poller_fn: Callable that initialises the poller.
         derive_task_list_id_fn: Async callable that derives the task list ID
@@ -87,6 +88,8 @@ async def ensure_task_poller_running(
     """
     if event.event_type in (EventType.SESSION_START, EventType.SESSION_END):
         return
+    if not sm.is_local:
+        return  # the hook sends a remote session's task files
 
     ensure_task_file_poller_fn()
     task_poller = get_task_file_poller()

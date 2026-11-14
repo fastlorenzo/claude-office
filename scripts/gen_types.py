@@ -64,6 +64,7 @@ from app.models.events import (  # noqa: E402  # type: ignore[import]
 )
 from app.models.git import (  # noqa: E402  # type: ignore[import]
     ChangedFile,
+    ClientGit,
     Commit,
     GitStatus,
 )
@@ -124,6 +125,7 @@ MODELS = [
     ChangedFile,
     Commit,
     GitStatus,
+    ClientGit,
     OverviewEntry,
     OverviewState,
     CampusActivity,

@@ -20,6 +20,8 @@ export interface Session {
   displayName: string | null;
   projectName: string | null;
   projectRoot: string | null;
+  /** Machine the session runs on ("host" / "host (WSL distro)"); null for old hooks. */
+  host?: string | null;
   createdAt: string;
   updatedAt: string;
   status: string;

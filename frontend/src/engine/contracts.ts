@@ -82,6 +82,8 @@ export interface CampusSession {
   sessionName?: string | null;
   /** Git branch of the session's working dir when known, e.g. "feat/3d-office". */
   gitBranch?: string | null;
+  /** Machine the session runs on ("host" / "host (WSL distro)"); null for old hooks. */
+  host?: string | null;
   /** Live Claude Code telemetry from the status line JSON (null until the statusline tee reports). */
   telemetry?: SessionTelemetry | null;
   /** Per-session activity counters for sparklines (ring buffer, oldest first). */

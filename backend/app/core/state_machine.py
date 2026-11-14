@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, cast
 
+from app.core.client_context import is_local_client
 from app.core.path_utils import compress_path, compress_paths_in_text, truncate_long_words
 from app.core.quotes import get_random_job_completion_quote
 from app.core.session_phase import slim_tool_input
@@ -34,6 +35,7 @@ from app.models.events import (
     TaskEvent,
     ToolEvent,
 )
+from app.models.git import ClientGit
 from app.models.sessions import (
     BackgroundTask,
     ConversationEntry,
@@ -762,6 +764,12 @@ class StateMachine:
     # backend inside WSL ignores it. Internal metadata only.
     wsl_distro: str | None = None
 
+    # Client context (``app.core.client_context``): the machine the session's
+    # Claude Code runs on (``data.host``) and the hook's latest git report.
+    # Set in ``transition`` so live, restore and replay agree.
+    host: str | None = None
+    client_git: ClientGit | None = None
+
     # Entry ids (built by ``EventProcessor._entry_id``) already reflected in
     # this machine — appended by the live pipeline or rebuilt during a DB
     # restore. The event pipeline consults and updates it under
@@ -956,6 +964,23 @@ class StateMachine:
                 out.append(aid)
         return out
 
+    @property
+    def is_local(self) -> bool:
+        """True when the session's Claude Code runs on this machine (see client_context)."""
+        return is_local_client(self.host, self.wsl_distro)
+
+    def _absorb_client_context(self, event: AnyEvent) -> None:
+        """Take the hook-reported host, git snapshot and titles from *event*."""
+        data = event.data
+        if data.host:
+            self.host = data.host
+        if data.client_git is not None:
+            self.client_git = data.client_git
+        if data.custom_title:
+            self.custom_title = data.custom_title
+        if data.ai_title:
+            self.ai_title = data.ai_title
+
     def transition(self, event: AnyEvent) -> None:
         """Process an event and update state accordingly.
 
@@ -974,6 +999,7 @@ class StateMachine:
         distro = getattr(event.data, "wsl_distro", None)
         if distro:
             self.wsl_distro = distro
+        self._absorb_client_context(event)
 
         # Invariant: token reads inside update_from_event are tail-bounded
         # (_TOKEN_READ_SIZE = 20_000, see token_tracker.py); offloading them to

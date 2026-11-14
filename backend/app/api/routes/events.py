@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from app.config import get_settings
+from app.core.client_context import context_mode
 from app.core.event_processor import EventProcessor, get_event_processor
 from app.models.events import AnyEvent
 
@@ -132,4 +133,6 @@ async def receive_event(
         "status": "accepted",
         "event_id": str(event.timestamp),
         "visual_action": "processing",  # Simplified
+        # Tells the hook whether to keep pushing client context (client_context).
+        "context": context_mode(event),
     }
