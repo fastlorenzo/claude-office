@@ -145,6 +145,13 @@ CLAUDE_PATH_HOST=/Users/yourusername/.claude
 # GIT_POLL_INTERVAL=5
 ```
 
+### Remote Hosts
+
+With hooks 0.26 or later the hook pushes everything the backend used to read
+from `~/.claude` and the git checkout, so the mount and path translation below
+become optional, and Claude Code on other machines can report to the same
+backend. See [Remote Hosts](remote-hosts.md).
+
 ### Path Translation
 
 When running in Docker, the backend receives file paths from hooks that reference the host filesystem. The path translation system converts these host paths to container paths:

@@ -64,3 +64,28 @@ def test_config_file_value_reads_config_file_constant(tmp_path, monkeypatch):
         "http://localhost:8050/api/v1/events"
     )
     assert config_mod._config_file_value("MISSING_KEY") is None
+
+
+def test_allow_remote_and_ca_file_from_config_file(tmp_path, monkeypatch):
+    """CLAUDE_OFFICE_ALLOW_REMOTE / CLAUDE_OFFICE_CA_FILE may live in the config file."""
+    import importlib
+
+    from claude_office_hooks import config as config_mod
+
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "claude-office-config.env").write_text(
+        "CLAUDE_OFFICE_API_URL=https://office.example.lan/api/v1/events\n"
+        "CLAUDE_OFFICE_ALLOW_REMOTE=1\n"
+        "CLAUDE_OFFICE_CA_FILE=/nonexistent/ca.pem\n",
+        encoding="utf-8",
+    )
+    for key in ("CLAUDE_OFFICE_API_URL", "CLAUDE_OFFICE_ALLOW_REMOTE", "CLAUDE_OFFICE_CA_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    try:
+        mod = importlib.reload(config_mod)
+        assert mod.API_URL == "https://office.example.lan/api/v1/events"
+        assert mod.CA_FILE == "/nonexistent/ca.pem"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config_mod)

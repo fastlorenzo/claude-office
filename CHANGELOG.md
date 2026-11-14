@@ -4,6 +4,21 @@ All notable changes to Claude Office Visualizer are documented here.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-14
+
+### Added
+
+- **Remote hosts: one backend for Claude Code on several machines.** A backend on another machine or in a container could not read the session's checkout or `~/.claude`, so sessions showed the dash-encoded project dir, no branch, no git panel, no tasks and no transcript-derived detail. The hook now gathers that context where the files are and posts it with the event: `host`, a throttled git snapshot (root, repo, branch, ahead/behind, changed files, last commits), the session titles, the task files when they change, and the transcript lines appended since the previous event (trimmed: 8 KB string cap, images and file-history snapshots dropped, 1 MB read / 768 KB send per run). The backend answers `context: local|push` so a same-machine backend stops the push. See [Remote Hosts](docs/guides/remote-hosts.md).
+- Sessions carry a `host` (new DB column); a session is local only when its host and WSL distro match the backend's, and only then are its paths read (git service, beads, task dirs, pid registry). Remote sessions take project, branch and git status from the hook's report.
+- Transcript mirror: hook-sent lines are appended to `mirror/` in the data dir, deduplicated by client byte offset; `translate_path` falls back to it, so titles, telemetry estimates, reply summaries, subagent speech and tool details work unchanged. Pruned after 14 days.
+- Host chip in the sessions HUD and the sidebar; the sidebar groups by repo folder instead of the dash-encoded dir.
+- Hook config: `CLAUDE_OFFICE_ALLOW_REMOTE` may now be set in `claude-office-config.env`, and `CLAUDE_OFFICE_CA_FILE` trusts a private CA for an `https` backend.
+
+### Changed
+
+- Status line reports refresh a session's activity watermark (a remote session answering at length without hook events stays active).
+- Event data is stored JSON-mode; hook-pushed task files and transcript lines are never stored with the event row.
+
 ## [0.25.1] - 2026-11-05
 
 ### Fixed

@@ -30,7 +30,13 @@ try:
     from typing import Any, cast
 
     from claude_office_hooks import client_context
-    from claude_office_hooks.config import API_URL, TIMEOUT, get_api_key, load_config
+    from claude_office_hooks.config import (
+        API_URL,
+        TIMEOUT,
+        get_api_key,
+        https_context,
+        load_config,
+    )
     from claude_office_hooks.debug_logger import debug_log
     from claude_office_hooks.event_mapper import map_event
     from claude_office_hooks.relay import is_connection_refused, relay, relay_command
@@ -68,7 +74,7 @@ try:
         ``HTTPSHandler``, which would re-trigger the context creation.
         """
         if API_URL.lower().startswith("https"):
-            return urllib.request.urlopen(req, timeout=TIMEOUT)
+            return urllib.request.urlopen(req, timeout=TIMEOUT, context=https_context())
         opener = urllib.request.OpenerDirector()
         for handler in (
             urllib.request.ProxyHandler(),
@@ -153,7 +159,7 @@ try:
                 headers["X-API-Key"] = api_key
             req = urllib.request.Request(url, data=data, headers=headers)
             if url.lower().startswith("https"):
-                urllib.request.urlopen(req, timeout=POST_TIMEOUT).close()
+                urllib.request.urlopen(req, timeout=POST_TIMEOUT, context=https_context()).close()
                 return
             opener = urllib.request.OpenerDirector()
             for handler in (

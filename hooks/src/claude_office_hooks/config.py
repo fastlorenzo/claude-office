@@ -5,9 +5,13 @@ Output suppression is handled in main.py before this module is imported.
 """
 
 import os
+import typing
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
+
+if typing.TYPE_CHECKING:
+    import ssl
 
 # ---------------------------------------------------------------------------
 # API endpoint and request constants
@@ -72,13 +76,35 @@ def _config_file_value(key: str) -> str | None:
     return None
 
 
+def _setting(key: str) -> str:
+    """Env var, else the config file, else ''."""
+    return os.environ.get(key) or _config_file_value(key) or ""
+
+
+# The opt-in may live in the config file next to the URL it unlocks: hooks
+# inherit Claude Code's environment, which is awkward to set on every machine
+# (Windows, WSL, IDE launches). Same trust as the URL itself.
 API_URL = _resolve_api_url(
-    os.environ.get("CLAUDE_OFFICE_API_URL")
-    or _config_file_value("CLAUDE_OFFICE_API_URL")
-    or _DEFAULT_API_URL,
-    os.environ.get("CLAUDE_OFFICE_ALLOW_REMOTE", "") == "1",
+    _setting("CLAUDE_OFFICE_API_URL") or _DEFAULT_API_URL,
+    _setting("CLAUDE_OFFICE_ALLOW_REMOTE") == "1",
     _log_clamp,
 )
+
+# Extra CA bundle for an https backend behind a private CA (e.g. a LAN reverse
+# proxy with its own root). Empty: the system trust store.
+CA_FILE = _setting("CLAUDE_OFFICE_CA_FILE")
+
+
+def https_context() -> "ssl.SSLContext | None":
+    """SSL context honouring ``CLAUDE_OFFICE_CA_FILE`` (None: urllib's default)."""
+    if not CA_FILE:
+        return None
+    import ssl
+
+    ctx = ssl.create_default_context()
+    ctx.load_verify_locations(cafile=os.path.expanduser(CA_FILE))
+    return ctx
+
 
 # Mutable holder for the API key — populated by load_config().
 _api_key_holder: list[str] = [""]

@@ -133,6 +133,9 @@ CLAUDE_OFFICE_DEBUG=0
 # Remote backends are opt-in: event payloads carry tool I/O and file paths.
 # CLAUDE_OFFICE_ALLOW_REMOTE=0
 
+# Optional: CA bundle for an https backend behind a private CA.
+# CLAUDE_OFFICE_CA_FILE=~/.claude/office-root.crt
+
 # Optional: API key for a backend started with CLAUDE_OFFICE_API_KEY. When set
 # (here or as an environment variable — env wins), the hook sends it as
 # X-API-Key on every event POST.
@@ -144,8 +147,17 @@ CLAUDE_OFFICE_DEBUG=0
 | `CLAUDE_OFFICE_STRIP_PREFIXES` | `-Users-probello-Repos-,-Users-probello-` | Comma-separated path prefixes stripped from project names |
 | `CLAUDE_OFFICE_DEBUG` | `0` | Set to `1` to write debug logs to `~/.claude/claude-office-hooks.log` |
 | `CLAUDE_OFFICE_API_URL` | `http://localhost:8000/api/v1/events` | Backend event endpoint. Non-localhost values are reset to the default unless `CLAUDE_OFFICE_ALLOW_REMOTE=1`. |
-| `CLAUDE_OFFICE_ALLOW_REMOTE` | `0` | Set to `1` to permit a non-localhost backend (e.g. a remote/dedicated server). Off by default since event payloads carry tool I/O and file paths. |
+| `CLAUDE_OFFICE_ALLOW_REMOTE` | `0` | Set to `1` to permit a non-localhost backend (e.g. a remote/dedicated server). Off by default since event payloads carry tool I/O and file paths. Read from the env or the config file. |
+| `CLAUDE_OFFICE_CA_FILE` | (empty) | PEM bundle trusted for an `https` backend (private CA). Empty: the system trust store. |
 | `CLAUDE_OFFICE_API_KEY` | (empty) | API key sent as `X-API-Key`. Required when the backend sets an explicit `CLAUDE_OFFICE_API_KEY`; env var takes precedence over the config file. |
+
+### Remote Backend
+
+When the backend runs on another machine or in a container, the hook also
+sends what that backend cannot read itself: the machine name, a git snapshot,
+the session titles, task files and the new transcript lines (trimmed). Its
+progress lives in `~/.claude/claude-office-state/`. See
+[Remote Hosts](../docs/guides/remote-hosts.md).
 
 ### Strip Prefixes
 

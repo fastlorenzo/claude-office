@@ -1,7 +1,7 @@
 {
   "name": "claude-office-desktop",
   "productName": "Claude Office",
-  "version": "0.25.1",
+  "version": "0.26.0",
   "description": "Claude Office Visualizer desktop app: the office, its backend and Claude Code hooks in one install",
   "author": "Claude Office contributors",
   "homepage": "https://github.com/fastlorenzo/claude-office",
