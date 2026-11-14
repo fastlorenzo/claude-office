@@ -7,6 +7,12 @@
 # =============================================================================
 FROM oven/bun:1-slim AS frontend-builder
 
+# bun run assets shells out to unzip (ambientCG material zips) and tar xjf
+# (KTX-Software .tar.bz2); the slim image ships neither unzip nor bzip2.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unzip bzip2 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app/frontend
 
 # Copy package files first for better layer caching
