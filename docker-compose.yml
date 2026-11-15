@@ -38,6 +38,10 @@ services:
       # Claude API settings (optional - enables AI summaries)
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - SUMMARY_ENABLED=${SUMMARY_ENABLED:-true}
+      # GitHub token for the gh CLI behind the factory view's CI/CD panel
+      # (PRs, workflow runs, releases). Read-only scope is enough; leave empty
+      # to disable CI data.
+      - GH_TOKEN=${GH_TOKEN:-}
       - SERVE_STATIC=1
       - LOCALHOST_ONLY=0
       # Browser WS handshakes are origin-checked against this list (QA-014)
