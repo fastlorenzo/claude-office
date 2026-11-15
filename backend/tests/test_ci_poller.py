@@ -251,9 +251,10 @@ class TestPoller:
         assert gh.calls == []
         watched[0] = True
         assert await p.tick() == 1
-        assert len(gh.calls) == 2
-        assert gh.calls[0][:4] == ["pr", "list", "--repo", "o/n"]
-        assert gh.calls[1][:2] == ["run", "list"]
+        assert len(gh.calls) == 3
+        assert gh.calls[0][:6] == ["pr", "list", "--repo", "o/n", "--state", "open"]
+        assert gh.calls[1][:6] == ["pr", "list", "--repo", "o/n", "--state", "closed"]
+        assert gh.calls[2][:2] == ["run", "list"]
         entry = p.get("o/n")
         assert entry is not None and entry.available and entry.pull_requests[0].number == 1
         assert changes == [1]
@@ -277,7 +278,7 @@ class TestPoller:
             p.note_repo(f"o/r{i}", "main")
         await p.tick()
         assert gh.max_active <= 2
-        assert len(gh.calls) == 12
+        assert len(gh.calls) == 18
 
     @pytest.mark.asyncio
     async def test_exponential_backoff_and_recovery(self) -> None:
@@ -492,8 +493,8 @@ class TestDeniedField:
         p.note_repo("o/public", "main")
         await p.tick()
         priv_prs = [a for a in seen if a[0] == "pr" and a[3] == "o/private"]
-        assert len(priv_prs) == n_denied + 1
-        assert "statusCheckRollup" not in priv_prs[-1][-1].split(",")
+        assert len(priv_prs) == n_denied + 2  # open + closed, no retry
+        assert all("statusCheckRollup" not in a[-1].split(",") for a in priv_prs[-2:])
 
     @pytest.mark.asyncio
     async def test_denied_field_not_requested_still_fails(self) -> None:
@@ -545,3 +546,32 @@ class TestTokens:
         await p.tick()
         assert {t for r, t in calls if r == "me/a"} == {"t-me"}
         assert {t for r, t in calls if r == "org/b"} == {"t-org"}
+
+
+class TestPrWindows:
+    @pytest.mark.asyncio
+    async def test_old_open_prs_kept_and_duplicates_merged(self) -> None:
+        """An open PR older than the newest ones is still listed (own call)."""
+        merged_now = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+
+        async def gh(args: list[str]) -> GhResult:
+            if args[0] == "pr" and args[5] == "open":
+                return GhResult(0, json.dumps([_pr(1), _pr(2)]))
+            if args[0] == "pr":
+                # PR 2 merged between the two calls: listed twice, kept once
+                return GhResult(
+                    0,
+                    json.dumps(
+                        [
+                            _pr(2, "MERGED", mergedAt=merged_now),
+                            _pr(3, "MERGED", mergedAt=merged_now),
+                        ]
+                    ),
+                )
+            return GhResult(0, "[]")
+
+        p = CiPoller(run_gh=gh, is_watched=lambda: True, clock=Clock(), interval=60.0)
+        entry = p.note_repo("o/n", "main")
+        await p.tick()
+        assert sorted(pr.number for pr in entry.pull_requests) == [1, 2, 3]
+        assert next(pr for pr in entry.pull_requests if pr.number == 2).state == "open"

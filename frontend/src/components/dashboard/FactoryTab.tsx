@@ -51,6 +51,16 @@ export function FactoryTab({
         .filter((n): n is number => n !== undefined),
     [data],
   );
+  // "#412 Fix the login flow" in the PR picker (just "#412" if the title is unknown).
+  const prOptions = useMemo(() => {
+    const titles = new Map(
+      (project?.pullRequests ?? []).map((p) => [p.number, p.title]),
+    );
+    return prNumbers.map((n) => {
+      const title = titles.get(n);
+      return { value: String(n), label: title ? `#${n} ${title}` : `#${n}` };
+    });
+  }, [prNumbers, project?.pullRequests]);
   const prNumber = Number(pr) || prNumbers[0];
   const prTarget = useMemo(
     () =>
@@ -107,12 +117,9 @@ export function FactoryTab({
           <Picker
             label={t("hud.panel.factoryPr")}
             value={String(prNumber ?? "")}
-            options={prNumbers.map((n) => ({
-              value: String(n),
-              label: `#${n}`,
-            }))}
+            options={prOptions}
             onChange={(v) => onPick({ pr: v })}
-            className="w-full sm:w-32"
+            className="w-full truncate sm:w-96"
           />
         )}
       </div>

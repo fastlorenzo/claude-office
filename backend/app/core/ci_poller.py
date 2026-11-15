@@ -60,7 +60,9 @@ __all__ = [
 ]
 
 MAX_CONCURRENT_GH = 2
-GH_TIMEOUT_S = 20.0
+# GitHub computes size/mergeable fields per PR; on busy repos a `pr list` takes
+# 5-15 s and varies call to call, so 20 s timed out now and then.
+GH_TIMEOUT_S = 45.0
 POLL_INTERVAL_S = 60.0
 TICK_S = 5.0
 MAX_BACKOFF_S = 900.0
@@ -98,6 +100,11 @@ RUN_FIELDS = (
     "databaseId,workflowName,headBranch,headSha,event,status,conclusion,"
     "createdAt,updatedAt,url,attempt"
 )
+# Open PRs and recently ended ones are two calls: `gh pr list` returns the newest
+# PRs first, so one `--state all` window drops older PRs that are still open.
+# Ended PRs only matter for 24 h (RECENT_PR_WINDOW), so a short list does.
+OPEN_PR_LIMIT = 50
+ENDED_PR_LIMIT = 10
 RUN_LIMIT = 15
 # Without statusCheckRollup, PR checks are matched against these runs, so fetch
 # more of them (still one call).
@@ -928,21 +935,33 @@ class CiPoller:
                 name = _s(cast(dict[str, Any], ref).get("name")) if isinstance(ref, dict) else None
                 if name:
                     entry.default_branch = name
-            prs = await self._call(
-                [
-                    "pr",
-                    "list",
-                    "--repo",
+            prs: list[Any] = []
+            seen: set[Any] = set()
+            # "closed" covers merged too; a PR is in at most one list, but it can
+            # change state between the two calls, so de-duplicate by number.
+            for state, limit in (("open", OPEN_PR_LIMIT), ("closed", ENDED_PR_LIMIT)):
+                batch = await self._call(
+                    [
+                        "pr",
+                        "list",
+                        "--repo",
+                        repo,
+                        "--state",
+                        state,
+                        "--limit",
+                        str(limit),
+                        "--json",
+                        PR_FIELDS,
+                    ],
                     repo,
-                    "--state",
-                    "all",
-                    "--limit",
-                    "30",
-                    "--json",
-                    PR_FIELDS,
-                ],
-                repo,
-            )
+                )
+                for item in cast(list[Any], batch) if isinstance(batch, list) else []:
+                    key = (
+                        cast(dict[str, Any], item).get("number") if isinstance(item, dict) else None
+                    )
+                    if key is None or key not in seen:
+                        seen.add(key)
+                        prs.append(item)
             run_limit = RUN_LIMIT_PR_CHECKS if self._rollup_missing(entry) else RUN_LIMIT
             runs = await self._call(
                 ["run", "list", "--repo", repo, "--limit", str(run_limit), "--json", RUN_FIELDS],
