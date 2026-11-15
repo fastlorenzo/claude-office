@@ -19,7 +19,7 @@ from app.api.middleware import ApiKeyMiddleware, LocalhostOnlyMiddleware
 from app.api.routes import ci, console, events, floors, preferences, sessions, telemetry, websockets
 from app.api.routes.ci import load_pinned_repos
 from app.config import get_settings
-from app.core.ci_poller import get_ci_poller
+from app.core.ci_poller import get_ci_poller, parse_gh_tokens
 from app.core.event_processor import EventProcessor, get_event_processor
 from app.core.local_git import get_local_git
 from app.core.summary_service import get_summary_service
@@ -115,6 +115,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             on_change=get_event_processor().request_campus_broadcast,
             interval=settings.CI_POLL_INTERVAL_SECONDS,
             releases_limit=settings.CI_RELEASES_LIMIT,
+            tokens=parse_gh_tokens(settings.GH_TOKENS),
         )
         ci_poller.set_pinned(await load_pinned_repos())
         ci_task = asyncio.create_task(ci_poller.run())

@@ -40,8 +40,11 @@ services:
       - SUMMARY_ENABLED=${SUMMARY_ENABLED:-true}
       # GitHub token for the gh CLI behind the factory view's CI/CD panel
       # (PRs, workflow runs, releases). Read-only scope is enough; leave empty
-      # to disable CI data.
+      # to disable CI data. A fine-grained PAT reaches one owner only: add one
+      # per owner as GH_TOKENS={"owner":"token",...}. Fine-grained PATs cannot
+      # read Checks, so PR checks then come from Actions runs (per workflow).
       - GH_TOKEN=${GH_TOKEN:-}
+      - GH_TOKENS=${GH_TOKENS:-}
       - SERVE_STATIC=1
       - LOCALHOST_ONLY=0
       # Browser WS handshakes are origin-checked against this list (QA-014)

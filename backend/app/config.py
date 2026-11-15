@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     CI_PINNED_REPOS: str = ""
     CI_RELEASES_LIMIT: int = 5
     CI_STALE_PR_DAYS: int = 14
+    # Per-owner gh tokens as JSON, e.g. GH_TOKENS={"my-user":"github_pat_...",
+    # "my-org":"github_pat_..."}: a fine-grained PAT covers one account or org
+    # only. Other owners use GH_TOKEN (read by gh itself), else the first entry.
+    # A string parsed by ci_poller.parse_gh_tokens: empty or invalid -> no map.
+    GH_TOKENS: str = ""
     # Local git intake (no network): per-root cache TTL.
     LOCAL_GIT_TTL_SECONDS: float = 30.0
 

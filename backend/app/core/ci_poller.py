@@ -5,6 +5,13 @@ client is connected, at most ``MAX_CONCURRENT_GH`` gh processes at a time, each
 with a timeout. Failures back off exponentially; a missing or unauthenticated
 ``gh`` disables CI globally for a while (``ciAvailable=false``) instead of
 retrying every tick. Nothing here ever raises into the caller.
+
+Tokens: ``gh`` reads ``GH_TOKEN`` from the environment. ``GH_TOKENS`` (an
+owner -> token map) adds per-owner tokens, because a fine-grained PAT belongs
+to exactly one account or org; repos of other owners use ``GH_TOKEN``, else the
+first mapped token (any token reads public repos). A field the token may not
+read (a fine-grained PAT cannot get Checks read, which ``statusCheckRollup``
+needs) is dropped for that repo, and PR checks then come from the Actions runs.
 """
 
 from __future__ import annotations
@@ -15,7 +22,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -38,9 +45,11 @@ __all__ = [
     "GhResult",
     "RateLimitError",
     "RepoCi",
+    "checks_from_runs",
     "derive_pr_flags",
     "map_releases",
     "normalize_repo",
+    "parse_gh_tokens",
     "parse_rate_limit",
     "get_ci_poller",
     "map_pull_request",
@@ -72,10 +81,16 @@ RELEASE_EVERY = 10  # refresh releases every N poll intervals
 MAX_PINNED = 20
 RELEASE_FIELDS = "tagName,name,publishedAt,isPrerelease,isDraft"
 _UNKNOWN_FIELD_RE = re.compile(r'Unknown JSON field: "([A-Za-z0-9_]+)"')
+# GraphQL error for a field the token may not read, with the path of the first
+# denied node, e.g. "Resource not accessible by personal access token
+# (repository.pullRequests.nodes.0.statusCheckRollup.nodes.0.commit...)".
+_DENIED_FIELD_RE = re.compile(
+    r"Resource not accessible by [a-z ]+\(repository\.\w+\.nodes\.\d+\.(\w+)", re.I
+)
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 PR_FIELDS = (
-    "number,title,headRefName,author,url,isDraft,state,reviewDecision,mergeable,"
+    "number,title,headRefName,headRefOid,author,url,isDraft,state,reviewDecision,mergeable,"
     "statusCheckRollup,updatedAt,mergedAt,closedAt,baseRefName,additions,deletions,changedFiles,"
     "labels,createdAt"
 )
@@ -83,6 +98,11 @@ RUN_FIELDS = (
     "databaseId,workflowName,headBranch,headSha,event,status,conclusion,"
     "createdAt,updatedAt,url,attempt"
 )
+RUN_LIMIT = 15
+# Without statusCheckRollup, PR checks are matched against these runs, so fetch
+# more of them (still one call).
+RUN_LIMIT_PR_CHECKS = 40
+ROLLUP_FIELD = "statusCheckRollup"
 
 
 @dataclass
@@ -92,7 +112,9 @@ class GhResult:
     stderr: str = ""
 
 
-GhRunner = Callable[[list[str]], Awaitable[GhResult]]
+# Called as runner(args), or runner(args, token) when a token was picked for the
+# call (GH_TOKENS); the default runner sets it as GH_TOKEN for that gh process.
+GhRunner = Callable[..., Awaitable[GhResult]]
 
 
 class GhMissingError(Exception):
@@ -312,8 +334,46 @@ def _is_bot(author: Any, login: str | None) -> bool:
 _BOT_RE = re.compile(r"dependabot|renovate|github-actions|\[bot\]$|^app/", re.I)
 
 
-def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
-    """One ``gh pr list --json`` entry -> PullRequestInfo (None when unusable)."""
+def checks_from_runs(runs: Any, head_sha: str | None, branch: str | None) -> CheckSummary:
+    """PR checks from Actions workflow runs, when ``statusCheckRollup`` is unreadable.
+
+    Matches runs on the PR's head commit (on its branch when the commit is not
+    known). One entry per workflow rather than per job, and external commit
+    statuses are not seen, so it is coarser than the rollup.
+    """
+    entries: list[dict[str, Any]] = []
+    if isinstance(runs, list):
+        for item in cast(list[Any], runs):
+            if not isinstance(item, dict):
+                continue
+            r = cast(dict[str, Any], item)
+            match = (
+                r.get("headSha") == head_sha
+                if head_sha
+                else bool(branch) and (r.get("headBranch") == branch)
+            )
+            if not match:
+                continue
+            entries.append(
+                {
+                    "__typename": "CheckRun",
+                    "name": _s(r.get("workflowName")) or "workflow",
+                    "status": r.get("status"),
+                    "conclusion": r.get("conclusion"),
+                    "startedAt": r.get("createdAt"),
+                    "completedAt": r.get("updatedAt"),
+                    "detailsUrl": r.get("url"),
+                }
+            )
+    return rollup_checks(entries)
+
+
+def map_pull_request(raw: dict[str, Any], runs: Any = None) -> PullRequestInfo | None:
+    """One ``gh pr list --json`` entry -> PullRequestInfo (None when unusable).
+
+    ``runs`` (``gh run list`` JSON) is given only when the rollup could not be
+    read; the PR's checks are then derived from them.
+    """
     number = raw.get("number")
     if not isinstance(number, int):
         return None
@@ -331,7 +391,10 @@ def map_pull_request(raw: dict[str, Any]) -> PullRequestInfo | None:
     mergeable = {"MERGEABLE": "mergeable", "CONFLICTING": "conflicting", "UNKNOWN": "unknown"}.get(
         str(raw.get("mergeable") or "").upper()
     )
-    checks = rollup_checks(raw.get("statusCheckRollup"))
+    if runs is not None:
+        checks = checks_from_runs(runs, _s(raw.get("headRefOid")), _s(raw.get("headRefName")))
+    else:
+        checks = rollup_checks(raw.get(ROLLUP_FIELD))
     return PullRequestInfo(
         conflict=mergeable == "conflicting",
         flaky=any(r.flaky for r in checks.runs),
@@ -392,6 +455,24 @@ def map_releases(raws: Any, repo: str, limit: int) -> list[ReleaseInfo]:
     return out[: max(limit, 0)]
 
 
+def parse_gh_tokens(raw: str) -> dict[str, str]:
+    """``GH_TOKENS`` JSON (``{"owner": "token"}``) -> map; empty/invalid -> {}.
+
+    Never logs the value: a parse error may echo part of a token.
+    """
+    if not raw.strip():
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning('GH_TOKENS is not valid JSON ({"owner": "token"}); ignored')
+        return {}
+    if not isinstance(data, dict):
+        logger.warning('GH_TOKENS must be a JSON object ({"owner": "token"}); ignored')
+        return {}
+    return {str(k): v for k, v in cast(dict[Any, Any], data).items() if isinstance(v, str) and v}
+
+
 def normalize_repo(value: Any) -> str | None:
     """``owner/name`` (trimmed), or None when it is not a plausible GitHub slug."""
     if not isinstance(value, str):
@@ -426,8 +507,11 @@ def parse_rate_limit(data: Any) -> tuple[int, int, float] | None:
     return worst
 
 
-def map_pull_requests(raws: Any, now: datetime) -> list[PullRequestInfo]:
-    """Open PRs plus PRs merged/closed within 24 h; open first, newest first, <= 20."""
+def map_pull_requests(raws: Any, now: datetime, runs: Any = None) -> list[PullRequestInfo]:
+    """Open PRs plus PRs merged/closed within 24 h; open first, newest first, <= 20.
+
+    ``runs``: see :func:`map_pull_request`.
+    """
     out: list[tuple[int, str, PullRequestInfo]] = []
     if not isinstance(raws, list):
         return []
@@ -435,7 +519,7 @@ def map_pull_requests(raws: Any, now: datetime) -> list[PullRequestInfo]:
         if not isinstance(item, dict):
             continue
         raw = cast(dict[str, Any], item)
-        pr = map_pull_request(raw)
+        pr = map_pull_request(raw, runs)
         if pr is None:
             continue
         if pr.state != "open":
@@ -535,10 +619,15 @@ class RepoCi:
     stale: bool = False  # last fetch failed; data is last-good
     error: str | None = None  # short human message
     fetched_at: str | None = None  # ISO time of the last successful fetch
+    # --json fields GitHub refused for this repo's token ("Resource not
+    # accessible by personal access token"); dropped from this repo's calls.
+    denied_fields: set[str] = field(default_factory=lambda: cast(set[str], set()))
 
 
-async def _run_gh(args: list[str]) -> GhResult:
+async def _run_gh(args: list[str], token: str | None = None) -> GhResult:
     env = {**os.environ, "GH_PROMPT_DISABLED": "1", "NO_COLOR": "1", "GH_NO_UPDATE_NOTIFIER": "1"}
+    if token:
+        env["GH_TOKEN"] = token
     try:
         proc = await asyncio.create_subprocess_exec(
             "gh",
@@ -602,8 +691,11 @@ class CiPoller:
         wall_clock: Callable[[], float] = time.time,
         interval: float = POLL_INTERVAL_S,
         releases_limit: int = 0,
+        tokens: Mapping[str, str] | None = None,
     ) -> None:
         self._run_gh = run_gh or _run_gh
+        self._tokens: dict[str, str] = {}
+        self.set_tokens(tokens or {})
         self._is_watched = is_watched or (lambda: False)
         self._on_change = on_change
         self._clock = clock
@@ -629,11 +721,39 @@ class CiPoller:
         on_change: Callable[[], None] | None,
         interval: float,
         releases_limit: int | None = None,
+        tokens: Mapping[str, str] | None = None,
     ) -> None:
         self._on_change = on_change
         self._interval = interval
         if releases_limit is not None:
             self._releases_limit = releases_limit
+        if tokens is not None:
+            self.set_tokens(tokens)
+
+    # -- tokens --------------------------------------------------------------
+
+    def set_tokens(self, tokens: Mapping[str, str]) -> None:
+        """Per-owner gh tokens (owner matched case-insensitively; blanks ignored)."""
+        self._tokens = {
+            str(owner).strip().lower(): tok.strip()
+            for owner, tok in tokens.items()
+            if str(owner).strip() and tok.strip()
+        }
+
+    def token_for(self, repo: str | None) -> str | None:
+        """Token for a gh call on ``repo`` (None: gh uses its own environment).
+
+        The owner's mapped token; else None when GH_TOKEN/GITHUB_TOKEN is set;
+        else the first mapped token, so calls for unmapped owners (public repos)
+        and ``gh api rate_limit`` are still authenticated.
+        """
+        if repo:
+            tok = self._tokens.get(repo.split("/", 1)[0].lower())
+            if tok:
+                return tok
+        if os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"):
+            return None
+        return next(iter(self._tokens.values()), None)
 
     # -- pinned repos --------------------------------------------------------
 
@@ -705,29 +825,53 @@ class CiPoller:
             self._on_change()
         return len(due)
 
-    def _strip_unsupported(self, args: list[str]) -> list[str]:
-        if not self._unsupported_fields or "--json" not in args:
+    @staticmethod
+    def _json_fields(args: list[str]) -> list[str]:
+        if "--json" not in args:
+            return []
+        i = args.index("--json") + 1
+        return args[i].split(",") if i < len(args) else []
+
+    def _strip_fields(self, args: list[str], entry: RepoCi | None) -> list[str]:
+        drop: set[str] = self._unsupported_fields | (entry.denied_fields if entry else set[str]())
+        if not drop or "--json" not in args:
             return args
         i = args.index("--json") + 1
         if i >= len(args):
             return args
-        kept = [f for f in args[i].split(",") if f not in self._unsupported_fields]
+        kept = [f for f in args[i].split(",") if f not in drop]
         return [*args[:i], ",".join(kept), *args[i + 1 :]]
 
-    async def _call(self, args: list[str]) -> Any:
+    def _rollup_missing(self, entry: RepoCi) -> bool:
+        return ROLLUP_FIELD in entry.denied_fields or ROLLUP_FIELD in self._unsupported_fields
+
+    async def _call(self, args: list[str], repo: str | None = None) -> Any:
+        entry = self._repos.get(repo) if repo else None
+        token = self.token_for(repo)
         while True:
-            call_args = self._strip_unsupported(args)
+            call_args = self._strip_fields(args, entry)
             async with self._sem:
-                res = await self._run_gh(call_args)
+                res = await (self._run_gh(call_args, token) if token else self._run_gh(call_args))
             if res.returncode == 0:
                 break
+            fields = self._json_fields(call_args)
             m = _UNKNOWN_FIELD_RE.search(res.stderr)
-            if m and m.group(1) not in self._unsupported_fields and "--json" in call_args:
+            if m and m.group(1) not in self._unsupported_fields and fields:
                 field_name = m.group(1)
                 self._unsupported_fields.add(field_name)
                 self._warn_once(
                     f"field:{field_name}",
                     f"installed gh lacks --json {field_name}; upgrade gh for full CI data",
+                )
+                continue
+            d = _DENIED_FIELD_RE.search(res.stderr)
+            if d and entry is not None and d.group(1) in fields:
+                field_name = d.group(1)
+                entry.denied_fields.add(field_name)
+                self._warn_once(
+                    f"denied:{repo}:{field_name}",
+                    f"token may not read {field_name} on {repo}; continuing without it"
+                    + (" (PR checks from Actions runs)" if field_name == ROLLUP_FIELD else ""),
                 )
                 continue
             raise _classify_failure(res)
@@ -775,7 +919,7 @@ class CiPoller:
         before = self._snapshot(entry)
         try:
             if entry.default_branch is None and repo in self._pinned:
-                info = await self._call(["repo", "view", repo, "--json", "defaultBranchRef"])
+                info = await self._call(["repo", "view", repo, "--json", "defaultBranchRef"], repo)
                 ref = (
                     cast(dict[str, Any], info).get("defaultBranchRef")
                     if isinstance(info, dict)
@@ -796,10 +940,13 @@ class CiPoller:
                     "30",
                     "--json",
                     PR_FIELDS,
-                ]
+                ],
+                repo,
             )
+            run_limit = RUN_LIMIT_PR_CHECKS if self._rollup_missing(entry) else RUN_LIMIT
             runs = await self._call(
-                ["run", "list", "--repo", repo, "--limit", "15", "--json", RUN_FIELDS]
+                ["run", "list", "--repo", repo, "--limit", str(run_limit), "--json", RUN_FIELDS],
+                repo,
             )
         except GhMissingError:
             self._gh_down("gh-missing", "gh CLI not found; CI/CD data disabled")
@@ -835,7 +982,9 @@ class CiPoller:
         entry.error = None
         entry.stale = False
         entry.fetched_at = datetime.now(UTC).isoformat()
-        entry.pull_requests = map_pull_requests(prs, datetime.now(UTC))
+        entry.pull_requests = map_pull_requests(
+            prs, datetime.now(UTC), runs if self._rollup_missing(entry) else None
+        )
         entry.pipelines = map_pipeline_runs(runs, entry.default_branch)
         entry.next_at = self._clock() + self.next_interval(entry)
         await self._refresh_releases(repo, entry)
@@ -856,7 +1005,8 @@ class CiPoller:
                     str(self._releases_limit + 3),  # drafts are filtered after
                     "--json",
                     RELEASE_FIELDS,
-                ]
+                ],
+                repo,
             )
         except (GhMissingError, GhAuthError, RepoGoneError, RateLimitError):
             return

@@ -54,7 +54,8 @@ FROM python:3.13-slim AS runtime
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # gh CLI feeds the factory view's CI/CD panel (backend/app/core/ci_poller.py).
-# Authenticate it at runtime with GH_TOKEN (a read-only token is enough).
+# Authenticate it at runtime with GH_TOKEN (a read-only token is enough), plus
+# GH_TOKENS ({"owner": "token"} JSON) when repos span several owners.
 COPY --from=gh-cli /usr/local/bin/gh /usr/local/bin/gh
 
 # Set environment variables
