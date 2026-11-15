@@ -666,6 +666,7 @@ def _classify_failure(res: GhResult) -> Exception:
         or "not logged in" in err
         or "authentication" in err
         or "gh_token" in err
+        or "bad credentials" in err  # HTTP 401: an expired or revoked token
     ):
         return GhAuthError(res.stderr.strip()[:200])
     if "could not resolve to a repository" in err or "http 404" in err or "not found" in err:
@@ -721,6 +722,9 @@ class CiPoller:
         self.rate_remaining: int | None = None
         self.gh_available: bool | None = None  # None until the first call
         self._warned: set[str] = set()
+        # Rejected tokens (HTTP 401: expired/revoked), by _token_key -> monotonic
+        # time to try again. Only the repos using that token pause.
+        self._token_down: dict[str, float] = {}
 
     def configure(
         self,
@@ -761,6 +765,47 @@ class CiPoller:
         if os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"):
             return None
         return next(iter(self._tokens.values()), None)
+
+    def _token_key(self, repo: str | None) -> str:
+        """Which token ``repo``'s calls use: its owner if mapped, else "" (the default)."""
+        if repo:
+            owner = repo.split("/", 1)[0].lower()
+            if owner in self._tokens:
+                return owner
+        return ""
+
+    def _token_label(self, key: str) -> str:
+        """Human name of the token behind ``key`` ("" when gh has no token at all)."""
+        if key:
+            return f"GH_TOKENS[{key}]"
+        for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+            if os.environ.get(name):
+                return name
+        if self._tokens:
+            return f"GH_TOKENS[{next(iter(self._tokens))}] (fallback)"
+        return ""
+
+    def _token_paused(self, repo: str, now: float) -> bool:
+        return self._token_down.get(self._token_key(repo), 0.0) > now
+
+    def _token_rejected(self, repo: str, label: str) -> None:
+        """Pause every repo on this token (not the others) with a clear error."""
+        key = self._token_key(repo)
+        self._token_down[key] = self._clock() + GH_DOWN_RETRY_S
+        message = f"GitHub rejected {label} (expired or revoked?)"
+        self._warn_once(
+            f"auth:{key}",
+            f"{message}; CI paused for the repos using it, retry every "
+            f"{GH_DOWN_RETRY_S / 60:.0f} min",
+        )
+        for r, e in self._repos.items():
+            if self._token_key(r) == key:
+                e.error = message
+                e.available = False
+                e.stale = False
+                e.pull_requests = []
+                e.pipelines = []
+                e.releases = []
 
     # -- pinned repos --------------------------------------------------------
 
@@ -824,7 +869,9 @@ class CiPoller:
             await self._check_rate_limit()
             if self._clock() < self._rate_pause_until:
                 return 0
-        due = [r for r, e in self._repos.items() if e.next_at <= now]
+        due = [
+            r for r, e in self._repos.items() if e.next_at <= now and not self._token_paused(r, now)
+        ]
         if not due:
             return 0
         results = await asyncio.gather(*(self._poll_repo(r) for r in due), return_exceptions=True)
@@ -972,6 +1019,10 @@ class CiPoller:
             entry.error = "gh CLI not found"
             return self._mark_unavailable(entry, before)
         except GhAuthError:
+            label = self._token_label(self._token_key(repo))
+            if label:  # a configured token was rejected: pause only its repos
+                self._token_rejected(repo, label)
+                return before != self._snapshot(entry)
             self._gh_down(
                 "gh-auth", "gh is not authenticated (run `gh auth login`); CI/CD data disabled"
             )
@@ -996,6 +1047,10 @@ class CiPoller:
             logger.debug("gh poll for %s failed (%s); retry in %.0fs", repo, exc, delay)
             return before != self._snapshot(entry)
         self.gh_available = True
+        key = self._token_key(repo)
+        if self._token_down.pop(key, None) is not None:
+            self._warned.discard(f"auth:{key}")  # log again if it is rejected later
+            logger.info("GitHub accepts %s again; CI resumed", self._token_label(key))
         entry.fails = 0
         entry.available = True
         entry.error = None

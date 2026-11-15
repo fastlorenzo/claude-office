@@ -341,7 +341,9 @@ class TestPoller:
         assert p.get("o/a").available  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
-    async def test_unauthenticated_and_repo_gone(self) -> None:
+    async def test_unauthenticated_and_repo_gone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GH_TOKEN", raising=False)  # no token at all: global
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         gh, watched, clock = FakeGh(), [True], Clock()
         p = _poller(gh, watched, clock, [])
         a = p.note_repo("o/a", None)
@@ -575,3 +577,82 @@ class TestPrWindows:
         await p.tick()
         assert sorted(pr.number for pr in entry.pull_requests) == [1, 2, 3]
         assert next(pr for pr in entry.pull_requests if pr.number == 2).state == "open"
+
+
+BAD_CREDS = (
+    "HTTP 401: Bad credentials (https://api.github.com/graphql)\n"
+    "Try authenticating with:  gh auth login -h github.com"
+)
+
+
+class TestRejectedToken:
+    @staticmethod
+    def _gh(bad: set[str]) -> tuple[Any, list[tuple[str, str | None]]]:
+        calls: list[tuple[str, str | None]] = []
+
+        async def gh(args: list[str], token: str | None = None) -> GhResult:
+            calls.append((args[3] if len(args) > 3 else args[1], token))
+            if token in bad:
+                return GhResult(1, "", BAD_CREDS)
+            return GhResult(0, json.dumps([_pr(1)] if args[0] == "pr" else []))
+
+        return gh, calls
+
+    @pytest.mark.asyncio
+    async def test_only_that_owner_pauses_and_error_names_the_token(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        bad = {"t-org"}
+        gh, calls = self._gh(bad)
+        clock = Clock()
+        p = CiPoller(
+            run_gh=gh,
+            is_watched=lambda: True,
+            clock=clock,
+            interval=60.0,
+            tokens={"me": "t-me", "Org": "t-org"},
+        )
+        me, b, c = (
+            p.note_repo("me/a", "main"),
+            p.note_repo("org/b", "main"),
+            p.note_repo("org/c", "main"),
+        )
+        with caplog.at_level("INFO"):
+            await p.tick()
+        assert me.available and me.error is None
+        for e in (b, c):
+            assert not e.available
+            assert e.error == "GitHub rejected GH_TOKENS[org] (expired or revoked?)"
+        assert p.gh_available is not False  # not a global outage
+        assert sum("GH_TOKENS[org]" in r.getMessage() for r in caplog.records) == 1
+        # while paused, org repos make no calls; me/a keeps polling
+        calls.clear()
+        clock.t += 200
+        for r in ("me/a", "org/b", "org/c"):
+            p.note_repo(r, "main")
+        await p.tick()
+        assert {r for r, _ in calls} == {"me/a"}
+        assert b.error and "GH_TOKENS[org]" in b.error
+        # token renewed: after the retry delay the org repos come back
+        bad.clear()
+        clock.t += 700
+        for r in ("me/a", "org/b", "org/c"):
+            p.note_repo(r, "main")
+        await p.tick()
+        assert b.available and c.available and b.error is None and c.error is None
+
+    @pytest.mark.asyncio
+    async def test_default_token_rejected_names_gh_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GH_TOKEN", "env-token")
+        gh, _ = self._gh({None})  # calls without a mapped token use GH_TOKEN
+        p = CiPoller(
+            run_gh=gh, is_watched=lambda: True, clock=Clock(), interval=60.0, tokens={"me": "t-me"}
+        )
+        me, other = p.note_repo("me/a", "main"), p.note_repo("someone/x", "main")
+        await p.tick()
+        assert me.available
+        assert other.error == "GitHub rejected GH_TOKEN (expired or revoked?)"
