@@ -364,3 +364,28 @@ class TestPoller:
         clock.t += 2000
         await p.tick()
         assert p.get("o/n") is None
+
+
+class TestOldGh:
+    @pytest.mark.asyncio
+    async def test_unknown_json_field_dropped_and_remembered(self) -> None:
+        """gh 2.46 rejects ``run list --json attempt``; poll without it, once."""
+        seen: list[list[str]] = []
+
+        async def old_gh(args: list[str]) -> GhResult:
+            seen.append(args)
+            if args[0] == "run" and "attempt" in args[-1].split(","):
+                return GhResult(1, "", 'Unknown JSON field: "attempt"\nAvailable fields:\n  url')
+            return GhResult(0, json.dumps([_pr(1)] if args[0] == "pr" else []))
+
+        clock = Clock()
+        p = CiPoller(run_gh=old_gh, is_watched=lambda: True, clock=clock, interval=60.0)
+        entry = p.note_repo("o/n", None)
+        await p.tick()
+        assert entry.available and entry.error is None
+        run_calls = [a for a in seen if a[0] == "run"]
+        assert len(run_calls) == 2 and "attempt" not in run_calls[1][-1].split(",")
+        clock.t += 61
+        await p.tick()
+        run_calls = [a for a in seen if a[0] == "run"]
+        assert len(run_calls) == 3 and "attempt" not in run_calls[2][-1].split(",")

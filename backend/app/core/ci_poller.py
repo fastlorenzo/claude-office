@@ -71,6 +71,7 @@ IDLE_MULTIPLIER = 3.0  # 60 s -> 180 s when nothing is open or pending
 RELEASE_EVERY = 10  # refresh releases every N poll intervals
 MAX_PINNED = 20
 RELEASE_FIELDS = "tagName,name,publishedAt,isPrerelease,isDraft"
+_UNKNOWN_FIELD_RE = re.compile(r'Unknown JSON field: "([A-Za-z0-9_]+)"')
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 PR_FIELDS = (
@@ -612,6 +613,9 @@ class CiPoller:
         self._repos: dict[str, RepoCi] = {}
         self._pinned: tuple[str, ...] = ()
         self._sem = asyncio.Semaphore(MAX_CONCURRENT_GH)
+        # --json fields the installed gh rejected ("Unknown JSON field"); dropped
+        # from later calls so an older gh still yields data, minus those fields.
+        self._unsupported_fields: set[str] = set()
         self._gh_down_until = 0.0
         self._rate_pause_until = 0.0
         self._rate_next_check: float | None = None  # armed on the first watched tick
@@ -701,10 +705,31 @@ class CiPoller:
             self._on_change()
         return len(due)
 
+    def _strip_unsupported(self, args: list[str]) -> list[str]:
+        if not self._unsupported_fields or "--json" not in args:
+            return args
+        i = args.index("--json") + 1
+        if i >= len(args):
+            return args
+        kept = [f for f in args[i].split(",") if f not in self._unsupported_fields]
+        return [*args[:i], ",".join(kept), *args[i + 1 :]]
+
     async def _call(self, args: list[str]) -> Any:
-        async with self._sem:
-            res = await self._run_gh(args)
-        if res.returncode != 0:
+        while True:
+            call_args = self._strip_unsupported(args)
+            async with self._sem:
+                res = await self._run_gh(call_args)
+            if res.returncode == 0:
+                break
+            m = _UNKNOWN_FIELD_RE.search(res.stderr)
+            if m and m.group(1) not in self._unsupported_fields and "--json" in call_args:
+                field_name = m.group(1)
+                self._unsupported_fields.add(field_name)
+                self._warn_once(
+                    f"field:{field_name}",
+                    f"installed gh lacks --json {field_name}; upgrade gh for full CI data",
+                )
+                continue
             raise _classify_failure(res)
         try:
             return json.loads(res.stdout or "null")
